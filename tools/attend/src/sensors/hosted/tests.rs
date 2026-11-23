@@ -3,6 +3,7 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 use super::*;
+use sensor_spec::bounds;
 use serde_json::json;
 
 /// A scratch store directory, removed when dropped.
@@ -72,13 +73,23 @@ fn items(pairs: &[(&str, i64)]) -> Seen {
     pairs.iter().map(|(k, v)| (k.to_string(), json!(v))).collect()
 }
 
-/// Each poll's fired keys, in order, with store memory saved after each
-/// poll; session memory reaches no store.
+/// What `trigger` fires on `now`, with its line delivered: a session
+/// trigger that fires is spent, as its delivery spends it.
+fn fire(s: &mut FileSensor, trigger: &Trigger, now: Seen) -> Vec<String> {
+    let out = s.observe(trigger, now);
+    if trigger.memory == Memory::Session && !out.is_empty() {
+        s.spend(trigger);
+    }
+    out
+}
+
+/// Each poll's fired keys, in order, each line delivered, with store
+/// memory saved after each poll; session memory reaches no store.
 fn run(s: &mut FileSensor, t: &Trigger, polls: Vec<Seen>) -> Vec<Vec<String>> {
     polls
         .into_iter()
         .map(|now| {
-            let out = s.observe(t, now);
+            let out = fire(s, t, now);
             if t.memory == Memory::Store {
                 s.commit().unwrap();
             }
@@ -134,7 +145,7 @@ fn session_memory_fires_enters_on_the_first_poll_that_meets_where_and_not_again(
     assert!(std::fs::read_dir(&d.0).unwrap().next().is_none(), "session memory writes no store");
     // A host of another session starts empty and fires once of its own.
     let mut other = sensor(&d.0, Some("s2"));
-    assert_eq!(other.observe(&t, seen(true)), vec!["$".to_string()]);
+    assert_eq!(fire(&mut other, &t, seen(true)), vec!["$".to_string()]);
 }
 
 /// Session memory fires a trigger at most once in the session,
@@ -161,12 +172,83 @@ fn session_memory_fires_at_most_once_even_when_the_condition_leaves_and_enters_a
 fn after_a_fire_an_edit_fires_once_and_a_rename_does_not() {
     let d = Dir::new("spent-key");
     let mut s = sensor(&d.0, Some("s1"));
-    assert_eq!(s.observe(&enters("behind", "session"), seen(true)), vec!["$".to_string()]);
+    assert_eq!(fire(&mut s, &enters("behind", "session"), seen(true)), vec!["$".to_string()]);
     let renamed = enters("outdated", "session");
     assert_eq!(run(&mut s, &renamed, vec![seen(true), seen(false), seen(true)]), fires(&[&[], &[], &[]]), "a rename is the same definition");
     let edited = trig("{name: behind, path: \"$\", on: enters, where: {behind: true, channel: release}, memory: session}");
     let polls = vec![Seen::from([("$".into(), json!(true))]), Seen::from([("$".into(), json!(false))]), Seen::from([("$".into(), json!(true))])];
     assert_eq!(run(&mut s, &edited, polls), fires(&[&["$"], &[], &[]]), "the edited condition fires once");
+}
+
+/// A session trigger offers its line once and fires nothing more while the
+/// loop holds it. A dropped line releases it to fire on the next poll that
+/// meets it, a condition that left and entered again included, and once its
+/// line is handled it is spent and fires no more.
+#[test]
+fn a_session_trigger_is_not_offered_again_while_its_line_is_out() {
+    let d = Dir::new("outstanding");
+    let behind = || json!({"behind": true});
+    let yaml = "triggers: [{name: late, path: \"$\", on: enters, where: {behind: true}, memory: session, description: \"behind\"}]\n";
+    let mut s = declared(&d.0, yaml, Vec::new(), true);
+    let line = vec![(1.0, "behind".to_string())];
+    assert_eq!(s.evaluate(&behind()), line);
+    for _ in 0..3 {
+        assert_eq!(s.evaluate(&behind()), vec![], "held, it is not offered again");
+    }
+    s.dropped("behind");
+    assert_eq!(s.evaluate(&behind()), line, "dropped, it fires again");
+    s.dropped("behind");
+    assert_eq!(s.evaluate(&json!({"behind": false})), vec![]);
+    assert_eq!(s.evaluate(&behind()), line, "an entry after the drop fires");
+    assert!(!s.take_spent());
+    s.delivered("another line");
+    assert!(!s.take_spent(), "another line spends nothing");
+    s.delivered("behind");
+    assert!(s.take_spent());
+    for result in [behind(), json!({"behind": false}), behind()] {
+        assert_eq!(s.evaluate(&result), vec![], "spent by its delivery");
+    }
+    assert!(s.export_state().iter().any(|(k, v)| k == SESSION_MEMORY && v.contains("\"spent\":[\"")), "{:?}", s.export_state());
+}
+
+/// A session trigger that offers several lines is spent only once all of
+/// them are handled; one written and one dropped leaves it unspent, and it
+/// offers its lines again.
+#[test]
+fn a_trigger_with_several_lines_is_spent_only_when_every_line_is_handled() {
+    let d = Dir::new("several");
+    let yaml = "triggers: [{name: new, path: \"$.items[*]\", key: id, on: added, memory: session, description: \"new {id}\"}]\n";
+    let both = || json!({"items": [{"id": "a"}, {"id": "b"}]});
+    let lines = || vec![(1.0, "new a".to_string()), (1.0, "new b".to_string())];
+    let mut s = declared(&d.0, yaml, Vec::new(), true);
+    assert_eq!(s.evaluate(&both()), lines());
+    s.delivered("new a");
+    assert!(!s.take_spent(), "one line of two handled");
+    s.dropped("new b");
+    assert!(!s.take_spent());
+    assert_eq!(s.evaluate(&both()), lines(), "one line dropped: the trigger offers both again");
+    s.delivered("new b");
+    assert!(!s.take_spent(), "new a of this offer is still out");
+    s.delivered("new a");
+    assert!(s.take_spent(), "every line handled");
+    assert_eq!(s.evaluate(&both()), vec![]);
+}
+
+/// The host checkpoints the moment a session trigger is spent: the sensor
+/// says so once, after the fire that spent it, and not for a store
+/// trigger's fire or a spent trigger's quiet polls.
+#[test]
+fn a_sensor_says_once_that_a_session_trigger_became_spent() {
+    let d = Dir::new("take-spent");
+    let mut s = sensor(&d.0, Some("s1"));
+    assert!(!s.take_spent(), "nothing fired yet");
+    assert_eq!(run(&mut s, &enters("store", "store"), vec![seen(false), seen(true)]), fires(&[&[], &["$"]]));
+    assert!(!s.take_spent(), "a store trigger's fire spends nothing");
+    assert_eq!(fire(&mut s, &enters("behind", "session"), seen(true)), vec!["$".to_string()]);
+    assert!(s.take_spent());
+    assert!(!s.take_spent(), "taken once");
+    assert_eq!(fire(&mut s, &enters("behind", "session"), seen(true)), Vec::<String>::new());
+    assert!(!s.take_spent(), "a spent trigger's later polls spend nothing new");
 }
 
 #[test]
@@ -196,16 +278,16 @@ fn session_memory_survives_an_export_and_import_so_the_trigger_does_not_fire_twi
     let behind = enters("behind", "session");
     let later = trig("{name: later, path: \"$\", on: enters, where: {ahead: true}, memory: session}");
     let mut s = sensor(&d.0, Some("s1"));
-    assert_eq!(s.observe(&behind, seen(true)), vec!["$".to_string()]);
-    assert_eq!(s.observe(&later, seen(false)), Vec::<String>::new());
+    assert_eq!(fire(&mut s, &behind, seen(true)), vec!["$".to_string()]);
+    assert_eq!(fire(&mut s, &later, seen(false)), Vec::<String>::new());
     let state = s.export_state();
     assert_eq!(state.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), [SESSION_MEMORY]);
     let mut again = sensor(&d.0, Some("s1"));
     again.import_state(&state);
-    assert_eq!(again.observe(&behind, seen(true)), Vec::<String>::new(), "spent before the restart");
-    assert_eq!(again.observe(&behind, seen(false)), Vec::<String>::new());
-    assert_eq!(again.observe(&behind, seen(true)), Vec::<String>::new());
-    assert_eq!(again.observe(&later, seen(true)), vec!["$".to_string()], "it saw false before the restart, so true is an entry");
+    assert_eq!(fire(&mut again, &behind, seen(true)), Vec::<String>::new(), "spent before the restart");
+    assert_eq!(fire(&mut again, &behind, seen(false)), Vec::<String>::new());
+    assert_eq!(fire(&mut again, &behind, seen(true)), Vec::<String>::new());
+    assert_eq!(fire(&mut again, &later, seen(true)), vec!["$".to_string()], "it saw false before the restart, so true is an entry");
     assert_eq!(again.export_state(), {
         let mut fresh = sensor(&d.0, Some("s1"));
         fresh.import_state(&again.export_state());
@@ -223,7 +305,7 @@ fn store_memory_takes_a_fresh_store_s_first_poll_as_its_baseline() {
     assert_eq!(run(&mut s, &t, polls), fires(&[&[], &[], &[], &["$"]]), "the condition held at the baseline, so only the later entry fires");
     // A restart in the same session reads the memory back and fires nothing new.
     let mut again = sensor(&d.0, Some("s1"));
-    assert_eq!(again.observe(&t, seen(true)), Vec::<String>::new());
+    assert_eq!(fire(&mut again, &t, seen(true)), Vec::<String>::new());
     // Another session's store is its own, so it starts from a baseline.
     let mut other = sensor(&d.0, Some("s2"));
     assert_eq!(run(&mut other, &t, vec![seen(true), seen(true)]), fires(&[&[], &[]]));
@@ -496,13 +578,13 @@ fn a_poll_s_save_keeps_the_trigger_memory() {
     let focus = Focus::default_focus();
     let mut s = sensor(&d.0, Some("s1"));
     s.poll(&focus);
-    assert_eq!(s.observe(&t, seen(false)), Vec::<String>::new());
+    assert_eq!(fire(&mut s, &t, seen(false)), Vec::<String>::new());
     s.poll(&focus);
     let key = Key::new("ways-update", "/p", Some("s1"));
     let rec = read_at(&key.path_in(&d.0), &key).unwrap();
     assert_eq!((rec.poll.as_ref().map(|p| (p.ok, p.observations)), rec.memory["behind"].seen.clone()), (Some((true, 0)), seen(false)));
     let mut reopened = sensor(&d.0, Some("s1"));
-    assert_eq!(reopened.observe(&t, seen(true)), vec!["$".to_string()], "it saw false before, so true is an entry and not a baseline");
+    assert_eq!(fire(&mut reopened, &t, seen(true)), vec!["$".to_string()], "it saw false before, so true is an entry and not a baseline");
 }
 
 #[test]
@@ -529,7 +611,7 @@ fn a_store_of_the_old_format_or_of_another_key_reads_as_no_store() {
     std::fs::write(&path, r#"{"sensor":"ways-update","project":"/p","poll":{"at":1,"ok":true,"observations":0}}"#).unwrap();
     assert_eq!(read_at(&path, &key), None);
     let mut s = sensor(&d.0, Some("s1"));
-    assert_eq!(s.observe(&enters("behind", "store"), seen(true)), Vec::<String>::new(), "it starts from a baseline");
+    assert_eq!(fire(&mut s, &enters("behind", "store"), seen(true)), Vec::<String>::new(), "it starts from a baseline");
     s.commit().unwrap();
     // A current file whose key is not the one asked for is not taken as its store.
     let other = Key::new("ways-update", "/p", Some("s2"));
@@ -586,14 +668,14 @@ fn a_session_s_stores_move_with_it_and_its_memory_comes_too() {
     let d = Dir::new("move");
     let t = enters("behind", "store");
     let mut s = sensor(&d.0, Some("old"));
-    s.observe(&t, seen(false));
+    fire(&mut s, &t, seen(false));
     s.commit().unwrap();
     assert_eq!(move_stores_in(&d.0, "old", "old"), 0, "a move to the same id does nothing");
     assert!(read_at(&Key::new("ways-update", "/p", Some("old")).path_in(&d.0), &Key::new("ways-update", "/p", Some("old"))).is_some(), "and keeps the store");
     assert_eq!(move_stores_in(&d.0, "old", "new"), 1);
     assert!(read_at(&Key::new("ways-update", "/p", Some("old")).path_in(&d.0), &Key::new("ways-update", "/p", Some("old"))).is_none());
     let mut moved = sensor(&d.0, Some("new"));
-    assert_eq!(moved.observe(&t, seen(true)), vec!["$".to_string()], "the memory moved, so this is an entry and not a baseline");
+    assert_eq!(fire(&mut moved, &t, seen(true)), vec!["$".to_string()], "the memory moved, so this is an entry and not a baseline");
     assert_eq!(move_stores_in(&d.0, "old", "new"), 0, "a second move finds nothing");
 }
 
@@ -603,7 +685,7 @@ fn a_move_that_cannot_write_keeps_the_source() {
     let d = Dir::new("move-fail");
     let from = Key::new("ways-update", "/p", Some("old"));
     let mut s = sensor(&d.0, Some("old"));
-    s.observe(&enters("behind", "store"), seen(false));
+    fire(&mut s, &enters("behind", "store"), seen(false));
     s.commit().unwrap();
     // A directory at the target's path makes the rename fail.
     std::fs::create_dir_all(Key::new("ways-update", "/p", Some("new")).path_in(&d.0)).unwrap();

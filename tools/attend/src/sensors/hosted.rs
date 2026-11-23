@@ -33,20 +33,22 @@
 //! another fingerprint belongs to an earlier definition and reads as none.
 //! Memory a trigger keeps for the session (`memory: session`) lives in the
 //! process and travels in the session's checkpoint through
-//! [`Sensor::export_state`], so a re-executed run keeps it and a trigger
-//! definition fires at most once in the session.
+//! [`Sensor::export_state`], so a re-executed run keeps it. A trigger
+//! definition's line is delivered at most once in the session, and one the
+//! loop dropped is offered again ([`session`]).
 //!
 //! References:
 //! - ADR-403 §1 and §3b: the store, where it lives, its retention, and the
 //!   fresh baseline a discarded store or changed declaration gives.
-//! - ADR-416 items 6 and 8: `memory: session` firing at most once per
-//!   session, and stores keyed by session and carried by a session's move.
+//! - ADR-416 items 6 and 8: `memory: session` delivering its line at most
+//!   once per session, and stores keyed by session and carried by a
+//!   session's move.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use sensor_spec::{bounds, Cadence, Change, Expires, Match, Memory, On, SensorSpec, Test, Trigger};
+use sensor_spec::{Cadence, Change, Expires, Match, Memory, On, SensorSpec, Test, Trigger};
 use sensor_trait::{Focus, Sensor};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -71,18 +73,6 @@ pub type Seen = BTreeMap<String, Value>;
 pub struct Memo {
     pub test: String,
     pub seen: Seen,
-}
-
-/// The memory of a sensor's triggers with `memory: session`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-struct SessionMemory {
-    /// What each trigger last saw, by trigger name.
-    #[serde(default)]
-    held: BTreeMap<String, Memo>,
-    /// The fingerprints of the trigger definitions that have fired. Each
-    /// fires at most once in the session, under whatever name it carries.
-    #[serde(default)]
-    spent: BTreeSet<String>,
 }
 
 /// Whose store a file is.
@@ -187,6 +177,12 @@ pub struct FileSensor {
     /// The declared state, as the store holds it.
     state: Option<StoredState>,
     session: SessionMemory,
+    /// The session triggers whose lines are out and not settled
+    /// ([`session`]).
+    outstanding: session::Outstanding,
+    /// Whether a session trigger became spent since [`Sensor::take_spent`]
+    /// last read it.
+    newly_spent: bool,
     /// The last poll's failure, for a caller that reads it.
     failure: Option<String>,
     /// Why the stored state was discarded when the store was read.
@@ -194,7 +190,7 @@ pub struct FileSensor {
     /// What each trigger made of the last poll.
     verdicts: Vec<Verdict>,
     /// How long each observation of the last poll stays deliverable, by
-    /// description.
+    /// description, for the triggers that set `expires`.
     lapses: Vec<(String, Expires)>,
     /// When this sensor last wrote its store, or read it, as the file's
     /// modification time.
@@ -239,6 +235,8 @@ impl FileSensor {
             stored: BTreeMap::new(),
             state: None,
             session: SessionMemory::default(),
+            outstanding: session::Outstanding::new(),
+            newly_spent: false,
             failure: None,
             discarded: None,
             verdicts: Vec::new(),
@@ -314,12 +312,15 @@ impl FileSensor {
     ///
     /// Store memory reaches the store when the sensor next saves: after a
     /// poll, or on [`FileSensor::commit`]. A fresh store's first poll sets a
-    /// baseline. Session memory starts from
-    /// nothing seen, and a trigger definition with it fires at most once in
-    /// the session, whatever it compares on: once it has fired, a later
-    /// change, such as a condition that leaves and enters again, fires
-    /// nothing. The mark is kept by fingerprint, so a renamed trigger stays
-    /// spent and an edited one fires once more.
+    /// baseline. Session memory starts from nothing seen, and a trigger
+    /// definition with it is delivered at most once in the session, whatever
+    /// it compares on. It fires nothing while its lines are out, and is
+    /// spent once they have all settled ([`session`]). Until then the keys
+    /// that fired keep what the trigger saw before, so a released trigger
+    /// fires again on the next poll whose result still meets it. Once spent,
+    /// a later change, such as a condition that leaves and enters again,
+    /// fires nothing. The mark is kept by fingerprint, so a renamed trigger
+    /// stays spent and an edited one fires once more.
     pub fn observe(&mut self, trigger: &Trigger, now: Seen) -> Vec<String> {
         let test = trigger.fingerprint();
         let mem = match trigger.memory {
@@ -334,10 +335,22 @@ impl FileSensor {
                 _ => Vec::new(),
             },
         };
-        mem.insert(trigger.name.clone(), Memo { test: test.clone(), seen: now });
-        if trigger.memory == Memory::Session && !out.is_empty() && !self.session.spent.insert(test) {
-            out.clear();
+        let mut seen = now;
+        if trigger.memory == Memory::Session {
+            if self.session.spent.contains(&test) {
+                out.clear();
+            }
+            for k in &out {
+                match prev.and_then(|p| p.get(k)) {
+                    Some(v) => seen.insert(k.clone(), v.clone()),
+                    None => seen.remove(k),
+                };
+            }
+            if self.outstanding.contains_key(&test) {
+                out.clear();
+            }
         }
+        mem.insert(trigger.name.clone(), Memo { test, seen });
         out
     }
 
@@ -384,6 +397,7 @@ impl FileSensor {
             let (now, items) = seen_by(t, result, &next);
             let before = self.prior(t).unwrap_or_default();
             let keys = self.observe(t, now);
+            let mut offered = std::collections::BTreeSet::new();
             for k in &keys {
                 let gone = keyed_item(t, k);
                 let item = items.get(k).or_else(|| before.get(k).filter(|v| !v.is_boolean())).or(gone.as_ref());
@@ -394,9 +408,15 @@ impl FileSensor {
                     None => format!("{} {}: {k}", self.name, t.name),
                 };
                 let text = super::deliverable(&text);
-                self.lapses.push((text.clone(), t.expiry()));
+                if t.memory == Memory::Session {
+                    offered.insert(text.clone());
+                }
+                if let Some(e) = t.expires {
+                    self.lapses.push((text.clone(), e));
+                }
                 out.push((t.magnitude.unwrap_or(1.0), text));
             }
+            self.offer(t.fingerprint(), offered);
             self.verdicts.push(Verdict { trigger: t.name.clone(), fired: keys });
         }
         out
@@ -631,9 +651,27 @@ impl Sensor for FileSensor {
         self.failure.take()
     }
 
+    /// Spend each session trigger whose line `description` is.
+    fn delivered(&mut self, description: &str) {
+        self.settle(description);
+    }
+
+    fn dropped(&mut self, description: &str) {
+        self.release(description);
+    }
+
+    fn waits_on(&self, description: &str) -> bool {
+        self.awaits(description)
+    }
+
+    fn take_spent(&mut self) -> bool {
+        std::mem::take(&mut self.newly_spent)
+    }
+
     /// How long the observation `description` of the last poll stays
-    /// deliverable: its trigger's `expires`. None for an observation no
-    /// trigger made, which takes the decay window.
+    /// deliverable: its trigger's `expires`. None when the trigger sets no
+    /// `expires`, or no trigger made it; the writer then applies its
+    /// lane's default.
     fn lapse(&self, description: &str) -> Option<sensor_trait::Lapse> {
         self.lapses.iter().find(|(d, _)| d == description).map(|(_, e)| match e {
             Expires::Seconds(n) => sensor_trait::Lapse::After(*n),
@@ -642,186 +680,11 @@ impl Sensor for FileSensor {
     }
 }
 
-/// The declared state as the store keeps it, with the fingerprint of the
-/// declaration that wrote it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StoredState {
-    pub decl: String,
-    pub fields: state::Fields,
-}
+mod session;
+use session::SessionMemory;
 
-/// One sensor's store file.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Record {
-    /// The store format. A file without it does not read as a record.
-    pub store: u32,
-    pub sensor: String,
-    pub project: String,
-    #[serde(default)]
-    pub session: Option<String>,
-    #[serde(default)]
-    pub poll: Option<Poll>,
-    /// What each trigger with `memory: store` last saw, by trigger name.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub memory: BTreeMap<String, Memo>,
-    /// The declared state, for a sensor that declares one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<StoredState>,
-    /// A value new with each write, so a reader can tell two writes apart
-    /// when the file's mtime cannot.
-    #[serde(default)]
-    pub nonce: u64,
-}
-
-impl Record {
-    pub fn new(key: &Key, poll: Option<Poll>, memory: BTreeMap<String, Memo>) -> Record {
-        Record { store: STORE_FORMAT, sensor: key.sensor.clone(), project: key.project.clone(), session: key.session.clone(), poll, memory, state: None, nonce: fresh_nonce() }
-    }
-
-    fn key(&self) -> Key {
-        Key::new(&self.sensor, &self.project, self.session.as_deref())
-    }
-}
-
-/// The last poll's outcome.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Poll {
-    /// Seconds since the epoch.
-    pub at: u64,
-    pub ok: bool,
-    /// Why it failed.
-    #[serde(default)]
-    pub detail: Option<String>,
-    /// How many observations it returned.
-    #[serde(default)]
-    pub observations: usize,
-}
-
-/// The directory of every sensor's store.
-pub fn store_dir() -> PathBuf {
-    ways_core::paths::state_root().join("attend").join("sensor-state")
-}
-
-/// A store file of this format, whatever its key.
-fn parse(path: &Path) -> Option<Record> {
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str::<Record>(&text).ok().filter(|r| r.store == STORE_FORMAT)
-}
-
-/// The store at `path`, when it is of this format and its key is `key`.
-pub fn read_at(path: &Path, key: &Key) -> Option<Record> {
-    parse(path).filter(|r| r.key() == *key)
-}
-
-/// Every store of this format under `dir`.
-fn records_in(dir: &Path) -> impl Iterator<Item = (PathBuf, Record)> {
-    let entries = std::fs::read_dir(dir).into_iter().flatten().flatten();
-    entries.map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).filter_map(|p| parse(&p).map(|r| (p, r)))
-}
-
-/// Remove every file of the store directory not written within the
-/// retention limit, and every `.json` file of an older format ([`outdated`]),
-/// such as one written before stores were keyed by session. A store of a
-/// newer format, which a newer attend on this machine writes, stays.
-/// Returns how many it removed.
-pub fn sweep() -> usize {
-    sweep_in(&store_dir(), SystemTime::now())
-}
-
-fn sweep_in(dir: &Path, now: SystemTime) -> usize {
-    let limit = Duration::from_secs(bounds::RETENTION_DAYS * 86_400);
-    let mut removed = 0;
-    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let path = entry.path();
-        let Ok(meta) = entry.metadata() else { continue };
-        if !meta.is_file() {
-            continue;
-        }
-        let expired = meta.modified().ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age > limit);
-        let older = path.extension().is_some_and(|x| x == "json") && outdated(&path);
-        if (expired || older) && std::fs::remove_file(&path).is_ok() {
-            removed += 1;
-        }
-    }
-    removed
-}
-
-/// Whether the file at `path` is a store of an older format: it is not
-/// valid JSON, or it is an object whose `store` is missing or below
-/// [`STORE_FORMAT`]. A file that cannot be read, a newer format and any
-/// other JSON value count as not outdated.
-fn outdated(path: &Path) -> bool {
-    let Ok(bytes) = std::fs::read(path) else { return false };
-    match serde_json::from_slice::<Value>(&bytes) {
-        Err(_) => true,
-        Ok(Value::Object(m)) => m.get("store").and_then(Value::as_u64).is_none_or(|n| n < u64::from(STORE_FORMAT)),
-        Ok(_) => false,
-    }
-}
-
-/// The last poll of each sensor in `project`, by sensor name: the
-/// session's own store when a session is given, else the newest poll of
-/// any session's store in the project.
-pub fn last_polls(project: &str, session: Option<&str>) -> BTreeMap<String, Poll> {
-    last_polls_in(&store_dir(), project, session)
-}
-
-fn last_polls_in(dir: &Path, project: &str, session: Option<&str>) -> BTreeMap<String, Poll> {
-    let mut out: BTreeMap<String, Poll> = BTreeMap::new();
-    let session = session.filter(|s| !s.is_empty());
-    for (_, r) in records_in(dir).filter(|(_, r)| r.project == project && (session.is_none() || r.session.as_deref() == session)) {
-        let Some(poll) = r.poll else { continue };
-        if out.get(&r.sensor).is_none_or(|p| p.at < poll.at) {
-            out.insert(r.sensor, poll);
-        }
-    }
-    out
-}
-
-/// Move every store of the session `from` to the session `to`, as a
-/// session's move after `/clear` carries its state, and return how many
-/// moved. A store `to` already has is kept. `from`'s store is removed once
-/// its copy is written, or when `to` already has one; a failed write leaves
-/// it in place.
-pub fn move_stores(from: &str, to: &str) -> usize {
-    move_stores_in(&store_dir(), from, to)
-}
-
-fn move_stores_in(dir: &Path, from: &str, to: &str) -> usize {
-    if from.is_empty() || to.is_empty() || from == to {
-        return 0;
-    }
-    let mut moved = 0;
-    for (path, r) in records_in(dir).filter(|(_, r)| r.session.as_deref() == Some(from)) {
-        let key = Key::new(&r.sensor, &r.project, Some(to));
-        let target = key.path_in(dir);
-        let written = read_at(&target, &key).is_none() && write(&target, &Record { session: key.session.clone(), ..r });
-        if written || read_at(&target, &key).is_some() {
-            std::fs::remove_file(&path).ok();
-        }
-        moved += usize::from(written);
-    }
-    moved
-}
-
-/// Write `rec` to `path` whole: a temporary file renamed over it. Returns
-/// whether the file now holds it.
-fn write(path: &Path, rec: &Record) -> bool {
-    let Some(dir) = path.parent() else { return false };
-    if std::fs::create_dir_all(dir).is_err() {
-        return false;
-    }
-    let tmp = path.with_extension(format!("json.{}", std::process::id()));
-    let Ok(text) = serde_json::to_string(rec) else { return false };
-    if std::fs::write(&tmp, text).is_err() {
-        return false;
-    }
-    if std::fs::rename(&tmp, path).is_err() {
-        std::fs::remove_file(&tmp).ok();
-        return false;
-    }
-    true
-}
+mod store;
+pub use store::*;
 
 #[cfg(test)]
 mod tests;

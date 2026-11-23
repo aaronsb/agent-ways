@@ -41,7 +41,7 @@ $ attend sensor list
 
 ## Step 3 — Send a test through it
 
-`attend sensor fire` passes a synthetic result through the sensor's real threshold and lane. `--dry-run` stops before delivery.
+`attend sensor fire` passes a synthetic result through the sensor's real threshold and lane, and delivers what gets through to the session. `--dry-run` stops before delivery.
 
 ```
 $ echo "2.5|cargo finished" | attend sensor fire processes --input - --dry-run
@@ -52,12 +52,10 @@ One observation at 2.5 is under the new threshold, so it waits in the accumulato
 
 ```
 $ printf '1.5|cargo finished\n1.5|make finished\n' | attend sensor fire processes --input -
-[attend sensor=processes priority=medium] [test] cargo finished
-[attend sensor=processes priority=medium] [test] make finished
-processes: delivered on the event lane at priority medium
+processes: delivered on the event lane to session 3f2a…: processes-1795443401432392982-0, processes-1795443401432392983-1
 ```
 
-Without `--dry-run` the lines print as `attend run` prints them, each marked `[test]`. Magnitude is the lever: at 3.0 or more a batch is medium priority and wakes the agent, below it attend logs it and wakes no one. A fire writes nothing to the sensor's store unless given `--commit`.
+Without `--dry-run` each line becomes a signal from `system:processes`, marked `[test]` and addressed to the session, as the sensor host writes a real report. The session reads it as it reads a message, and `attend message inbox` lists it with `from_kind` `system`. The session is the one the shell runs in; from anywhere else, name it with `--session <id>`, and with no session at all the fire refuses to deliver. Magnitude is the lever: what reaches the threshold goes out together, and what does not waits. On the event lane a batch that reaches the threshold also needs 3.0 to be written; under that, attend logs it and writes nothing, as the host does. A fire writes nothing to the sensor's store unless given `--commit`.
 
 ## Step 4 — Switch a sensor off for one project
 

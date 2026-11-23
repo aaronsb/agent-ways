@@ -49,6 +49,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend sensor poll`↴](#attend-sensor-poll)
 * [`attend sensor fire`↴](#attend-sensor-fire)
 * [`attend sensor permissions`↴](#attend-sensor-permissions)
+* [`attend sensor host`↴](#attend-sensor-host)
 * [`attend config`↴](#attend-config)
 * [`attend config init`↴](#attend-config-init)
 * [`attend config show`↴](#attend-config-show)
@@ -687,9 +688,10 @@ List, poll and test-fire sensors, and audit their permissions (default: list)
 ###### **Subcommands:**
 
 * `list` — List every sensor the files declare, with its kind, origin, file, source and state
-* `poll` — Run one real poll of a sensor and print its result and what attend would deliver
-* `fire` — Send a synthetic result through a sensor's threshold, lane and delivery, marked [test]
+* `poll` — Run one real poll of a sensor and deliver what its threshold lets through to the session
+* `fire` — Send a synthetic result through a sensor's threshold and lane to the session, marked [test]
 * `permissions` — Compare each sensor's `requires:` against settings.json
+* `host` — Run one session's sensors and write what they report to it as system signals
 
 
 
@@ -707,7 +709,7 @@ List every sensor the files declare, with its kind, origin, file, source and sta
 
 ## `attend sensor poll`
 
-Run one real poll of a sensor and print its result and what attend would deliver
+Run one real poll of a sensor and deliver what its threshold lets through to the session
 
 **Usage:** `attend sensor poll [OPTIONS] <NAME>`
 
@@ -717,6 +719,7 @@ Run one real poll of a sensor and print its result and what attend would deliver
 
 ###### **Options:**
 
+* `--session <ID>` — The session whose store the poll reads and to which it delivers; unset, the session this shell runs in
 * `--dry-run` — Stop before delivery
 * `--json` — Print the result as one JSON document
 
@@ -724,7 +727,7 @@ Run one real poll of a sensor and print its result and what attend would deliver
 
 ## `attend sensor fire`
 
-Send a synthetic result through a sensor's threshold, lane and delivery, marked [test]
+Send a synthetic result through a sensor's threshold and lane to the session, marked [test]
 
 **Usage:** `attend sensor fire [OPTIONS] <TARGET>`
 
@@ -735,6 +738,7 @@ Send a synthetic result through a sensor's threshold, lane and delivery, marked 
 ###### **Options:**
 
 * `--input <FILE|->` — The synthetic result: a file, or `-` for stdin. A command sensor with `output: json` takes one JSON poll result, which its state and triggers evaluate. Any other sensor takes a JSON list of `{magnitude, description}` or `magnitude|description` lines; with none, one observation at the sensor's threshold
+* `--session <ID>` — The session whose store the fire reads and to which it delivers; unset, the session this shell runs in
 * `--dry-run` — Stop before delivery
 * `--commit` — Keep the trigger memory and declared state the fire leaves; a test fire writes neither without it
 * `--json` — Print the result as one JSON document
@@ -746,6 +750,22 @@ Send a synthetic result through a sensor's threshold, lane and delivery, marked 
 Compare each sensor's `requires:` against settings.json
 
 **Usage:** `attend sensor permissions`
+
+
+
+## `attend sensor host`
+
+Run one session's sensors and write what they report to it as system signals
+
+The attend mod starts one host for each listening session and stops it when the session stops listening. The host polls the sensors the files declare for --cwd, except keepwarm and disclosure, and the peers sensor reports sessions starting and leaving but no messages. Each report the governor lets through becomes a signal from `system:<sensor>` addressed to --session, on the sensor's lane, with the expiry its trigger sets; the mod delivers it as it delivers a message. Each signal written prints one line on stdout, `signal <id>`, and nothing else does; logs go to stderr. A changed binary or sensor file re-executes the host in place.
+
+**Usage:** `attend sensor host [OPTIONS] --session <SESSION> --cwd <CWD>`
+
+###### **Options:**
+
+* `--session <SESSION>` — The session the signals are addressed to
+* `--cwd <CWD>` — The session's directory: the project the sensors watch, whose tray the signals go to
+* `--moved-from <OLD_ID>` — The id the session had before /clear: its sensor stores and the memory of triggers kept for the session move to --session
 
 
 

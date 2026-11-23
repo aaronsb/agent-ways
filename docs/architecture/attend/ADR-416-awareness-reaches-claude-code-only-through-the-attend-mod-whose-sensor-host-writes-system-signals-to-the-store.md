@@ -194,11 +194,16 @@ The operator set the direction: awareness is furnished through the mod, and a se
          where: { behind: true }
          memory: session
          expires: session
-         magnitude: 1
+         magnitude: 3
          description: "agent-ways has a newer release: {summary}. `ways manage update --what-if` shows it."
      ```
 
+     > Amended 2026-11-23: the host applies attend run's magnitude 3.0 cut on the event lane, so the shipped file's trigger uses `magnitude: 3`.
+
    - **Once per session.** ADR-403's `on: enters` over `where` does not give this alone. Trigger memory persists across restarts and is keyed by sensor and project, so a second session would never fire. A fresh store's first poll sets a baseline and fires nothing, so a session that starts behind would not fire either. Two fields are added to the spec. `memory: session` holds the trigger's memory in the host's process. It starts empty and has no baseline, so `enters` fires on the first poll whose result meets `where`, and never again in that host's life. Since the host lives as long as the session, that is once per session. `expires: session` keeps the notice until the session reads it, so the notice does not lapse with the one-hour event expiry. Both fields are allowed on any trigger.
+
+     > Amended 2026-11-23: a session trigger's line is delivered at most once in the session. A line the loop holds, such as one the governor holds, is not offered again while it waits; a line the loop drops, by the refractory, the cache gate, a failed write or a restart before it went out, is offered again on the next poll that meets the trigger. A line under the event lane's cut counts as handled, and spends the trigger as a written line does. The checkpoint follows the write, so a kill between the write and the checkpoint can repeat the notice.
+
    - **Cadence.** Each listening session checks once at start and says it once. Several sessions each saying it is the intended cadence, as with Claude Code's own update notice. There is no machine-wide cache and no daily sentinel. Concurrent fetches in one app source can collide on git's ref lock. A session whose fetch loses compares against the last fetched target, which is the same release unless one landed in between.
 
 7. **The footer reads the binary.** `ways show core` prints `_Ways version: <version>_` from the `ways` binary's own version. `git_version`, `update_status_text`, `render_update_status` and `dirty_status_text` in `show/metrics.rs` go, with the git-describe parsing that serves them. The footer shows the version only and makes no network call, in every session. A dormant session learns of a release from `ways status` or `ways manage update --what-if` when asked.

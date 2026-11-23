@@ -80,6 +80,10 @@ pub struct PeerSensor {
     /// Set true after the first `read_signals`. Gates the one-time
     /// cold-start message baseline.
     message_baseline_done: bool,
+    /// Report peer sessions starting, leaving and changing state, and read
+    /// no messages. The sensor host runs it so: the mod's drain carries
+    /// messages, and a second reader would deliver them twice.
+    presence_only: bool,
 }
 
 #[allow(dead_code)]
@@ -164,7 +168,17 @@ impl PeerSensor {
             checkpoint_loaded: false,
             state_imported: false,
             message_baseline_done: false,
+            presence_only: false,
         }
+    }
+
+    /// Report presence alone and read no messages, as the sensor host runs
+    /// this sensor. It then keeps no seen-set and exports no state.
+    ///
+    /// References:
+    /// - ADR-416 item 5: the host keeps the presence half of peers.
+    pub fn set_presence_only(&mut self, on: bool) {
+        self.presence_only = on;
     }
 
     /// Set the per-peer engagement window. Called by the orchestrator
@@ -763,7 +777,9 @@ impl Sensor for PeerSensor {
         }
 
         // Check for peer signals (messages from other sessions)
-        observations.extend(self.read_signals(focus));
+        if !self.presence_only {
+            observations.extend(self.read_signals(focus));
+        }
 
         self.prior = current;
         observations
@@ -787,6 +803,9 @@ impl Sensor for PeerSensor {
 
     fn export_state(&self) -> Vec<(String, String)> {
         let mut state = Vec::new();
+        if self.presence_only {
+            return state;
+        }
         for sig in &self.seen_signals {
             state.push(("seen_signal".to_string(), sig.clone()));
         }
@@ -808,6 +827,9 @@ impl Sensor for PeerSensor {
         // messages) leave the session cold. ADR-172's per-poll drain-mark
         // refresh also lands here; it may make the sensor warm before its
         // first scan, never cold again, and does not re-log the banner.
+        if self.presence_only {
+            return;
+        }
         let first_import = !self.state_imported;
         self.state_imported = true;
         if !self.message_baseline_done && state.iter().any(|(k, v)| k == "baselined" && v == "true") {
@@ -1096,5 +1118,33 @@ mod tests {
         assert!(body.contains("2 on #open"), "{body}");
         assert!(!body.contains("to you"), "{body}");
         assert!(!body.contains("in groups"), "{body}");
+    }
+
+    /// A presence-only sensor scans no tray on any poll, and keeps and
+    /// takes no message state, so the mod's drain stays the one reader of
+    /// messages.
+    #[test]
+    fn a_presence_only_sensor_reads_no_messages_and_keeps_no_message_state() {
+        let root = temp_claude("presence");
+        let scans = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut sensor = PeerSensor::new();
+        sensor.claude = claude_sessions::ClaudeDir::at(&root);
+        let counted = scans.clone();
+        sensor.set_receive_dirs_provider(Arc::new(move |_: &str| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Vec::new()
+        }));
+        sensor.set_presence_only(true);
+        sensor.import_state(&[("seen_signal".into(), "a.signal".into()), ("baselined".into(), "true".into())]);
+        let focus = Focus { description: String::new(), working_dir: "/p".into(), keywords: Vec::new() };
+        for _ in 0..3 {
+            assert!(sensor.poll(&focus).is_empty());
+        }
+        assert_eq!(scans.load(std::sync::atomic::Ordering::SeqCst), 0, "no tray was scanned");
+        assert!(sensor.export_state().is_empty(), "{:?}", sensor.export_state());
+        sensor.set_presence_only(false);
+        sensor.poll(&focus);
+        assert_eq!(scans.load(std::sync::atomic::Ordering::SeqCst), 1, "the control: a full sensor scans");
+        fs::remove_dir_all(&root).ok();
     }
 }

@@ -129,6 +129,35 @@ pub trait Sensor: Send {
     fn lapse(&self, _description: &str) -> Option<Lapse> {
         None
     }
+
+    /// The line `description` of an earlier poll was handled: written, or
+    /// held under the event lane's cut. A trigger the sensor keeps for the
+    /// session becomes spent once all the lines it offered were handled.
+    /// Until each of its lines is handled or [`Sensor::dropped`], the
+    /// trigger offers nothing more. Default: nothing.
+    fn delivered(&mut self, _description: &str) {}
+
+    /// The line `description` of an earlier poll was dropped on its way: by
+    /// the refractory, the cache gate or a failed write. A trigger the sensor
+    /// keeps for the session that offered it fires again on the next poll
+    /// that meets it. Default: nothing.
+    fn dropped(&mut self, _description: &str) {}
+
+    /// Whether a trigger the sensor keeps for the session waits on the line
+    /// `description` of an earlier poll, so that [`Sensor::dropped`] for it
+    /// would let the trigger fire again. A loop that holds a dropped line
+    /// back keeps only the lines this names. Default: none.
+    fn waits_on(&self, _description: &str) -> bool {
+        false
+    }
+
+    /// Whether a trigger this sensor keeps for the session became spent
+    /// since the last call, because its lines were [`Sensor::delivered`].
+    /// The loop checkpoints at once when it did, so a restart does not
+    /// fire the trigger again. Default: never.
+    fn take_spent(&mut self) -> bool {
+        false
+    }
 }
 
 /// How long a sensor's report stays deliverable once written.
@@ -174,6 +203,11 @@ pub struct DeltaAccumulator {
     pub event_count: u32,
     pub window_start: Instant,
     pub events: Vec<String>,
+    /// How long each accumulated event stays deliverable, as the sensor
+    /// said when it was polled, by description. An event the sensor gave no
+    /// lapse for has no entry. Kept here because a later poll replaces what
+    /// the sensor itself remembers.
+    pub lapses: Vec<(String, Lapse)>,
 }
 
 impl DeltaAccumulator {
@@ -183,6 +217,7 @@ impl DeltaAccumulator {
             event_count: 0,
             window_start: Instant::now(),
             events: Vec::new(),
+            lapses: Vec::new(),
         }
     }
 
@@ -197,6 +232,21 @@ impl DeltaAccumulator {
         self.event_count = 0;
         self.window_start = Instant::now();
         self.events.clear();
+        self.lapses.clear();
+    }
+
+    /// Record that the event `description` stays deliverable for `lapse`.
+    /// The first lapse recorded for a description holds.
+    pub fn note_lapse(&mut self, description: &str, lapse: Lapse) {
+        if self.lapse_of(description).is_none() {
+            self.lapses.push((description.to_string(), lapse));
+        }
+    }
+
+    /// How long the accumulated event `description` stays deliverable, when
+    /// its sensor said.
+    pub fn lapse_of(&self, description: &str) -> Option<Lapse> {
+        self.lapses.iter().find(|(d, _)| d == description).map(|(_, l)| *l)
     }
 
     /// Drain events as individual lines for paged emission.
@@ -355,6 +405,9 @@ impl SensorSlot {
         // Absolute refractory: drop all observations silently. The agent
         // needs a beat to process what just arrived.
         if self.engagement.in_absolute_refractory(tick) {
+            for (_, description) in &observations {
+                self.sensor.dropped(description);
+            }
             self.interval.on_change();
             return true;
         }
@@ -372,8 +425,13 @@ impl SensorSlot {
         let mut accepted = 0;
         for (magnitude, description) in observations {
             if magnitude >= per_event_gate {
+                if let Some(lapse) = self.sensor.lapse(&description) {
+                    self.accumulator.note_lapse(&description, lapse);
+                }
                 self.accumulator.accumulate(magnitude, description);
                 accepted += 1;
+            } else {
+                self.sensor.dropped(&description);
             }
         }
 
@@ -474,5 +532,48 @@ mod util_tests {
     #[test]
     fn extract_json_u64_non_numeric() {
         assert_eq!(extract_json_u64(r#"{"tokens_used":"str"}"#, "tokens_used"), None);
+    }
+
+    /// A sensor whose first poll reports `a`, kept until read, and whose
+    /// later polls report `b` with no lapse.
+    struct Lapsing(u32);
+    impl Sensor for Lapsing {
+        fn name(&self) -> &str {
+            "lapsing"
+        }
+        fn poll(&mut self, _: &Focus) -> Vec<(f64, String)> {
+            self.0 += 1;
+            vec![(0.5, if self.0 == 1 { "a" } else { "b" }.to_string())]
+        }
+        fn emission_threshold(&self) -> f64 {
+            10.0
+        }
+        fn base_interval(&self) -> Duration {
+            Duration::from_secs(30)
+        }
+        fn min_interval(&self) -> Duration {
+            Duration::from_secs(10)
+        }
+        fn decay_threshold(&self) -> u32 {
+            3
+        }
+        fn lapse(&self, description: &str) -> Option<Lapse> {
+            (self.0 == 1 && description == "a").then_some(Lapse::UntilRead)
+        }
+    }
+
+    /// An event held below the threshold keeps the lapse its poll gave it
+    /// through later polls, and a reset drops it.
+    #[test]
+    fn an_accumulated_event_keeps_its_lapse_across_polls() {
+        let mut slot = SensorSlot::new(Box::new(Lapsing(0)));
+        let focus = Focus::default_focus();
+        slot.poll(&focus);
+        slot.poll(&focus);
+        assert_eq!(slot.accumulator.events, ["a", "b"]);
+        assert_eq!(slot.accumulator.lapse_of("a"), Some(Lapse::UntilRead));
+        assert_eq!(slot.accumulator.lapse_of("b"), None);
+        slot.accumulator.reset();
+        assert_eq!(slot.accumulator.lapse_of("a"), None);
     }
 }

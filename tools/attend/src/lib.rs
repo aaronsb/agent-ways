@@ -131,6 +131,7 @@ pub fn cli_main() {
             SensorCmd::Poll(a) => cmd::sensors::poll(&a),
             SensorCmd::Fire(a) => cmd::sensors::fire(&a),
             SensorCmd::Permissions => cmd::permissions::cmd_permissions_audit(),
+            SensorCmd::Host(a) => cmd::run::host::cmd_host(&a),
         },
         Commands::Config { sub } => dispatch_config(sub.unwrap_or(ConfigCmd::Show)),
     }

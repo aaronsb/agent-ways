@@ -6,6 +6,16 @@ This page covers the rhythm of one iteration, the phases a sensor passes through
 
 The loop serves one Claude session: `attend run` prints its lines to stdout, and Monitor delivers each line as a notification. A human reads the same message bus through attend-chat ([`tui.md`](tui.md)), which watches the signal files directly and does not run this loop.
 
+## The sensor host
+
+The same loop runs as `attend sensor host --session <id> --cwd <dir>`, which the attend mod starts for a listening session. The scheduling, intervals, engagement, governors, checkpoint and re-exec described here are the same. What differs is where a disclosed line goes and what is left out:
+
+- Each line becomes a signal in the session's project tray, from `system:<sensor>`, addressed to the session, on the sensor's lane, with the expiry its trigger sets (`expires`; an unset one on the event lane is the hour of the decay window, and `session` keeps it until read). The mod's drain delivers it as it delivers a message. An event-lane batch must also reach the magnitude 3.0 at which `attend run` printed a batch: one under it is logged on stderr and not written, as `attend run` logged it and did not print it. A message-lane batch has no such cut.
+- Each write prints one line on stdout, `signal <id>`, which the mod takes as a cue to poll. Nothing else goes to stdout; logs go to stderr.
+- There is no banner, no message poller, no cache gate and no rekey. The keepwarm and disclosure sensors do not run, and the peers sensor reports presence alone, on the event lane.
+- A trigger kept for the session (`memory: session`) offers its lines once and fires nothing while the loop holds them, such as behind the governor. It is spent once every line it offered was written or held under the cut, and the checkpoint follows at once, so a restart after that does not fire it again. A line dropped on its way, by the refractory, a write that fails, or a governor hold that a restart ends, leaves the trigger to fire again on the next poll that meets it. Under `attend run`, a line the cache gate drops is offered again once the cache is warm. A kill between the write and the checkpoint can repeat the notice. `--moved-from <old id>` carries the stores and that memory across a `/clear`.
+- The host exits when its parent process is gone.
+
 ## The rhythm
 
 Attend's loop is **pull-based, not push-based**. Nothing wakes it up — it wakes itself up at timestamps it already knows about, does one unit of work, and goes back to sleep. The only external input is the filesystem: signal files other agents write, git state, process list, transcript changes. Sensors read these during their own scheduled polls.
@@ -265,3 +275,7 @@ There's no graceful shutdown hook. The `attend run` process is meant to be start
 - **Message delivery**: [`delivery.md`](delivery.md) covers the Monitor line and the Stop-hook drain.
 - **Signal format**: [`signals.md`](signals.md) covers the wire format, on-disk layout, and lifecycle.
 - **Configuration**: [`configuration.md`](configuration.md) covers the YAML overlay and how to reshape any of the timers above.
+
+## References
+
+- ADR-416: the sensor host, its stdout cue, the system signals it writes and what it keeps of this loop.

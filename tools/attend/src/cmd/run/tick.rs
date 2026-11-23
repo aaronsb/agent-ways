@@ -10,7 +10,9 @@
 //! shell (sensor registration, instance registry, signal lock, etc).
 //!
 //! - `tick_iteration` — sensor poll, governor decision, periodic
-//!   checkpoint, instance-registry touch, cleanup sweep.
+//!   checkpoint, instance-registry touch, cleanup sweep. What the
+//!   governor lets through goes to a [`Sink`]: Monitor's stdout for
+//!   `attend run`, the signal store for the sensor host.
 //! - `build_engagement` — pure config → curve translation.
 //! - `maybe_self_reload` — checkpoint + `exec()` on binary mtime change.
 //! - `collect_snapshot` — sensor state → on-disk checkpoint shape.
@@ -20,6 +22,7 @@ use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
 use super::governor::{DisclosureGovernor, ScheduledSensor};
+use super::sink::{Delivery, Disclosure, Sink};
 use crate::cmd::cleanup::run_cleanup;
 use crate::sensors::{Focus, SensorSlot};
 use crate::util::signals_base;
@@ -56,7 +59,11 @@ pub(super) struct TickState<'a> {
     pub(super) focus: &'a Focus,
     pub(super) heartbeat_id: &'a str,
     pub(super) cfg: &'a config::Config,
-    pub(super) cache_gate: &'a mut CacheGate,
+    /// The cache gate on what goes out; none for the sensor host, whose
+    /// signals the mod's drain gates.
+    pub(super) cache_gate: Option<&'a mut CacheGate>,
+    /// Where disclosed lines go.
+    pub(super) sink: &'a mut dyn Sink,
 }
 
 /// The cache gate on what this run prints (ADR-406 item 2). A line on
@@ -66,10 +73,36 @@ pub(super) struct TickState<'a> {
 #[derive(Default)]
 pub(super) struct CacheGate {
     checked: Option<(Instant, bool)>,
+    /// Event lines dropped while the cache had lapsed that a session
+    /// trigger waits on, by slot. Their sensors hear of the drop once the
+    /// cache is warm again, so the trigger fires again then, and not on
+    /// every poll of a lapsed cache. A waiting trigger offers nothing more,
+    /// so the list holds no more lines than the sensors keep outstanding.
+    dropped: Vec<(usize, String)>,
 }
 
 impl CacheGate {
     const RECHECK: Duration = Duration::from_secs(10);
+
+    /// Drop slot `i`'s accumulated events, keeping each line a session
+    /// trigger waits on ([`sensors::Sensor::waits_on`]) for a warm cache.
+    /// Every other line is gone: no trigger fires on its drop.
+    fn drop_events(&mut self, slots: &mut [SensorSlot], i: usize) {
+        for line in slots[i].accumulator.drain_events() {
+            if slots[i].sensor.waits_on(&line) && !self.dropped.iter().any(|(j, l)| *j == i && *l == line) {
+                self.dropped.push((i, line));
+            }
+        }
+        slots[i].accumulator.reset();
+    }
+
+    /// Tell each sensor of the lines it lost to the lapsed cache, so their
+    /// triggers fire again.
+    fn release_drops(&mut self, slots: &mut [SensorSlot]) {
+        for (i, line) in std::mem::take(&mut self.dropped) {
+            slots[i].sensor.dropped(&line);
+        }
+    }
 
     /// Whether session `session_id`'s cache has lapsed, on keepwarm's clock.
     fn lapsed(&mut self, session_id: &str, working_dir: &str) -> bool {
@@ -164,20 +197,26 @@ pub(super) fn maybe_self_reload(
     session_id: &str,
     working_dir: &str,
 ) {
+    if binary_changed(self_exe, baseline_mtime, baseline_hash) {
+        reload(slots, state_store, session_id, working_dir, "binary changed", "binary updated");
+    }
+}
+
+/// Whether the running binary's bytes changed since startup. An identical
+/// rebuild, which moves the mtime and not the bytes, advances the baseline
+/// mtime and counts as no change.
+pub(super) fn binary_changed(self_exe: Option<&Path>, baseline_mtime: &mut Option<SystemTime>, baseline_hash: Option<u64>) -> bool {
     let Some(exe) = self_exe else {
-        return;
+        return false;
     };
     let Some(orig_mtime) = *baseline_mtime else {
-        return;
+        return false;
     };
-    let Ok(meta) = std::fs::metadata(exe) else {
-        return;
-    };
-    let Ok(current_mtime) = meta.modified() else {
-        return;
+    let Some(current_mtime) = std::fs::metadata(exe).ok().and_then(|m| m.modified().ok()) else {
+        return false;
     };
     if current_mtime == orig_mtime {
-        return;
+        return false;
     }
     // mtime moved — confirm the bytes actually changed before reloading.
     // A matching hash means an identical rebuild: skip the pointless
@@ -187,9 +226,9 @@ pub(super) fn maybe_self_reload(
     let current_hash = hash_file(exe);
     if current_hash.is_some() && current_hash == baseline_hash {
         *baseline_mtime = Some(current_mtime);
-        return;
+        return false;
     }
-    reload(slots, state_store, session_id, working_dir, "binary changed", "binary updated");
+    true
 }
 
 /// Checkpoint and re-exec `attend run` because `what` happened, once the
@@ -421,19 +460,40 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // what the peers sensor surfaced, presence included, and it goes out
     // once the cache is warm. Messages that would wake the session wait
     // unseen in the sensor itself.
+    if let Some(gate) = s.cache_gate.as_deref_mut() {
+        if !gate.dropped.is_empty() && !gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
+            gate.release_drops(s.slots);
+        }
+    }
     let gated = |i: &usize| !s.slots[*i].is_crate("keepwarm");
-    if (evt_ready.iter().any(gated) || msg_ready.iter().any(gated)) && s.cache_gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
+    let lapsed = match s.cache_gate.as_deref_mut() {
+        Some(gate) if evt_ready.iter().any(gated) || msg_ready.iter().any(gated) => gate.lapsed(s.heartbeat_id, &s.focus.working_dir),
+        _ => false,
+    };
+    if lapsed {
         for &i in &evt_ready {
             emit::log(&format!("{}: dropped {} event(s), the prompt cache has lapsed", s.slots[i].name(), s.slots[i].accumulator.event_count));
-            s.slots[i].accumulator.reset();
+            if let Some(gate) = s.cache_gate.as_deref_mut() {
+                gate.drop_events(s.slots, i);
+            }
         }
         evt_ready.clear();
         msg_ready.retain(|i| s.slots[*i].is_crate("keepwarm"));
     }
-    try_disclose(s.slots, &evt_ready, s.governor, true);
+    let mut spent = try_disclose(s.slots, &evt_ready, s.governor, true, s.sink);
     // Message lane: do not record engagement, so it never builds the
     // action-potential refractory that would later hold conversation.
-    try_disclose(s.slots, &msg_ready, s.msg_governor, false);
+    spent |= try_disclose(s.slots, &msg_ready, s.msg_governor, false, s.sink);
+
+    // A trigger kept for the session is spent once its lines were written or
+    // cut. The checkpoint follows at once, so a restart does not fire it
+    // again; a kill between the write and this checkpoint can, and a
+    // duplicate notice is the lesser loss.
+    if spent {
+        s.state_store.checkpoint(&collect_snapshot(s.slots));
+        *s.last_checkpoint = Instant::now();
+        emit::log("a session trigger is spent; checkpointed");
+    }
 
     // Periodic checkpoint
     if s.last_checkpoint.elapsed() >= CHECKPOINT_INTERVAL {
@@ -481,7 +541,9 @@ pub(super) fn tick_iteration(s: &mut TickState) {
 }
 
 /// Disclose a batch of ready sensors through `governor`, or log a hold if
-/// the governor is closed. Shared by the event lane and the (permissive)
+/// the governor is closed. Each line that went out is reported to its
+/// sensor ([`sensor_trait::Sensor::delivered`]); returns whether that spent
+/// a trigger kept for the session. Shared by the event lane and the (permissive)
 /// message lane so both get identical batching, priority, and engagement
 /// bookkeeping — only the governing policy differs.
 fn try_disclose(
@@ -489,9 +551,10 @@ fn try_disclose(
     ready: &[usize],
     governor: &mut DisclosureGovernor,
     record_engagement: bool,
-) {
+    sink: &mut dyn Sink,
+) -> bool {
     if ready.is_empty() {
-        return;
+        return false;
     }
     if !governor.can_disclose() {
         emit::log(&format!(
@@ -500,7 +563,7 @@ fn try_disclose(
             governor.window_disclosures,
             governor.max_disclosures_per_window,
         ));
-        return;
+        return false;
     }
 
     let mut batch = Vec::new();
@@ -513,11 +576,17 @@ fn try_disclose(
         } else {
             "low"
         };
-        batch.push((
-            slot.name().to_string(),
-            priority.to_string(),
-            slot.accumulator.drain_events(),
-        ));
+        let lines = slot.accumulator.drain_events().into_iter().map(|l| {
+            let lapse = slot.accumulator.lapse_of(&l);
+            (l, lapse)
+        });
+        batch.push(Disclosure {
+            sensor: slot.name().to_string(),
+            priority,
+            magnitude: slot.accumulator.magnitude,
+            message_lane: slot.message_lane,
+            lines: lines.collect(),
+        });
     }
 
     emit::log(&format!(
@@ -525,8 +594,24 @@ fn try_disclose(
         batch.len(),
         governor.cooldown().as_secs_f64(),
     ));
-    let emitted = emit::emit_batch(&batch);
-    if emitted {
+    let verdicts = sink.deliver(&batch);
+    let mut spent = false;
+    for ((&i, d), verdicts) in ready.iter().zip(&batch).zip(&verdicts) {
+        // A failed line releases its trigger first, so a trigger with one
+        // line written and another failed is not spent.
+        for ((line, _), v) in d.lines.iter().zip(verdicts) {
+            if *v == Delivery::Failed {
+                slots[i].sensor.dropped(line);
+            }
+        }
+        for ((line, _), v) in d.lines.iter().zip(verdicts) {
+            if *v != Delivery::Failed {
+                slots[i].sensor.delivered(line);
+            }
+        }
+        spent |= slots[i].sensor.take_spent();
+    }
+    if verdicts.iter().flatten().any(|v| *v == Delivery::Written) {
         governor.record_disclosure();
         // Record engagement only for the event lane (refractory is its
         // noise-control). The message lane skips it so conversation never
@@ -544,6 +629,7 @@ fn try_disclose(
     for &i in ready {
         slots[i].accumulator.reset();
     }
+    spent
 }
 
 /// Emit every message-lane line the disclosure governor is holding, before
@@ -563,7 +649,13 @@ pub(super) fn flush_message_lane(slots: &mut [SensorSlot]) {
         .collect();
     emit::log(&format!("flushing {} held message-lane batch(es) before exec", batch.len()));
     emit::emit_batch(&batch);
-    for &i in &held {
+    // Printed at high priority, every line went out, so a session trigger
+    // among them is spent before the checkpoint that follows.
+    for (&i, (_, _, lines)) in held.iter().zip(&batch) {
+        for line in lines {
+            slots[i].sensor.delivered(line);
+        }
+        slots[i].sensor.take_spent();
         slots[i].accumulator.reset();
     }
 }
@@ -628,132 +720,4 @@ pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSna
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sensors::Sensor as _;
-
-    #[test]
-    fn build_engagement_returns_action_potential_curve() {
-        // Reachable without standing up a full cmd_run shell, which
-        // is the testability claim from issue #78.
-        let cfg = config::Config::default();
-        let curve = build_engagement(&cfg);
-        match curve {
-            sensor_trait::Curve::ActionPotential { peak_multiplier, .. } => {
-                assert!(peak_multiplier > 1.0);
-            }
-            _ => panic!("expected ActionPotential curve"),
-        }
-    }
-
-    #[test]
-    fn a_cold_reload_logs_presence_and_waits_on_anything_else() {
-        assert_eq!(reload_plan(false, &["message from A ~x: hi"]), ReloadPlan::Loud);
-        assert_eq!(reload_plan(true, &[]), ReloadPlan::Quiet);
-        assert_eq!(reload_plan(true, &["peer session started: p [/p] (same project, idle, ctx 3%)"]), ReloadPlan::Quiet);
-        assert_eq!(reload_plan(true, &["peer session exited: p [/p]", "message from A ~x: hi"]), ReloadPlan::Wait);
-        assert_eq!(reload_plan(true, &["2 older messages held back; reading them is optional: attend message inbox"]), ReloadPlan::Wait);
-    }
-
-    /// A sensor that exports the peers sensor's cold-start mark, under a
-    /// name of its file's choosing.
-    struct Marked(&'static str);
-    impl sensors::Sensor for Marked {
-        fn name(&self) -> &str {
-            self.0
-        }
-        fn poll(&mut self, _: &sensors::Focus) -> Vec<(f64, String)> {
-            Vec::new()
-        }
-        fn emission_threshold(&self) -> f64 {
-            1.0
-        }
-        fn base_interval(&self) -> Duration {
-            Duration::from_secs(30)
-        }
-        fn min_interval(&self) -> Duration {
-            Duration::from_secs(10)
-        }
-        fn decay_threshold(&self) -> u32 {
-            3
-        }
-        fn export_state(&self) -> Vec<(String, String)> {
-            vec![("baselined".into(), "true".into())]
-        }
-    }
-
-    /// The peers sensor's state is the crate's, whatever its file is named:
-    /// a `chat.yaml` running it keeps the mark, and a file named `peers`
-    /// running another crate does not.
-    #[test]
-    fn the_snapshot_keys_the_peers_state_on_the_crate_and_not_the_name() {
-        let peers_as_chat = sensors::slot(Box::new(Marked("chat")), sensor_spec::Lane::Message, Some("peers"));
-        assert!(peers_as_chat.is_crate("peers"));
-        assert!(collect_snapshot(&[peers_as_chat]).baselined);
-        let git_as_peers = sensors::slot(Box::new(Marked("peers")), sensor_spec::Lane::Event, Some("git"));
-        assert!(!collect_snapshot(&[git_as_peers]).baselined);
-    }
-
-    /// A file sensor named `ways-update` whose session trigger has fired,
-    /// and the trigger.
-    fn fired_update_sensor() -> (sensors::hosted::FileSensor, sensor_spec::Trigger) {
-        let doc = "kind: command\nargv: [x]\noutput: json\ntriggers: [{name: behind, path: \"$\", on: enters, where: {behind: true}, memory: session}]\n";
-        let t = sensor_spec::parse("ways-update", &serde_yaml::from_str(doc).unwrap()).spec.unwrap().triggers.remove(0);
-        let mut s = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
-        let behind = sensors::hosted::Seen::from([("$".to_string(), serde_json::json!(true))]);
-        assert_eq!(s.observe(&t, behind), vec!["$".to_string()]);
-        (s, t)
-    }
-
-    /// The checkpoint carries a file sensor's session memory under the
-    /// slot's name, as the sensor exports it.
-    #[test]
-    fn the_snapshot_carries_a_file_sensor_s_session_memory_under_its_name() {
-        let (s, _) = fired_update_sensor();
-        let exported: Vec<String> = s.export_state().into_iter().filter(|(k, _)| k == sensors::hosted::SESSION_MEMORY).map(|(_, v)| v).collect();
-        assert_eq!(exported.len(), 1);
-        let snapshot = collect_snapshot(&[sensors::slot(Box::new(s), sensor_spec::Lane::Event, None)]);
-        assert_eq!(snapshot.sensor_memory.keys().collect::<Vec<_>>(), ["ways-update"]);
-        assert_eq!(snapshot.sensor_memory["ways-update"], exported[0]);
-        assert!(snapshot.sensor_memory["ways-update"].contains("\"spent\":[\""), "{}", snapshot.sensor_memory["ways-update"]);
-    }
-
-    /// Export through the checkpoint, restore by name as a restarted run
-    /// does, and the trigger that fired stays spent.
-    #[test]
-    fn a_restored_file_sensor_does_not_fire_its_session_trigger_again() {
-        let (s, t) = fired_update_sensor();
-        let snapshot = collect_snapshot(&[sensors::slot(Box::new(s), sensor_spec::Lane::Event, None)]);
-        let state = restored_state("ways-update", None, &snapshot);
-        assert_eq!(state.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), [sensors::hosted::SESSION_MEMORY]);
-        assert!(restored_state("git", Some("git"), &snapshot).is_empty(), "another sensor gets none of it");
-        let mut restarted = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
-        restarted.import_state(&state);
-        let behind = || sensors::hosted::Seen::from([("$".to_string(), serde_json::json!(true))]);
-        assert_eq!(restarted.observe(&t, behind()), Vec::<String>::new());
-        let mut fresh = sensors::hosted::FileSensor::new("ways-update".into(), sensor_spec::DEFAULTS, Box::new(Marked("inner")), "/p", None, false);
-        assert_eq!(fresh.observe(&t, behind()), vec!["$".to_string()], "without the restore it would fire again");
-    }
-
-    #[test]
-    fn hash_file_is_stable_and_content_sensitive() {
-        // The same-hash skip on the reload path (issue #140) depends on
-        // hash_file being deterministic for identical bytes and different
-        // for changed bytes.
-        let dir = std::env::temp_dir().join(format!("attend-hash-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let a = dir.join("bin-a");
-        let b = dir.join("bin-b");
-        std::fs::write(&a, b"identical rebuild bytes").unwrap();
-        std::fs::write(&b, b"identical rebuild bytes").unwrap();
-        // Byte-identical files hash equal even as distinct paths — this is
-        // the "mtime moved, content didn't" case we skip the reload on.
-        assert_eq!(hash_file(&a), hash_file(&b));
-
-        std::fs::write(&b, b"a genuinely changed binary").unwrap();
-        assert_ne!(hash_file(&a), hash_file(&b));
-
-        assert!(hash_file(&dir.join("does-not-exist")).is_none());
-        std::fs::remove_dir_all(&dir).ok();
-    }
-}
+mod tests;

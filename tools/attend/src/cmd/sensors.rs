@@ -7,10 +7,13 @@
 //! `list` reports every sensor the files declare as an item (ADR-516): its
 //! kind, origin and file, source and version, recorded state, and lane. `poll` runs one real poll
 //! and `fire` sends a synthetic result; both go through the sensor's real
-//! threshold and lane, and deliver as `attend run` would unless `--dry-run`.
-//! A command sensor's poll and fire run its triggers against the session's
-//! store and print each verdict. Neither writes the store, except a fire
-//! with `--commit`. A fire's lines are marked `[test]`.
+//! threshold and lane, and unless `--dry-run` write what it lets through
+//! to the session as system signals, through the writer the sensor host
+//! uses. The session is `--session`, else the one the shell runs in; with
+//! neither, they deliver nothing and say so. A command sensor's poll and
+//! fire run its triggers against the session's store and print each
+//! verdict. Neither writes the store, except a fire with `--commit`. A
+//! fire's lines are marked `[test]`.
 
 use std::io::Read;
 
@@ -20,15 +23,71 @@ use serde_json::{json, Value};
 
 use crate::cli::{FireArgs, PollArgs};
 use crate::config::Config;
-use crate::sensors::{self, Ctx, Focus, Hosted, Sensor, State};
+use crate::sensors::{self, writer::Writer, Ctx, Focus, Hosted, Sensor, State};
 use sensor_spec::{Block, Kind, Lane};
+use sensor_trait::Lapse;
 
 /// The project the sensors resolve for: the session's, as `attend run` uses.
 fn context() -> (Focus, Config) {
+    context_of(None, "list", false)
+}
+
+/// The project of the named `session`, from its record; with none named,
+/// this shell's session's. Exit 3 for a named session with no record,
+/// whose tray is unknown.
+fn context_of(session: Option<&str>, verb: &str, json: bool) -> (Focus, Config) {
     let mut focus = Focus::default_focus();
-    focus.working_dir = crate::util::own_origin_cwd();
+    focus.working_dir = match session {
+        None => crate::util::own_origin_cwd(),
+        Some(id) => attend_presence::session::origin_path(id).unwrap_or_else(|| {
+            let why = format!("no record of session {id}; its tray is unknown");
+            if json {
+                crate::cmd::print_json(&json!({ "error": why }));
+            } else {
+                eprintln!("attend sensor {verb}: {why}");
+            }
+            std::process::exit(agent_settings::exit::REJECTED);
+        }),
+    };
     let cfg = Config::load(&focus.working_dir);
     (focus, cfg)
+}
+
+/// The session a poll or fire reads the store of and delivers to:
+/// `given`, else the session this shell runs in. Exit 2 for an id no
+/// signal can be addressed to.
+fn target(given: Option<&str>, verb: &str, json: bool) -> Option<String> {
+    match given {
+        Some(id) if !agent_identity::signal::is_tag_value(id) => {
+            let why = format!("{id:?} is not a session id a signal can be addressed to");
+            crate::cmd::refuse_usage(&format!("attend sensor {verb}: {why}"), &why, json)
+        }
+        Some(id) => Some(id.to_string()),
+        None => {
+            let ident = attend_presence::session::identity();
+            ident.session_resolved.then(|| ident.session_id.clone())
+        }
+    }
+}
+
+/// The writer to `session`, or exit 3 when a delivery has no session to go
+/// to. A dry run delivers nothing and needs none.
+fn writer(session: Option<&str>, project: &str, dry_run: bool, verb: &str, json: bool) -> Option<Writer> {
+    if dry_run {
+        return None;
+    }
+    let refuse = |why: String| -> ! {
+        if json {
+            crate::cmd::print_json(&json!({ "error": why }));
+        } else {
+            eprintln!("attend sensor {verb}: {why}");
+        }
+        std::process::exit(agent_settings::exit::REJECTED);
+    };
+    let Some(session) = session else {
+        refuse("no session to deliver to; name one with --session, run it from the session's shell, or add --dry-run".into())
+    };
+    Some(Writer::new(session, project).unwrap_or_else(|why| refuse(why)))
 }
 
 pub(crate) fn list(json: bool) {
@@ -130,6 +189,9 @@ struct Replay {
     result: Vec<(f64, String)>,
 }
 
+/// What a test fire marks its lines with.
+const TEST_MARK: &str = "[test] ";
+
 impl Sensor for Replay {
     fn name(&self) -> &str {
         self.of.name()
@@ -149,14 +211,21 @@ impl Sensor for Replay {
     fn decay_threshold(&self) -> u32 {
         self.of.decay_threshold()
     }
+    /// The lapse the sensor gave the line, marked or not.
+    fn lapse(&self, description: &str) -> Option<Lapse> {
+        self.of.lapse(description.strip_prefix(TEST_MARK).unwrap_or(description))
+    }
 }
 
 /// What passing `result` through the sensor's slot comes to.
 struct Outcome {
     lane: Lane,
-    /// The lines that go out, or none when the threshold holds them.
-    delivered: Option<Vec<String>>,
-    priority: &'static str,
+    /// The lines that go out, each with its lapse, or none when the
+    /// threshold holds them.
+    delivered: Option<Vec<(String, Option<Lapse>)>>,
+    /// The threshold let the lines through and the event lane's cut held
+    /// them, so they are logged and not written.
+    cut: bool,
     accumulated: f64,
     threshold: f64,
 }
@@ -167,13 +236,9 @@ fn run_through(of: Box<dyn Sensor>, lane: Lane, result: Vec<(f64, String)>, focu
     slot.poll(focus);
     let accumulated = slot.accumulator.magnitude;
     let ready = (slot.message_lane && accumulated > 0.0) || slot.ready_to_disclose();
-    // The priority `attend run` gives a batch of this magnitude.
-    let priority = match accumulated {
-        m if m >= 5.0 => "high",
-        m if m >= 3.0 => "medium",
-        _ => "low",
-    };
-    Outcome { lane, delivered: ready.then(|| slot.accumulator.drain_events()), priority, accumulated, threshold }
+    let cut = ready && crate::sensors::writer::below_cut(lane, accumulated);
+    let delivered = (ready && !cut).then(|| slot.accumulator.drain_events().into_iter().map(|l| (l.clone(), slot.accumulator.lapse_of(&l))).collect());
+    Outcome { lane, delivered, cut, accumulated, threshold }
 }
 
 /// Find `name`, or exit 2 naming the ones there are.
@@ -201,12 +266,10 @@ fn require_hosted(h: &Hosted, verb: &str, json: bool) {
     std::process::exit(agent_settings::exit::REJECTED);
 }
 
-/// The sensor `h`, keyed by this session so it reads the session's store,
+/// The sensor `h`, keyed by `session` so it reads the session's store,
 /// writing it only with `record`; or exit 3 saying why it cannot run.
-fn open(h: &Hosted, cfg: &Config, project: &str, record: bool, verb: &str) -> sensors::hosted::FileSensor {
-    let ident = attend_presence::session::identity();
-    let session = ident.session_resolved.then_some(ident.session_id.as_str());
-    sensors::file_sensor(h, &Ctx { cfg, groups: None, session }, project, record).unwrap_or_else(|why| {
+fn open(h: &Hosted, cfg: &Config, project: &str, session: Option<&str>, record: bool, verb: &str) -> sensors::hosted::FileSensor {
+    sensors::file_sensor(h, &Ctx { cfg, groups: None, session, host: false }, project, record).unwrap_or_else(|why| {
         eprintln!("attend sensor {verb}: {}: {why}", h.name());
         std::process::exit(agent_settings::exit::REJECTED);
     })
@@ -240,11 +303,13 @@ fn print_verdicts(h: &Hosted, s: &sensors::hosted::FileSensor) {
 }
 
 pub(crate) fn poll(a: &PollArgs) {
-    let (focus, cfg) = context();
-    let h = find(sensors::catalog(&cfg, &focus.working_dir), &a.name, a.json);
+    let session = target(a.session.as_deref(), "poll", a.json);
+    let (focus, cfg) = context_of(a.session.as_deref(), "poll", a.json);
+    let h = find(sensors::catalog_for(&cfg, &focus.working_dir, session.as_deref()), &a.name, a.json);
     require_hosted(&h, "poll", a.json);
+    let writer = writer(session.as_deref(), &focus.working_dir, a.dry_run, "poll", a.json);
     // A test poll compares against the session's store and writes nothing.
-    let mut sensor = open(&h, &cfg, &focus.working_dir, false, "poll");
+    let mut sensor = open(&h, &cfg, &focus.working_dir, session.as_deref(), false, "poll");
     let result = sensor.poll(&focus);
     let failure = sensor.take_failure();
     let triggers = verdicts_json(&sensor);
@@ -252,11 +317,12 @@ pub(crate) fn poll(a: &PollArgs) {
     if !a.json {
         print_verdicts(&h, &sensor);
     }
-    let out = run_through(Box::new(sensor), h.lane().unwrap_or(Lane::Event), result.clone(), &focus);
-    let delivered = deliver(&h, &out, a.dry_run);
+    let out = run_through(Box::new(sensor), sensors::host_lane(&h), result.clone(), &focus);
+    let (delivered, ids) = deliver(&h, &out, writer.as_ref());
     if a.json {
         crate::cmd::print_json(&json!({
             "sensor": h.name(),
+            "session": session,
             "state": h.state.label(),
             "failure": failure,
             "result": result.iter().map(|(m, d)| json!({ "magnitude": m, "description": d })).collect::<Vec<_>>(),
@@ -266,6 +332,8 @@ pub(crate) fn poll(a: &PollArgs) {
             "accumulated": out.accumulated,
             "threshold": out.threshold,
             "delivered": delivered,
+            "cut": out.cut,
+            "signals": ids,
             "dry_run": a.dry_run,
         }));
         return;
@@ -279,16 +347,17 @@ pub(crate) fn poll(a: &PollArgs) {
     for (m, d) in &result {
         println!("  {m:>4.1}  {d}");
     }
-    verdict(&h, &out, a.dry_run);
+    verdict(&h, &out, writer.as_ref(), ids.as_deref());
 }
 
 pub(crate) fn fire(a: &FireArgs) {
-    let (focus, cfg) = context();
+    let session = target(a.session.as_deref(), "fire", a.json);
+    let (focus, cfg) = context_of(a.session.as_deref(), "fire", a.json);
     let (name, trigger) = match a.target.split_once('/') {
         Some((n, t)) => (n, Some(t)),
         None => (a.target.as_str(), None),
     };
-    let h = find(sensors::catalog(&cfg, &focus.working_dir), name, a.json);
+    let h = find(sensors::catalog_for(&cfg, &focus.working_dir, session.as_deref()), name, a.json);
     if let (Some(t), Some(spec)) = (trigger, h.loaded.spec.as_ref()) {
         if !spec.triggers.iter().any(|x| x.name == t) {
             let names: Vec<&str> = spec.triggers.iter().map(|x| x.name.as_str()).collect();
@@ -302,14 +371,15 @@ pub(crate) fn fire(a: &FireArgs) {
     require_hosted(&h, "fire", a.json);
     let spec = h.loaded.spec.as_ref().expect("a hosted sensor loads");
     let refuse = |why: String| -> ! { crate::cmd::refuse_usage(&format!("attend sensor fire: {why}"), &why, a.json) };
-    if a.commit && !attend_presence::session::identity().session_resolved {
-        refuse("no session here, so --commit keeps nothing; run it from the session's shell".into());
+    if a.commit && session.is_none() {
+        refuse("no session here, so --commit keeps nothing; name one with --session or run it from the session's shell".into());
     }
     if let (Some(t), true) = (trigger, a.commit) {
         refuse(format!("--commit fires the whole sensor, since advancing {t} alone would leave the other triggers' memory behind; fire {name} --commit"));
     }
+    let writer = writer(session.as_deref(), &focus.working_dir, a.dry_run, "fire", a.json);
     // A test fire leaves the store as it was unless --commit keeps it.
-    let mut sensor = open(&h, &cfg, &focus.working_dir, a.commit, "fire");
+    let mut sensor = open(&h, &cfg, &focus.working_dir, session.as_deref(), a.commit, "fire");
     let input: Vec<(f64, String)> = if declares_triggers(&h) {
         let Some(src) = &a.input else { refuse(format!("{name} reads a JSON poll result; give one with --input FILE or --input -")) };
         let doc = read_text(src).unwrap_or_else(|why| refuse(why));
@@ -342,13 +412,14 @@ pub(crate) fn fire(a: &FireArgs) {
     if !a.json && declares_triggers(&h) {
         print_verdicts(&h, &sensor);
     }
-    let input: Vec<(f64, String)> = input.into_iter().map(|(m, d)| (m, format!("[test] {}", sensors::deliverable(&d)))).collect();
-    let out = run_through(Box::new(sensor), h.lane().unwrap_or(Lane::Event), input.clone(), &focus);
-    let delivered = deliver(&h, &out, a.dry_run);
+    let input: Vec<(f64, String)> = input.into_iter().map(|(m, d)| (m, format!("{TEST_MARK}{}", sensors::deliverable(&d)))).collect();
+    let out = run_through(Box::new(sensor), sensors::host_lane(&h), input.clone(), &focus);
+    let (delivered, ids) = deliver(&h, &out, writer.as_ref());
     let commit_note = (a.commit && !declares_triggers(&h)).then_some("this sensor keeps no trigger memory or declared state, so --commit changes nothing");
     if a.json {
         crate::cmd::print_json(&json!({
             "sensor": h.name(),
+            "session": session,
             "trigger": trigger,
             "test": true,
             "input": input.iter().map(|(m, d)| json!({ "magnitude": m, "description": d })).collect::<Vec<_>>(),
@@ -357,6 +428,8 @@ pub(crate) fn fire(a: &FireArgs) {
             "accumulated": out.accumulated,
             "threshold": out.threshold,
             "delivered": delivered,
+            "cut": out.cut,
+            "signals": ids,
             "dry_run": a.dry_run,
             "note": commit_note,
         }));
@@ -365,29 +438,41 @@ pub(crate) fn fire(a: &FireArgs) {
     if let Some(n) = commit_note {
         println!("{n}");
     }
-    verdict(&h, &out, a.dry_run);
+    verdict(&h, &out, writer.as_ref(), ids.as_deref());
 }
 
-/// Emit what the slot let through, as `attend run` does, unless `dry_run`.
-/// Returns the lines that went out, or would have.
-fn deliver(h: &Hosted, out: &Outcome, dry_run: bool) -> Option<Vec<String>> {
-    let lines = out.delivered.clone()?;
-    if !dry_run {
-        crate::emit::emit_batch(&[(h.name().to_string(), out.priority.to_string(), lines.clone())]);
-    }
-    Some(lines)
+/// Write what the slot let through through `writer`, one system signal a
+/// line; with no writer, a dry run, write nothing. Returns the lines that
+/// went out, or would have, and the id of each signal written. A line that
+/// could not be written is said on stderr and has no id.
+fn deliver(h: &Hosted, out: &Outcome, writer: Option<&Writer>) -> (Option<Vec<String>>, Option<Vec<String>>) {
+    let Some(lines) = &out.delivered else { return (None, None) };
+    let ids = writer.map(|w| {
+        lines
+            .iter()
+            .filter_map(|(line, lapse)| {
+                w.write(h.name(), out.lane, *lapse, line).map_err(|why| eprintln!("attend sensor: {}: not written: {why}", h.name())).ok()
+            })
+            .collect()
+    });
+    (Some(lines.iter().map(|(l, _)| l.clone()).collect()), ids)
 }
 
-fn verdict(h: &Hosted, out: &Outcome, dry_run: bool) {
+fn verdict(h: &Hosted, out: &Outcome, writer: Option<&Writer>, ids: Option<&[String]>) {
     let lane = format!("{} lane", out.lane.as_str());
-    match (&out.delivered, dry_run) {
-        (Some(_), true) => println!("{}: would deliver on the {lane} at priority {} (dry run)", h.name(), out.priority),
-        (Some(_), false) if out.priority == "low" => println!("{}: delivered on the {lane} at priority low, which attend logs and does not wake on", h.name()),
-        (Some(_), false) => println!("{}: delivered on the {lane} at priority {}", h.name(), out.priority),
-        (None, _) => println!("{}: held on the {lane}: {:.1} accumulated of a {:.1} threshold", h.name(), out.accumulated, out.threshold),
+    match (&out.delivered, writer, ids) {
+        (Some(_), Some(w), Some(ids)) => println!("{}: delivered on the {lane} to session {}: {}", h.name(), w.session(), ids.join(", ")),
+        (Some(_), _, _) => println!("{}: would deliver on the {lane} (dry run)", h.name()),
+        (None, _, _) if out.cut => println!(
+            "{}: {:.1} accumulated is under the {lane}'s cut of {:.1}, so attend logs it and writes no signal",
+            h.name(),
+            out.accumulated,
+            crate::sensors::writer::EVENT_CUT
+        ),
+        (None, _, _) => println!("{}: held on the {lane}: {:.1} accumulated of a {:.1} threshold", h.name(), out.accumulated, out.threshold),
     }
     if h.state == State::Off {
-        println!("{}: off, so attend run does not poll it", h.name());
+        println!("{}: off, so the sensor host does not poll it", h.name());
     }
 }
 
@@ -509,8 +594,8 @@ mod tests {
         let held = run_through(Box::new(Fixed(2.0)), Lane::Event, vec![(1.0, "x".into())], &focus);
         assert!(held.delivered.is_none() && held.accumulated == 1.0);
         let out = run_through(Box::new(Fixed(2.0)), Lane::Message, vec![(1.0, "x".into())], &focus);
-        assert_eq!(out.delivered, Some(vec!["x".to_string()]));
+        assert_eq!(out.delivered, Some(vec![("x".to_string(), None)]));
         let out = run_through(Box::new(Fixed(2.0)), Lane::Event, vec![(3.5, "y".into())], &focus);
-        assert_eq!((out.delivered.is_some(), out.priority), (true, "medium"));
+        assert!(out.delivered.is_some(), "a magnitude over the threshold goes out");
     }
 }

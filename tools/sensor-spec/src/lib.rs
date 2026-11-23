@@ -503,8 +503,9 @@ pub enum Memory {
     Store,
     /// In the host's process. It starts empty and takes no baseline, so the
     /// first poll is compared against nothing seen: `enters` fires on the
-    /// first poll whose result meets `where`. The trigger fires at most once
-    /// in the session, whatever it compares on. The host carries the memory
+    /// first poll whose result meets `where`. Its line is delivered at most
+    /// once in the session, whatever it compares on; a line the host drops
+    /// before it goes out is offered again. The host carries the memory
     /// across its own restarts within the session. An item trigger only:
     /// a state trigger refuses it, since it compares against the last state its
     /// store kept.

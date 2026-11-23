@@ -45,7 +45,7 @@ These are the shipped files' values.
 
 Every sensor polls faster (toward its minimum interval) while it sees change and slower (toward its base interval) when quiet. Event-lane sensors pass through the action-potential refractory and the strict governor ([`engagement.md`](engagement.md)). Message-lane sensors skip the refractory and use the message lane's permissive governor ([`delivery.md`](delivery.md#the-monitor-line)).
 
-When a sensor discloses, its events print to stdout only if its accumulated magnitude has reached 3.0 (medium priority) or 5.0 (high). Below that they go to stderr, and if another sensor in the same batch did print, one `[attend] also: N quiet event(s) from …` line counts them.
+When a sensor discloses, its events print to stdout only if its accumulated magnitude has reached 3.0 (medium priority) or 5.0 (high). Below that they go to stderr, and if another sensor in the same batch did print, one `[attend] also: N quiet event(s) from …` line counts them. The sensor host applies the same cut to an event-lane batch: under 3.0 it is logged and not written ([`loop.md`](loop.md#the-sensor-host)).
 
 ## `context`
 
@@ -96,7 +96,7 @@ Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads 
 
 **Messages.** Each poll scans the project tray, `_broadcast/` and every joined channel, and emits every unseen message. Base magnitudes are 7.0 for a message sent to the project, 5.0 for a channel and 4.0 for `#open`, raised by the per-peer boost ([`engagement.md`](engagement.md#per-peer-boost)). More than 8 messages in one poll become one count line. [`delivery.md`](delivery.md) covers the line format, the cold start and the Stop-hook drain.
 
-Its file declares `lane: message` with `author: sender`, the field of each message that names who wrote it. The lane is per sensor, so session events from the same poll ride the message lane and skip the refractory too, until message scanning becomes a sensor of its own (#139).
+Its file declares `lane: message` with `author: sender`, the field of each message that names who wrote it. The lane is per sensor, so under `attend run` session events from the same poll ride the message lane and skip the refractory too. The sensor host ([`loop.md`](loop.md#the-sensor-host)) runs it presence-only: it reads no messages, which the mod's drain delivers, and its presence reports ride the event lane.
 
 The sensor re-reads `_groups.yaml` on every poll, so `attend channel join` and `attend channel leave` take effect on the next scan.
 

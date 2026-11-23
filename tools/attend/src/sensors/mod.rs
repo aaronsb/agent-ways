@@ -23,6 +23,7 @@ pub mod eval;
 mod git;
 pub mod hosted;
 pub mod state;
+pub mod writer;
 
 pub use context::ContextSensor;
 pub use disclosure::DisclosureSensor;
@@ -146,9 +147,14 @@ impl Hosted {
 /// state. The last poll is this session's own, or with no session id the
 /// newest of any session in the project.
 pub fn catalog(cfg: &Config, project: &str) -> Vec<Hosted> {
-    let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
     let ident = attend_presence::session::identity();
-    let polls = hosted::last_polls(project, ident.session_resolved.then_some(ident.session_id.as_str()));
+    catalog_for(cfg, project, ident.session_resolved.then_some(ident.session_id.as_str()))
+}
+
+/// [`catalog`], with the last polls of `session`'s stores.
+pub fn catalog_for(cfg: &Config, project: &str, session: Option<&str>) -> Vec<Hosted> {
+    let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
+    let polls = hosted::last_polls(project, session);
     catalog_of(loaded, |name| polls.get(name).cloned())
 }
 
@@ -263,7 +269,20 @@ pub struct Ctx<'a> {
     pub groups: Option<&'a Groups>,
     /// The session its reports go to; none when the caller has no id.
     pub session: Option<&'a str>,
+    /// Built for the sensor host ([`register_host_sensors`]): the peers
+    /// sensor reports presence alone, since the mod's drain carries
+    /// messages.
+    pub host: bool,
 }
+
+/// The compiled sensors the sensor host does not run. The mod takes
+/// keepwarm's wake from `attend keepwarm check`, and its preamble covers
+/// what the disclosure sensor re-printed.
+///
+/// References:
+/// - ADR-416 items 4 and 5: keepwarm's wake is not a signal, and the
+///   disclosure sensor leaves the host.
+const NOT_HOSTED: &[&str] = &["keepwarm", "disclosure"];
 
 /// The sensor `h` configures, ready to poll, or why it cannot run here.
 pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<dyn Sensor>, String> {
@@ -307,6 +326,7 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
         #[cfg(feature = "sensor-peers")]
         "peers" => {
             let mut p = PeerSensor::new();
+            p.set_presence_only(ctx.host);
             // Group membership is re-read on every poll, so a focus group
             // joined or left mid-session counts without a restart (ADR-118).
             if let Some(groups) = ctx.groups {
@@ -331,19 +351,51 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
     s
 }
 
-/// The slots `attend run` polls, and their names. A sensor that does not
-/// run is logged once with its state. First it sweeps the store directory
-/// of stores past retention and files of an older format.
+/// The slots `attend run` polls, and their names, for the session found by
+/// process ancestry.
 pub fn register_sensors(cfg: &Config, focus: &Focus, _catchup: bool, groups: &Groups) -> (Vec<SensorSlot>, Vec<String>) {
+    let ident = attend_presence::session::identity();
+    let ctx = Ctx { cfg, groups: Some(groups), session: ident.session_resolved.then_some(ident.session_id.as_str()), host: false };
+    register(&ctx, focus)
+}
+
+/// The slots the sensor host of `session` polls, and their names: every
+/// sensor `attend run` would poll but keepwarm and disclosure, with the
+/// peers sensor reporting presence alone, on the event lane, since
+/// presence is no one's words.
+///
+/// References:
+/// - ADR-416 items 4 and 5: what the host runs, and the lane rule.
+pub fn register_host_sensors(cfg: &Config, focus: &Focus, session: &str) -> (Vec<SensorSlot>, Vec<String>) {
+    let ctx = Ctx { cfg, groups: None, session: Some(session), host: true };
+    register(&ctx, focus)
+}
+
+/// The lane the sensor host runs `h` on, and so the lane `attend sensor
+/// poll` and `fire` deliver it on: its file's, but the event lane for the
+/// peers sensor, which the host runs presence-only, since presence is no
+/// one's words.
+///
+/// References:
+/// - ADR-416 item 4: the lane rule.
+pub fn host_lane(h: &Hosted) -> Lane {
+    match h.crate_id() {
+        Some("peers") => Lane::Event,
+        _ => h.lane().unwrap_or(Lane::Event),
+    }
+}
+
+/// The slots `ctx` runs for `focus`, and their names. A sensor that does
+/// not run is logged once with its state. First it sweeps the store
+/// directory of stores past retention and files of an older format.
+fn register(ctx: &Ctx, focus: &Focus) -> (Vec<SensorSlot>, Vec<String>) {
     let mut slots = Vec::new();
     let mut names = Vec::new();
     let swept = hosted::sweep();
     if swept > 0 {
         crate::emit::log(&format!("removed {swept} sensor store(s) past retention or of an older format"));
     }
-    let ident = attend_presence::session::identity();
-    let ctx = Ctx { cfg, groups: Some(groups), session: ident.session_resolved.then_some(ident.session_id.as_str()) };
-    for h in catalog(cfg, &focus.working_dir) {
+    for h in catalog_for(ctx.cfg, &focus.working_dir, ctx.session) {
         for n in &h.notes {
             crate::emit::log(&format!("sensor {}: {n}", h.name()));
         }
@@ -353,9 +405,14 @@ pub fn register_sensors(cfg: &Config, focus: &Focus, _catchup: bool, groups: &Gr
             }
             continue;
         }
-        match build(&h, &ctx, &focus.working_dir, true) {
+        if ctx.host && h.crate_id().is_some_and(|id| NOT_HOSTED.contains(&id)) {
+            crate::emit::log(&format!("sensor {}: the sensor host does not run it", h.name()));
+            continue;
+        }
+        let lane = if ctx.host { host_lane(&h) } else { h.lane().unwrap_or(Lane::Event) };
+        match build(&h, ctx, &focus.working_dir, true) {
             Ok(sensor) => {
-                slots.push(slot(sensor, h.lane().unwrap_or(Lane::Event), h.crate_id()));
+                slots.push(slot(sensor, lane, h.crate_id()));
                 names.push(h.name().to_string());
             }
             Err(why) => crate::emit::log(&format!("sensor {}: not started: {why}", h.name())),
@@ -455,6 +512,17 @@ mod tests {
         assert_eq!(lane("chat"), Some(Lane::Message), "the peers crate's lane, under any name");
         let chat = all.iter().find(|h| h.name() == "chat").unwrap();
         assert_eq!(chat.crate_id(), Some("peers"));
+    }
+
+    /// The host, and so poll and fire, run the peers sensor on the event
+    /// lane whatever its file says, and every other sensor on its file's.
+    #[test]
+    fn the_host_runs_peers_on_the_event_lane_and_the_rest_on_their_file_s() {
+        let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), |_| None);
+        let lane = |n: &str| all.iter().find(|h| h.name() == n).map(host_lane);
+        assert_eq!(lane("chat"), Some(Lane::Event), "the peers crate, under any name and whatever its file says");
+        assert_eq!(lane("keepwarm"), Some(Lane::Message));
+        assert_eq!(lane("git"), Some(Lane::Event));
     }
 
     #[test]
