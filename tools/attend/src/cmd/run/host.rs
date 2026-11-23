@@ -94,9 +94,11 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     // The parent is read first, so a parent that leaves during startup is
     // still seen to leave.
     let parent = parent_id();
-    // A cue written to a closed pipe returns an error to handle, rather than
-    // ending the host before the tick that wrote it checkpoints. A child
-    // the host runs, and the host re-executed, get the default back.
+    // attend's main restores SIGPIPE's default (agent_fmt::
+    // exit_quietly_on_closed_pipe), under which a cue written to a closed
+    // pipe kills the host before the tick that wrote it checkpoints. The
+    // host ignores it again, so the write returns BrokenPipe to handle. A
+    // child the host runs, and the host re-executed, get the default back.
     #[cfg(unix)]
     // SAFETY: setting a signal disposition before any thread starts.
     unsafe {
