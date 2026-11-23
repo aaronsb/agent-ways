@@ -42,7 +42,7 @@
 //! - ADR-416 items 6 and 8: `memory: session` firing at most once per
 //!   session, and stores keyed by session and carried by a session's move.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -71,18 +71,6 @@ pub type Seen = BTreeMap<String, Value>;
 pub struct Memo {
     pub test: String,
     pub seen: Seen,
-}
-
-/// The memory of a sensor's triggers with `memory: session`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-struct SessionMemory {
-    /// What each trigger last saw, by trigger name.
-    #[serde(default)]
-    held: BTreeMap<String, Memo>,
-    /// The fingerprints of the trigger definitions that have fired. Each
-    /// fires at most once in the session, under whatever name it carries.
-    #[serde(default)]
-    spent: BTreeSet<String>,
 }
 
 /// Whose store a file is.
@@ -360,22 +348,6 @@ impl FileSensor {
         mem.insert(trigger.name.clone(), Memo { test, seen });
         out
     }
-
-    /// Mark the session trigger `trigger` spent, as the delivery of its line
-    /// does: it fires no more in this session.
-    #[cfg(test)]
-    pub(crate) fn spend(&mut self, trigger: &Trigger) {
-        self.spend_test(trigger.fingerprint());
-    }
-
-    fn spend_test(&mut self, test: String) {
-        if self.session.spent.insert(test) {
-            self.newly_spent = true;
-        }
-    }
-
-    /// The most undelivered session-trigger lines kept; the oldest go first.
-    const UNDELIVERED_MAX: usize = 64;
 
     /// What a trigger last saw, under its current definition.
     fn prior(&self, trigger: &Trigger) -> Option<Seen> {
@@ -677,11 +649,7 @@ impl Sensor for FileSensor {
 
     /// Spend each session trigger whose line `description` is.
     fn delivered(&mut self, description: &str) {
-        let (hit, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.undelivered).into_iter().partition(|(d, _)| d == description);
-        self.undelivered = rest;
-        for (_, test) in hit {
-            self.spend_test(test);
-        }
+        self.spend_lines_of(description);
     }
 
     fn take_spent(&mut self) -> bool {
@@ -880,6 +848,9 @@ fn write(path: &Path, rec: &Record) -> bool {
     }
     true
 }
+
+mod session;
+use session::SessionMemory;
 
 #[cfg(test)]
 mod tests;
