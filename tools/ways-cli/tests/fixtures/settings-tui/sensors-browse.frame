@@ -17,7 +17,7 @@ agent-tui frame 100x30
 |│     lane                      event                 ││                                           │|
 |│     requires                  [Bash(ps:*)]          ││                                           │|
 |│     watch                     (built-in)            ││                                           │|
-|│                                                     ││                                           │|
+|│ ▸ ways-update · setting       value                 ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -125,6 +125,9 @@ styles
  17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
+ 18   2-14  - - BOLD
+ 18  15-24  - - DIM
+ 18  32-36  - - DIM
  18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
