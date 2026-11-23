@@ -350,7 +350,8 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
             focus: &focus,
             heartbeat_id: &heartbeat_id,
             cfg: &cfg,
-            cache_gate: &mut cache_gate,
+            cache_gate: Some(&mut cache_gate),
+            sink: &mut tick::Monitor,
         };
         tick_iteration(&mut tick_state);
     }

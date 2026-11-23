@@ -10,7 +10,9 @@
 //! shell (sensor registration, instance registry, signal lock, etc).
 //!
 //! - `tick_iteration` — sensor poll, governor decision, periodic
-//!   checkpoint, instance-registry touch, cleanup sweep.
+//!   checkpoint, instance-registry touch, cleanup sweep. What the
+//!   governor lets through goes to a [`Sink`]: Monitor's stdout for
+//!   `attend run`, the signal store for the sensor host.
 //! - `build_engagement` — pure config → curve translation.
 //! - `maybe_self_reload` — checkpoint + `exec()` on binary mtime change.
 //! - `collect_snapshot` — sensor state → on-disk checkpoint shape.
@@ -56,7 +58,38 @@ pub(super) struct TickState<'a> {
     pub(super) focus: &'a Focus,
     pub(super) heartbeat_id: &'a str,
     pub(super) cfg: &'a config::Config,
-    pub(super) cache_gate: &'a mut CacheGate,
+    /// The cache gate on what goes out; none for the sensor host, whose
+    /// signals the mod's drain gates.
+    pub(super) cache_gate: Option<&'a mut CacheGate>,
+    /// Where disclosed lines go.
+    pub(super) sink: &'a mut dyn Sink,
+}
+
+/// One sensor's disclosed lines.
+pub(super) struct Disclosure {
+    pub(super) sensor: String,
+    pub(super) priority: &'static str,
+    pub(super) message_lane: bool,
+    /// Each line, with how long it stays deliverable when its sensor said.
+    pub(super) lines: Vec<(String, Option<sensor_trait::Lapse>)>,
+}
+
+/// Where the loop puts what the governor lets through.
+pub(super) trait Sink {
+    /// Deliver `batch`. Returns whether anything went out, which the
+    /// governor counts as a disclosure.
+    fn deliver(&mut self, batch: &[Disclosure]) -> bool;
+}
+
+/// `attend run`'s sink: Monitor lines on stdout.
+pub(super) struct Monitor;
+
+impl Sink for Monitor {
+    fn deliver(&mut self, batch: &[Disclosure]) -> bool {
+        let lines: Vec<(String, String, Vec<String>)> =
+            batch.iter().map(|d| (d.sensor.clone(), d.priority.to_string(), d.lines.iter().map(|(l, _)| l.clone()).collect())).collect();
+        emit::emit_batch(&lines)
+    }
 }
 
 /// The cache gate on what this run prints (ADR-406 item 2). A line on
@@ -164,20 +197,26 @@ pub(super) fn maybe_self_reload(
     session_id: &str,
     working_dir: &str,
 ) {
+    if binary_changed(self_exe, baseline_mtime, baseline_hash) {
+        reload(slots, state_store, session_id, working_dir, "binary changed", "binary updated");
+    }
+}
+
+/// Whether the running binary's bytes changed since startup. An identical
+/// rebuild, which moves the mtime and not the bytes, advances the baseline
+/// mtime and counts as no change.
+pub(super) fn binary_changed(self_exe: Option<&Path>, baseline_mtime: &mut Option<SystemTime>, baseline_hash: Option<u64>) -> bool {
     let Some(exe) = self_exe else {
-        return;
+        return false;
     };
     let Some(orig_mtime) = *baseline_mtime else {
-        return;
+        return false;
     };
-    let Ok(meta) = std::fs::metadata(exe) else {
-        return;
-    };
-    let Ok(current_mtime) = meta.modified() else {
-        return;
+    let Some(current_mtime) = std::fs::metadata(exe).ok().and_then(|m| m.modified().ok()) else {
+        return false;
     };
     if current_mtime == orig_mtime {
-        return;
+        return false;
     }
     // mtime moved — confirm the bytes actually changed before reloading.
     // A matching hash means an identical rebuild: skip the pointless
@@ -187,9 +226,9 @@ pub(super) fn maybe_self_reload(
     let current_hash = hash_file(exe);
     if current_hash.is_some() && current_hash == baseline_hash {
         *baseline_mtime = Some(current_mtime);
-        return;
+        return false;
     }
-    reload(slots, state_store, session_id, working_dir, "binary changed", "binary updated");
+    true
 }
 
 /// Checkpoint and re-exec `attend run` because `what` happened, once the
@@ -422,7 +461,11 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // once the cache is warm. Messages that would wake the session wait
     // unseen in the sensor itself.
     let gated = |i: &usize| !s.slots[*i].is_crate("keepwarm");
-    if (evt_ready.iter().any(gated) || msg_ready.iter().any(gated)) && s.cache_gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
+    let lapsed = match s.cache_gate.as_deref_mut() {
+        Some(gate) if evt_ready.iter().any(gated) || msg_ready.iter().any(gated) => gate.lapsed(s.heartbeat_id, &s.focus.working_dir),
+        _ => false,
+    };
+    if lapsed {
         for &i in &evt_ready {
             emit::log(&format!("{}: dropped {} event(s), the prompt cache has lapsed", s.slots[i].name(), s.slots[i].accumulator.event_count));
             s.slots[i].accumulator.reset();
@@ -430,10 +473,10 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         evt_ready.clear();
         msg_ready.retain(|i| s.slots[*i].is_crate("keepwarm"));
     }
-    try_disclose(s.slots, &evt_ready, s.governor, true);
+    try_disclose(s.slots, &evt_ready, s.governor, true, s.sink);
     // Message lane: do not record engagement, so it never builds the
     // action-potential refractory that would later hold conversation.
-    try_disclose(s.slots, &msg_ready, s.msg_governor, false);
+    try_disclose(s.slots, &msg_ready, s.msg_governor, false, s.sink);
 
     // Periodic checkpoint
     if s.last_checkpoint.elapsed() >= CHECKPOINT_INTERVAL {
@@ -489,6 +532,7 @@ fn try_disclose(
     ready: &[usize],
     governor: &mut DisclosureGovernor,
     record_engagement: bool,
+    sink: &mut dyn Sink,
 ) {
     if ready.is_empty() {
         return;
@@ -513,11 +557,11 @@ fn try_disclose(
         } else {
             "low"
         };
-        batch.push((
-            slot.name().to_string(),
-            priority.to_string(),
-            slot.accumulator.drain_events(),
-        ));
+        let lines = slot.accumulator.drain_events().into_iter().map(|l| {
+            let lapse = slot.accumulator.lapse_of(&l);
+            (l, lapse)
+        });
+        batch.push(Disclosure { sensor: slot.name().to_string(), priority, message_lane: slot.message_lane, lines: lines.collect() });
     }
 
     emit::log(&format!(
@@ -525,8 +569,7 @@ fn try_disclose(
         batch.len(),
         governor.cooldown().as_secs_f64(),
     ));
-    let emitted = emit::emit_batch(&batch);
-    if emitted {
+    if sink.deliver(&batch) {
         governor.record_disclosure();
         // Record engagement only for the event lane (refractory is its
         // noise-control). The message lane skips it so conversation never
