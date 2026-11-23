@@ -289,26 +289,129 @@ pub fn same_dir(a: &str, b: &str) -> bool {
     a == b || canonical_dir(a) == canonical_dir(b)
 }
 
-/// Whether a sensor command started `pid`: an attend sensor host is among
-/// its ancestors. No legitimate caller has a host above it, since the
+/// Why a process is taken to have been started for a sensor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SensorStart {
+    /// An attend sensor host is among its ancestors.
+    Host,
+    /// Its environment carries the sensor marker `value`, which names the
+    /// live attend `pid`.
+    Marker { pid: u32, value: String },
+}
+
+/// Whether a sensor command started `pid`, and how attend knows: an
+/// attend sensor host is among its ancestors, or, for this process, its
+/// environment carries the sensor marker of a live attend
+/// ([`live_sensor_marker`]). No legitimate caller has either, since the
 /// session's own processes sit beside a host, not under one. Such a
-/// process does not act as the session. For this process the answer is
-/// read once and kept, as no new ancestor can appear.
+/// process does not act as the session.
+///
+/// For this process the ancestry is read once and kept, as no new
+/// ancestor can appear. The marker is read on every call, so a
+/// long-running process stops refusing once the attend that set its
+/// marker exits.
+///
+/// The two checks cover each other. A command that detaches, as `( … & )`
+/// or `setsid -f` does, leaves the host's ancestry and keeps the marker;
+/// a command that clears its environment and stays attached keeps the
+/// ancestry. Neither covers a command that asks a process already running
+/// outside the host to start attend for it: a service manager
+/// (`systemd-run --user`, `launchctl`), a terminal multiplexer's server
+/// that was already up (`tmux new-window`), `at` or cron, `ssh`, or
+/// `sudo`, which resets the environment. Nor do they cover a command that
+/// unsets the marker and detaches. The guard prevents accidents, and
+/// trusting the sensor file is the control against intent.
 ///
 /// A wrapper that runs `pid` with its arguments and stays its parent, as
 /// `timeout 75 attend sensor host …` does, names a host in its arguments
 /// without being one, and is not counted ([`launches_argv`]). `env`,
 /// `nice`, `nohup` and `stdbuf` exec in place and leave no such parent.
-pub fn started_by_sensor_command(pid: u32) -> bool {
+pub fn sensor_start(pid: u32) -> Option<SensorStart> {
     static OWN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let check = || {
+    let ancestry = || {
         let own = crate::process::argv(pid);
         host_above(pid, crate::process::parent_pid, |p| is_sensor_host(p) && !launches(p, own.as_deref()))
     };
     match pid == std::process::id() {
-        true => *OWN.get_or_init(check),
-        false => check(),
+        true if *OWN.get_or_init(ancestry) => Some(SensorStart::Host),
+        true => live_sensor_marker(),
+        false => ancestry().then_some(SensorStart::Host),
     }
+}
+
+/// Whether a sensor command started `pid` ([`sensor_start`]).
+pub fn started_by_sensor_command(pid: u32) -> bool {
+    sensor_start(pid).is_some()
+}
+
+/// The sensor marker: the variable attend sets in the environment of the
+/// processes it starts for a sensor, naming itself ([`marker_value`]).
+pub const SENSOR_HOST_VAR: &str = "ATTEND_SENSOR_HOST";
+
+/// The marker naming `pid`: `<pid>:<start time>`, the start time as
+/// [`crate::process::start_stamp`] reads it, so a later process that takes
+/// the same pid does not match. Just `<pid>` where the start time cannot
+/// be read.
+pub fn marker_value(pid: u32) -> String {
+    match crate::process::start_stamp(pid) {
+        Some(start) => format!("{pid}:{start}"),
+        None => pid.to_string(),
+    }
+}
+
+/// Set the sensor marker on `cmd`, naming this process. attend marks every
+/// process that runs a command a sensor file or a repository can choose: a
+/// `command` sensor's child, an `mcp` sensor's server, and the `git` the
+/// git sensor runs, which a repository's configuration, such as
+/// `core.fsmonitor`, can make run other programs. The `ways` the context
+/// and disclosure sensors run is marked too, for uniformity with the git
+/// sensor beside them, though `ways context` runs nothing a repository
+/// chooses. The processes sensor's `ps` and keepwarm's `ways` are fixed
+/// programs and are not marked. Call it after the environment is cleared or
+/// filtered and after the sensor file's own variables are added, so
+/// neither removes or replaces it. A `tokio::process::Command` passes its
+/// `as_std_mut()`.
+pub fn mark_sensor_child(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    cmd.env(SENSOR_HOST_VAR, marker_value(std::process::id()))
+}
+
+/// The marker in this process's environment, when it names a live attend
+/// ([`marker_host`]).
+pub fn live_sensor_marker() -> Option<SensorStart> {
+    let value = std::env::var_os(SENSOR_HOST_VAR)?;
+    let pid = marker_host(&value, std::process::id(), runs_attend, crate::process::start_stamp)?;
+    Some(SensorStart::Marker { pid, value: value.to_string_lossy().into_owned() })
+}
+
+/// The pid and start time a marker holds: `<pid>:<start>`, or `<pid>`
+/// alone. `None` for any other text.
+pub fn parse_marker(value: &str) -> Option<(u32, Option<u64>)> {
+    match value.split_once(':') {
+        Some((pid, start)) => Some((pid.parse().ok()?, Some(start.parse().ok()?))),
+        None => Some((value.parse().ok()?, None)),
+    }
+}
+
+/// The live attend the marker `value` names: a pid other than 1 and other
+/// than `own` that `runs_attend` says runs attend and whose start time,
+/// read by `start_of`, is the one the marker holds, when it holds one.
+/// Any other marker is stale and names nothing: one naming a process that
+/// has exited, a pid since taken by another process, attend included, or
+/// a value that is not a marker. A marker that leaks, as into a daemon a
+/// sensor command starts and the shells that daemon starts, therefore
+/// refuses only while the attend that set it runs.
+pub fn marker_host(value: &std::ffi::OsStr, own: u32, runs_attend: impl Fn(u32) -> bool, start_of: impl Fn(u32) -> Option<u64>) -> Option<u32> {
+    let (pid, start) = parse_marker(value.to_str()?)?;
+    let same_process = start.is_none() || start_of(pid) == start;
+    (pid > 1 && pid != own && runs_attend(pid) && same_process).then_some(pid)
+}
+
+/// Whether `pid` runs attend: its executable file is named `attend`, or
+/// its command line starts a sensor host ([`is_sensor_host`]), as a host
+/// run through an interpreter has it. A process that has exited runs
+/// nothing.
+fn runs_attend(pid: u32) -> bool {
+    crate::process::exe_name(pid).is_some_and(|n| is_attend(&n)) || is_sensor_host(pid)
 }
 
 /// Whether `pid` runs an attend sensor host: its command line starts one
@@ -570,6 +673,61 @@ mod tests {
         assert!(!launcher(None, Some(&w), Some(&own)), "an executable that cannot be named counts as attend");
         assert!(!launcher(None, Some(&own), Some(&own)), "a host whose executable cannot be named stays a host");
         assert!(!launcher(Some("attend"), Some(&w), Some(&own)), "attend under another argv[0] is no wrapper");
+    }
+
+    #[test]
+    fn a_marker_holds_a_pid_and_maybe_a_start_time() {
+        assert_eq!(parse_marker("4242:8828"), Some((4242, Some(8828))));
+        assert_eq!(parse_marker("4242"), Some((4242, None)));
+        for bad in ["", "host", "4242:", ":8828", "4242:x", "-1:5", "4242:8828:1"] {
+            assert_eq!(parse_marker(bad), None, "{bad:?}");
+        }
+    }
+
+    /// A marker names a live attend while the pid it holds runs attend,
+    /// that pid is not this process, and its start time is the one the
+    /// marker holds. A pid that has exited, runs something else, or was
+    /// taken by a later attend with another start time is stale, as are
+    /// pid 1 and a value that is not a marker. A marker with no start time
+    /// is checked by its pid alone.
+    #[test]
+    fn a_marker_names_only_the_live_attend_it_was_set_by() {
+        let attend = |p: u32| p == 4242;
+        let started = |p: u32| (p == 4242).then_some(8828);
+        let host = |v: &str, own: u32| marker_host(std::ffi::OsStr::new(v), own, attend, started);
+        assert_eq!(host("4242:8828", 100), Some(4242), "the live attend that set it");
+        assert_eq!(host("4242", 100), Some(4242), "a marker with no start time");
+        assert_eq!(host("4242:9000", 100), None, "the pid now runs a later attend");
+        assert_eq!(host("4243:8828", 100), None, "a pid that runs no attend, or none at all");
+        assert_eq!(host("4242:8828", 4242), None, "a marker naming this process");
+        assert_eq!(marker_host(std::ffi::OsStr::new("1"), 100, |_| true, |_| None), None, "pid 1");
+        assert_eq!(host("not-a-pid", 100), None);
+    }
+
+    /// A marked command carries the marker naming this process, start
+    /// time included where it can be read, over a value the caller set
+    /// before.
+    #[test]
+    fn a_marked_command_names_this_process() {
+        let mut cmd = std::process::Command::new("true");
+        cmd.env(SENSOR_HOST_VAR, "0");
+        mark_sensor_child(&mut cmd);
+        let own = std::process::id();
+        let set: Vec<_> = cmd.get_envs().filter(|(k, _)| *k == SENSOR_HOST_VAR).map(|(_, v)| v.map(|v| v.to_os_string())).collect();
+        assert_eq!(set, [Some(marker_value(own).into())]);
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        assert_eq!(parse_marker(&marker_value(own)), Some((own, crate::process::start_stamp(own))));
+    }
+
+    /// This test process runs no attend, so its own pid in a marker is
+    /// stale; a child that has exited and been reaped names no process.
+    #[test]
+    fn a_real_pid_that_runs_no_attend_is_stale() {
+        assert!(!runs_attend(std::process::id()), "the test binary is not attend");
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let gone = child.id();
+        child.wait().unwrap();
+        assert!(!runs_attend(gone), "an exited pid");
     }
 
     #[test]

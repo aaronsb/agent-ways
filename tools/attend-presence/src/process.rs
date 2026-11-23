@@ -34,6 +34,38 @@ fn parse_stat_ppid(stat: &str) -> Option<u32> {
     rest.split_whitespace().nth(1)?.parse::<u32>().ok().filter(|&p| p > 0)
 }
 
+/// When `pid` started, as a number that stays the same for the process's
+/// life and differs for a later process given the same pid, read without
+/// starting a process: field 22 of `/proc/<pid>/stat` on Linux (clock
+/// ticks since boot), and the start time in microseconds from
+/// `proc_pidinfo` on macOS. `None` when the process is gone, `/proc` is
+/// not mounted, or the platform has no reader. [`start_time`] is the
+/// string form a process key holds, read the same way on Linux.
+pub fn start_stamp(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        parse_stat_start(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        bsd_info(pid).map(|i| i.pbi_start_tvsec * 1_000_000 + i.pbi_start_tvusec)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// The twenty-second field of `/proc/<pid>/stat`, the start time in clock
+/// ticks since boot, counted from the last `)` as [`parse_stat_ppid`]
+/// counts.
+#[cfg(any(target_os = "linux", test))]
+fn parse_stat_start(stat: &str) -> Option<u64> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    rest.split_whitespace().nth(19)?.parse::<u64>().ok()
+}
+
 #[cfg(not(windows))]
 fn parent_pid_by_command(pid: u32) -> Option<u32> {
     #[cfg(target_os = "macos")]
@@ -303,11 +335,7 @@ pub fn is_running(pid: u32) -> bool {
 pub fn start_time(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
     if proc_mounted() {
-        // Field 22 (starttime, in clock ticks since boot), counted from
-        // the last `)` like the parent pid.
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        let rest = &stat[stat.rfind(')')? + 1..];
-        return rest.split_whitespace().nth(19).map(str::to_string);
+        return start_stamp(pid).map(|t| t.to_string());
     }
     start_time_by_command(pid)
 }
@@ -457,6 +485,30 @@ mod tests {
         assert_eq!(parse_stat_ppid("42 (a) b) S 7 42 42 0"), Some(7));
         assert_eq!(parse_stat_ppid("1 (init) S 0 1 1"), None);
         assert_eq!(parse_stat_ppid("garbage"), None);
+    }
+
+    /// The start time is the twentieth field after the command name, here
+    /// 8828, whatever the name holds.
+    #[test]
+    fn stat_start_time_survives_a_command_name_with_parens_and_spaces() {
+        let stat = "42 (a) b) S 7 42 42 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 8828 1000 50";
+        assert_eq!(parse_stat_start(stat), Some(8828));
+        assert_eq!(parse_stat_start("42 (x) S 7 42"), None, "too few fields");
+        assert_eq!(parse_stat_start("garbage"), None);
+    }
+
+    /// A live process has a start time that holds across reads; one that
+    /// has exited has none.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_live_process_keeps_its_start_stamp() {
+        let own = std::process::id();
+        assert!(start_stamp(own).is_some());
+        assert_eq!(start_stamp(own), start_stamp(own));
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let gone = child.id();
+        child.wait().unwrap();
+        assert_eq!(start_stamp(gone), None, "a reaped child");
     }
 
     #[cfg(unix)]
