@@ -132,6 +132,20 @@ export function configArgv(project: string): string[] {
   return [WAYS, 'settings', 'list', 'mods.attend', '--json', '--effective', '--project', project]
 }
 
+/** The session's sensor host: `attend sensor host
+ *  --session <id> --cwd <dir>`, with `--moved-from` the id a /clear ended,
+ *  whose sensor stores move to `session`, and `--parent` Claude Code's pid,
+ *  which the host watches so that it exits once Claude Code is gone, even
+ *  when it went before the host started. argv[0] is attend itself: attend
+ *  refuses the session's verbs to anything a host runs, and the host is
+ *  spawned directly, never through a wrapper. */
+export function hostArgv(h: HostSpec, cwd: string, parent?: string): string[] {
+  const argv = [ATTEND, 'sensor', 'host', '--session', h.session, '--cwd', cwd]
+  if (h.movedFrom !== undefined && h.movedFrom !== '' && h.movedFrom !== h.session) argv.push('--moved-from', h.movedFrom)
+  if (parent !== undefined) argv.push('--parent', parent)
+  return argv
+}
+
 // ── the module's state ─────────────────────────────────────────────────
 
 /** What the module keeps between dispatches. A reload starts it afresh, so
@@ -197,8 +211,92 @@ export type Mod = {
    *  prompt as context. The module's copy serves a /clear, which empties
    *  $.state; the copy in $.state (`heldNote`) serves a reload. */
   heldNote: string | undefined
+  /** The sensor host this module spawned, while it runs. */
+  host: HostChild | undefined
+  /** The host the session should have: set on activation and when a
+   *  /clear or a /resume settles; undefined while the session is dormant. */
+  hostFor: HostSpec | undefined
+  /** attend's drain said the session is not listening (`attend listen off`
+   *  elsewhere): the host is ended until a drain says it listens again. */
+  isListeningOff: boolean
+  /** When each respawn after an exit of the host's own ran, within
+   *  HOST_WINDOW_MS. */
+  hostRespawns: number[]
+  /** The host exited past the respawn cap, or attend refused it: no host
+   *  until the module reloads. */
+  isHostStopped: boolean
+  /** A respawn waits out HOST_RESPAWN_MS: no poll starts one sooner. */
+  isHostWaiting: boolean
+  /** Starts a host on session.start's `$`, whose spawn outlives the hook
+   *  that asks for it. */
+  spawnHost: ((h: HostSpec) => void) | undefined
+  /** A host's cue came while a tick ran: one more forced tick follows. */
+  isCueWaiting: boolean
   /** The keepalive policy's state (ADR-414). */
   ka: Keepalive
+}
+
+/** Which host a session runs: its id, and the id a /clear ended, whose
+ *  sensor stores the host moves to it. */
+export type HostSpec = { session: string; movedFrom: string | undefined }
+
+/** A running host: what it was spawned for, and how to end it. `isEnding`
+ *  is set once the module ends it, so its end is not taken for an exit. */
+export type HostChild = HostSpec & { isEnding: boolean; stop: () => void }
+
+// ── the sensor host ──────────────────────────────────────────────────────
+//
+// References:
+// - ADR-416 item 2: one host per listening session, its respawn cap, and
+//   the stdout line that cues a poll.
+
+/** A host that exits on its own is spawned again after HOST_RESPAWN_MS, at
+ *  most HOST_RESPAWNS times in HOST_WINDOW_MS; the next exit stops it. */
+export const HOST_RESPAWNS = 3
+export const HOST_WINDOW_MS = 10 * 60_000
+export const HOST_RESPAWN_MS = 5_000
+
+/** After an exit at `nowMs`: the respawns still inside the window, this one
+ *  added when the cap allows it, and whether to respawn. */
+export function respawnAfterExit(respawns: readonly number[], nowMs: number): { respawns: number[]; respawn: boolean } {
+  const kept = respawns.filter(t => nowMs - t < HOST_WINDOW_MS)
+  if (kept.length >= HOST_RESPAWNS) return { respawns: kept, respawn: false }
+  return { respawns: [...kept, nowMs], respawn: true }
+}
+
+/** How a host ended: `$.process.spawn`'s `{ code, signal }`, a `{ deny }`
+ *  where a policy refused the spawn, or why it could not start. */
+export type HostEnd = { code?: number | null; signal?: string | null; deny?: unknown } | undefined
+
+/** Whether the end says another spawn gets the same answer: attend's usage
+ *  code 2 (an attend without `sensor host`, an argument it refuses) or a
+ *  refused spawn. */
+export function isHostRefused(end: HostEnd): boolean {
+  return end !== undefined && (end.deny !== undefined || end.code === 2)
+}
+
+/** The end in a few words, for the log. */
+export function hostEndText(end: HostEnd, failed?: string): string {
+  if (failed !== undefined) return `could not start: ${oneLine(failed)}`
+  if (end?.deny !== undefined) return `refused: ${oneLine(String(end.deny))}`
+  if (typeof end?.signal === 'string') return end.signal
+  return `exit ${end?.code ?? '?'}`
+}
+
+/** The host's stdout read so far: `held` is a line not yet ended. Each
+ *  complete line is one cue, a signal the host wrote; the rest is held. A
+ *  held part past 4096 characters keeps its end. */
+export function cuesIn(held: string, text: string): { held: string; cues: number } {
+  const lines = (held + text).split('\n')
+  const rest = lines.pop() ?? ''
+  return { held: rest.slice(-4096), cues: lines.filter(l => l.trim() !== '').length }
+}
+
+/** Claude Code's pid from the command-hook environment (CLAUDE_PID), or
+ *  undefined where it is absent or not a pid. */
+export function claudePid(env: Readonly<Record<string, string>> | undefined): string | undefined {
+  const pid = env?.CLAUDE_PID
+  return pid !== undefined && /^[1-9][0-9]*$/.test(pid) ? pid : undefined
 }
 
 export type Keepalive = {
@@ -804,8 +902,8 @@ export function rowRefused(k: KeepaliveRow | null): KeepaliveRow | null {
   return k && { ...k, isRefused: true }
 }
 
-/** The row's text: an active session's peers, mail, channels and keepalive
- *  segment; a dormant session's keepalive segment alone, from its first
+/** The row's text: an active session's peers, mail, channels, a sensor host
+ *  that stopped, and the keepalive segment; a dormant session's keepalive segment alone, from its first
  *  keepalive until the operator's next prompt; otherwise none. */
 export function rowText(s: AttendStatus, nowMs: number): string | undefined {
   const keepalive = s.keepalive ? keepaliveSegment(s.keepalive, nowMs) : undefined
@@ -814,7 +912,8 @@ export function rowText(s: AttendStatus, nowMs: number): string | undefined {
   const mail = s.cacheLapsed && s.unread > 0 ? `${s.unread} waiting · cold` : `${s.unread} unread`
   const state = s.listening === false ? '○ attend not listening' : `● ${s.peers} peers ✉ ${mail}`
   const channels = s.channels.length > 0 ? ` ${s.channels.join(' ')}` : ''
-  return `${state}${channels}${keepalive ? ` ${keepalive}` : ''}`
+  const sensors = s.hostStopped ? ' · sensors stopped' : ''
+  return `${state}${channels}${sensors}${keepalive ? ` ${keepalive}` : ''}`
 }
 
 // ── parsing ──────────────────────────────────────────────────────────────

@@ -73,6 +73,9 @@ export type AttendStatus = {
   /** A /clear or a /resume the mod is still following, kept so a reloaded
    *  module takes the watch up; null when none is. */
   move: MoveRecord | null
+  /** The session's sensor host exited past its respawn cap, or attend
+   *  refused it: the row says so, and messages still arrive. */
+  hostStopped: boolean
 }
 
 declare module 'claude-code' {

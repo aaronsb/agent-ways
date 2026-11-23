@@ -32,6 +32,12 @@ import {
   rowText,
   serialize,
   wrapPlan,
+  claudePid,
+  cuesIn,
+  hostArgv,
+  hostEndText,
+  isHostRefused,
+  respawnAfterExit,
   HEADER,
   PREAMBLE,
   SILENCE_FIRST,
@@ -159,6 +165,21 @@ type World = {
   steps?: (string | { answer: string; stop: string })[]
   /** Holds each `keepwarm wrapped` report until it settles. */
   holdWrapped?: Promise<void>
+  /** An attend whose `sensor host` exits 2 at once, as one without the
+   *  verb does. */
+  hostRefused?: boolean
+}
+
+/** One `attend sensor host` the mod spawned, as the fake beneath runs it:
+ *  its argv, `say` to write to its stdout (or stderr), `exit` to end it on
+ *  its own. `killed` is set once the mod ended it, `ended` once it is gone
+ *  either way. */
+type Spawned = {
+  argv: string[]
+  ended: boolean
+  killed: boolean
+  say: (text: string, stream?: 'stdout' | 'stderr') => void
+  exit: (code: number | null, signal?: string | null) => void
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -258,6 +279,52 @@ function host(on: On, world: World) {
     const [answer, stopReason] = typeof step === 'string' ? [step, 'end_turn'] : [step.answer, step.stop]
     return { turnId: e.turnId, index: e.index, answer, toolUses: [], stopReason, usage: null } as never
   })
+  // Claude Code's command-hook environment, CLAUDE_PID among it.
+  on('process.hookEnv', () => ({ value: { CLAUDECODE: '1', CLAUDE_PID: '4242' } }) as never)
+  // The sensor host: runs until the mod ends its stream (next.signal
+  // aborts) or the test ends it, writing what the test has it say.
+  const spawns: Spawned[] = []
+  on('process.spawn', async function* ($, e, next) {
+    const queue: { stream: 'stdout' | 'stderr'; text: string }[] = []
+    let wake = () => {}
+    let result: { code: number | null; signal: string | null } | undefined
+    const sp: Spawned = {
+      argv: [...e.argv],
+      ended: false,
+      killed: false,
+      say: (text, stream = 'stdout') => {
+        queue.push({ stream, text })
+        wake()
+      },
+      exit: (code, signal = null) => {
+        result = { code, signal }
+        wake()
+      },
+    }
+    spawns.push(sp)
+    if (world.hostRefused) {
+      sp.ended = true
+      return { value: { code: 2, signal: null } } as never
+    }
+    const onAbort = () => {
+      sp.killed = true
+      wake()
+    }
+    next.signal.addEventListener('abort', onAbort)
+    try {
+      for (;;) {
+        while (queue.length > 0) yield queue.shift()!
+        // A call on $ answers { value }: how the child ended.
+        if (result) return { value: result } as never
+        if (sp.killed) return { value: { code: null, signal: 'SIGTERM' } } as never
+        await new Promise<void>(r => (wake = r))
+      }
+    } finally {
+      next.signal.removeEventListener('abort', onAbort)
+      if (!result) sp.killed = true
+      sp.ended = true
+    }
+  })
   on('session.usage', () => {
     if (world.autocompact === undefined) throw new Error('usage unavailable')
     const skills = world.skills === undefined ? {} : { skills: { totalSkills: world.skills.length, includedSkills: world.skills.length, tokens: 0, skillFrontmatter: world.skills.map(k => ({ source: 'userSettings', tokens: 1, ...k })) } }
@@ -328,7 +395,8 @@ function host(on: On, world: World) {
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
   const status = () => state.value as Partial<AttendStatus> | undefined
   const reads = () => idReads
-  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts, commands, reads }
+  const live = () => spawns.filter(sp => !sp.ended)
+  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts, commands, reads, spawns, live }
 }
 
 /** What `attend keepwarm check --policy --json` prints. */
@@ -898,7 +966,9 @@ describe('active', () => {
   // beat are what touch its heartbeat, and attend-chat reads a heartbeat
   // older than 90 s as a session that is gone (the mod-session liveness
   // defect of 2026-10-13).
-  test('the heartbeat stays fresh through a turn longer than the grace and a slow poll longer than it', async ($, on) => {
+  // Hours of the mock clock with a sensor host's stream open: the kit
+  // settles each step more slowly then.
+  test('the heartbeat stays fresh through a turn longer than the grace and a slow poll longer than it', { timeoutMs: 30_000 }, async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', slow_poll_seconds: 300 } })
     await $.session.start(INTERACTIVE)
@@ -2315,7 +2385,9 @@ describe('keepalive policy', () => {
     expect(h.submitted).toEqual([])
   })
 
-  test('a -p run gets no policy, whatever headless_poll says', async ($, on) => {
+  // Hours of the mock clock with a sensor host's stream open: the kit
+  // settles each step more slowly then.
+  test('a -p run gets no policy, whatever headless_poll says', { timeoutMs: 30_000 }, async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', headless_poll: true }, autocompact: false, policy: [keepalive(1)] })
     await $.session.start(HEADLESS)
@@ -2324,7 +2396,9 @@ describe('keepalive policy', () => {
     expect(h.submitted).toEqual([])
   })
 
-  test('keepwarm off runs no policy check, listening or dormant', async ($, on) => {
+  // Hours of the mock clock with a sensor host's stream open: the kit
+  // settles each step more slowly then.
+  test('keepwarm off runs no policy check, listening or dormant', { timeoutMs: 30_000 }, async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, autocompact: false, policy: [keepalive(1)] })
     await $.session.start(INTERACTIVE)
@@ -2641,12 +2715,16 @@ describe('keepalive policy: the pure pieces', () => {
 
   test('the row: the segment alone while dormant and shown, beside the peers while active', () => {
     const k: KeepaliveRow = { state: 'running', count: 2, max: 8, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true }
-    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null }
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null, hostStopped: false }
     expect(rowText({ ...base, keepalive: k }, 0)).toBe('⟳ 2/8 · next 41m · wrap ~21:40')
     expect(rowText({ ...base, keepalive: rowAfterPrompt(k) }, 0)).toBeUndefined()
     expect(rowText({ ...base, keepalive: null }, 0)).toBeUndefined()
     expect(rowText({ ...base, mode: 'active', keepalive: k }, 0)).toBe('● 3 peers ✉ 1 unread #room ⟳ 2/8 · next 41m · wrap ~21:40')
     expect(rowText({ ...base, mode: 'active', keepalive: null }, 0)).toBe('● 3 peers ✉ 1 unread #room')
+    // A sensor host past its respawns, ahead of the keepalive segment; the
+    // messages go on.
+    expect(rowText({ ...base, mode: 'active', keepalive: k, hostStopped: true }, 0)).toBe('● 3 peers ✉ 1 unread #room · sensors stopped ⟳ 2/8 · next 41m · wrap ~21:40')
+    expect(rowText({ ...base, hostStopped: true }, 0)).toBeUndefined()
     expect(rowAfterTurnEnd(k, 3_000_000)?.nextAt).toBe(3000)
     expect(rowAfterTurnEnd({ ...k, state: 'wrapped' }, 3_000_000)?.nextAt).toBe(41 * 60)
   })
@@ -2700,7 +2778,7 @@ describe('keepalive policy: the pure pieces', () => {
   })
 
   test('the row says why the policy is idle: under the 50k floor, the 5m tier, no request yet', () => {
-    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null }
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null, hostStopped: false }
     const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true })
     expect(rowText({ ...base, keepalive: idle({ idle: 'under 50k' }) }, 0)).toBe('⟳ 0/1 · idle: under 50k')
     expect(rowText({ ...base, keepalive: idle({ idle: '5m tier' }) }, 0)).toBe('⟳ 0/1 · idle: 5m tier')
@@ -2709,6 +2787,207 @@ describe('keepalive policy: the pure pieces', () => {
     expect(rowText({ ...base, keepalive: idle({}) }, 0)).toBe('⟳ 0/1')
     expect(rowText({ ...base, keepalive: idle({ next_at: 41 * 60 }) }, 0)).toBe('⟳ 0/1 · next 41m')
     expect(rowText({ ...base, keepalive: idle({ idle: 7 }) }, 0)).toBe('⟳ 0/1')
+  })
+})
+
+/** The host the mod spawns for `session` in INTERACTIVE's directory, with
+ *  the CLAUDE_PID the fake hook environment gives. */
+const HOST = (session: string, ...movedFrom: string[]) => ['attend', 'sensor', 'host', '--session', session, '--cwd', '/work/agent-ways', ...movedFrom, '--parent', '4242']
+
+describe('the sensor host (ADR-416 item 2)', () => {
+  const shows = async ($: Engine, text: RegExp) => {
+    const ui = await $.ui.mount(BAND as never)
+    const found = await ui.find({ text } as never)
+    await ui.unmount()
+    return found !== undefined
+  }
+
+  test('a dormant session spawns none; attend_listen spawns one for its id and directory, watching Claude Code\'s pid', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(10 * 60_000)
+    expect(h.spawns).toEqual([])
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clock.advance(5_000)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1')])
+    expect(h.live().length).toBe(1)
+    // attend_listen again, and session.start again: still the one host.
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1')])
+    expect(h.live().length).toBe(1)
+  })
+
+  test('a project that starts listening spawns its host at session start', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active' } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+  })
+
+  test('a -p run in a listening project, which never polls, spawns none', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active' } })
+    await $.session.start(HEADLESS)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clock.advance(60_000)
+    expect(h.spawns).toEqual([])
+  })
+
+  test('listening turned off elsewhere ends the host, with no respawn; listening again starts one', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    drains.push(DRAIN_NOT_LISTENING, DRAIN_NOT_LISTENING, DRAIN_NOT_LISTENING)
+    await clock.advance(6_000)
+    expect(h.spawns[0]?.killed).toBe(true)
+    expect(h.live()).toEqual([])
+    await clock.advance(10_000)
+    expect(h.spawns.length).toBe(1)
+    // The drain says the session listens again.
+    await clock.advance(10_000)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1'), HOST('s1')])
+    expect(h.live().length).toBe(1)
+    expect(h.logs.filter(l => l.includes('sensor host'))).toEqual([])
+  })
+
+  test('a /clear ends the old host once the new id shows and spawns one with --moved-from; a /resume spawns one without it', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    await clear($, h, 's2', 'clear', { clock, ms: 12_000 })
+    // The old host keeps its id until the move settles.
+    await clock.advance(6_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    await clock.advance(12_000)
+    expect(h.spawns[0]?.killed).toBe(true)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1'), HOST('s2', '--moved-from', 's1')])
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s2', '--moved-from', 's1')])
+    // A /resume goes on with the stores of the session it resumed.
+    await clear($, h, 's3', 'resume')
+    await clock.advance(5_000)
+    expect(h.spawns[1]?.killed).toBe(true)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s3')])
+    expect(h.spawns.length).toBe(3)
+  })
+
+  test('a host that exits on its own is spawned again after 5 s, three times; the fourth exit in ten minutes stops it, the row says so, and messages still arrive', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    for (let i = 0; i < 3; i++) {
+      h.live()[0]?.exit(1)
+      await clock.advance(4_000)
+      expect(h.live()).toEqual([])
+      await clock.advance(1_500)
+      expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    }
+    expect(h.spawns.length).toBe(4)
+    expect(h.status()?.hostStopped).toBe(false)
+    expect(await shows($, /sensors stopped/)).toBe(false)
+    h.live()[0]?.exit(null, 'SIGKILL')
+    await clock.advance(60_000)
+    expect(h.spawns.length).toBe(4)
+    expect(h.live()).toEqual([])
+    expect(h.status()?.hostStopped).toBe(true)
+    expect(await shows($, /● 2 peers ✉ 0 unread · sensors stopped/)).toBe(true)
+    expect(h.logs.filter(l => l.startsWith('attend: the sensor host stopped'))).toEqual([
+      'attend: the sensor host stopped (it ended 4 times in ten minutes, last SIGKILL); sensor reports stop until the mod reloads, and messages still arrive',
+    ])
+    drains.push(one(5), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m5')
+  })
+
+  test('exits further apart than the window are each followed by a respawn', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    for (let i = 0; i < 5; i++) {
+      h.live()[0]?.exit(0)
+      await clock.advance(4 * 60_000)
+    }
+    expect(h.spawns.length).toBe(6)
+    expect(h.live().length).toBe(1)
+    expect(h.status()?.hostStopped).toBe(false)
+  })
+
+  test('an attend that refuses sensor host stops it at once, with no respawn', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, hostRefused: true })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(60_000)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1')])
+    expect(h.status()?.hostStopped).toBe(true)
+    expect(h.logs.filter(l => l.startsWith('attend: the sensor host stopped'))).toEqual([
+      'attend: the sensor host stopped (exit 2); sensor reports stop until the mod reloads, and messages still arrive',
+    ])
+  })
+
+  test('a line on the host\'s stdout polls at once; half a line waits for its end; stderr goes to the debug log', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off', poll_seconds: 60 }, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    const polls = () => h.count('message inbox --drain --json --wake')
+    const before = polls()
+    expect(before).toBe(1)
+    // With no cue, nothing polls before the minute is up.
+    await clock.advance(20_000)
+    expect(polls()).toBe(before)
+    drains.push(one(9), DRAIN_EMPTY)
+    h.live()[0]?.say('sig')
+    await clock.settle()
+    expect(polls()).toBe(before)
+    h.live()[0]?.say('nal system-1\n')
+    await clock.settle()
+    expect(polls()).toBe(before + 1)
+    await clock.advance(2_500)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m9')
+    h.live()[0]?.say('peers: wrote system-2\n', 'stderr')
+    await clock.settle()
+    expect(polls()).toBe(before + 1)
+    expect(h.logs).toContain('attend sensor host: peers: wrote system-2')
+  })
+
+  test('the pure pieces: argv, the respawn cap, cues, the pid, how it ended', () => {
+    expect(hostArgv({ session: 's2', movedFrom: 's1' }, '/p', '42')).toEqual(['attend', 'sensor', 'host', '--session', 's2', '--cwd', '/p', '--moved-from', 's1', '--parent', '42'])
+    expect(hostArgv({ session: 's1', movedFrom: 's1' }, '/p')).toEqual(['attend', 'sensor', 'host', '--session', 's1', '--cwd', '/p'])
+    expect(hostArgv({ session: 's1', movedFrom: '' }, '/p')).toEqual(['attend', 'sensor', 'host', '--session', 's1', '--cwd', '/p'])
+    expect(respawnAfterExit([], 0)).toEqual({ respawns: [0], respawn: true })
+    expect(respawnAfterExit([0, 1, 2], 3)).toEqual({ respawns: [0, 1, 2], respawn: false })
+    expect(respawnAfterExit([0, 1, 2], 10 * 60_000)).toEqual({ respawns: [1, 2, 10 * 60_000], respawn: true })
+    expect(cuesIn('', 'signal a\nsignal b\nsig')).toEqual({ held: 'sig', cues: 2 })
+    expect(cuesIn('sig', 'nal c\n')).toEqual({ held: '', cues: 1 })
+    expect(cuesIn('', '\n\n')).toEqual({ held: '', cues: 0 })
+    expect(cuesIn('', 'x'.repeat(5000)).held.length).toBe(4096)
+    expect(claudePid({ CLAUDE_PID: '4242' })).toBe('4242')
+    for (const bad of ['', '0', '42a', '-1', ' 42']) expect(claudePid({ CLAUDE_PID: bad })).toBeUndefined()
+    expect(claudePid({})).toBeUndefined()
+    expect(claudePid(undefined)).toBeUndefined()
+    expect(isHostRefused({ code: 2, signal: null })).toBe(true)
+    expect(isHostRefused({ deny: 'blocked by policy' })).toBe(true)
+    expect(isHostRefused({ code: 1, signal: null })).toBe(false)
+    expect(isHostRefused({ code: null, signal: 'SIGKILL' })).toBe(false)
+    expect(isHostRefused(undefined)).toBe(false)
+    expect(hostEndText({ code: 1, signal: null })).toBe('exit 1')
+    expect(hostEndText({ code: null, signal: 'SIGKILL' })).toBe('SIGKILL')
+    expect(hostEndText({ deny: 'blocked' })).toBe('refused: blocked')
+    expect(hostEndText(undefined, 'Error: spawn attend ENOENT')).toBe('could not start: Error: spawn attend ENOENT')
   })
 })
 
