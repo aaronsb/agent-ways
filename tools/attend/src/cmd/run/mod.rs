@@ -12,6 +12,7 @@
 //!   iteration. Reachable from tests without standing up the full
 //!   `cmd_run_with_catchup` shell.
 //!
+//! - `sink` — where disclosed lines go: Monitor lines for `attend run`.
 //! - `host` — `attend sensor host`, the same loop writing system signals.
 //!
 //! This file owns the setup-then-loop skeleton: process-level locking,
@@ -21,6 +22,7 @@
 mod governor;
 pub(crate) mod host;
 mod rekey;
+mod sink;
 mod stamps;
 mod tick;
 
@@ -354,7 +356,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
             heartbeat_id: &heartbeat_id,
             cfg: &cfg,
             cache_gate: Some(&mut cache_gate),
-            sink: &mut tick::Monitor,
+            sink: &mut sink::Monitor,
         };
         tick_iteration(&mut tick_state);
     }

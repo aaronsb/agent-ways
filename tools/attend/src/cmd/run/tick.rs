@@ -22,6 +22,7 @@ use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
 use super::governor::{DisclosureGovernor, ScheduledSensor};
+use super::sink::{Disclosure, Sink};
 use crate::cmd::cleanup::run_cleanup;
 use crate::sensors::{Focus, SensorSlot};
 use crate::util::signals_base;
@@ -63,33 +64,6 @@ pub(super) struct TickState<'a> {
     pub(super) cache_gate: Option<&'a mut CacheGate>,
     /// Where disclosed lines go.
     pub(super) sink: &'a mut dyn Sink,
-}
-
-/// One sensor's disclosed lines.
-pub(super) struct Disclosure {
-    pub(super) sensor: String,
-    pub(super) priority: &'static str,
-    pub(super) message_lane: bool,
-    /// Each line, with how long it stays deliverable when its sensor said.
-    pub(super) lines: Vec<(String, Option<sensor_trait::Lapse>)>,
-}
-
-/// Where the loop puts what the governor lets through.
-pub(super) trait Sink {
-    /// Deliver `batch`. Returns whether anything went out, which the
-    /// governor counts as a disclosure.
-    fn deliver(&mut self, batch: &[Disclosure]) -> bool;
-}
-
-/// `attend run`'s sink: Monitor lines on stdout.
-pub(super) struct Monitor;
-
-impl Sink for Monitor {
-    fn deliver(&mut self, batch: &[Disclosure]) -> bool {
-        let lines: Vec<(String, String, Vec<String>)> =
-            batch.iter().map(|d| (d.sensor.clone(), d.priority.to_string(), d.lines.iter().map(|(l, _)| l.clone()).collect())).collect();
-        emit::emit_batch(&lines)
-    }
 }
 
 /// The cache gate on what this run prints (ADR-406 item 2). A line on

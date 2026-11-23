@@ -32,7 +32,8 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use super::governor::{DisclosureGovernor, ScheduledSensor};
-use super::tick::{self, build_engagement, Disclosure, Sink, TickState};
+use super::sink::{Disclosure, Sink};
+use super::tick::{self, build_engagement, TickState};
 use crate::cli::HostArgs;
 use crate::sensors::{self, writer::Writer, Focus};
 use crate::{config, emit, state};
