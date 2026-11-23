@@ -74,7 +74,7 @@ fn scene_private_un_enrolls_when_attend_run_is_not_running() {
     assert!(!f.enrolled(&f.sid));
 }
 
-/// A fresh `attend run` or `attend channel join` after `scene private` enrolls the
+/// A fresh `attend listen on` or `attend channel join` after `scene private` enrolls the
 /// session again.
 #[test]
 fn enrolling_again_after_private_clears_the_opt_out() {

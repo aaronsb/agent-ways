@@ -244,7 +244,7 @@ const KEYS: &[KeySpec] = &[
         // A switch fails closed (ADR-503 addendum): anything but true is off,
         // so a bad value never starts a sweep that deletes files.
         fail_closed: Some(closed_off),
-        doc: "Whether `attend run` sweeps away the signals of projects that are gone.",
+        doc: "Whether the sensor host sweeps away the signals of projects that are gone.",
         long: "Off, signals stay until `attend message cleanup` is run by hand.",
         ..BASE
     },

@@ -4,8 +4,8 @@
 
 //! One message is one signal, whatever its length (ADR-412). `attend message send`
 //! writes it whole, and every conduit delivers it whole under its one id:
-//! the Stop-hook drain, the attend mod's format, and the Monitor line of
-//! `attend run`. Signals an older peer sent as numbered `(i/n)` parts still
+//! the Stop-hook drain and the attend mod's format. Signals an older peer
+//! sent as numbered `(i/n)` parts still
 //! read, in order, as the messages they are.
 
 mod common;

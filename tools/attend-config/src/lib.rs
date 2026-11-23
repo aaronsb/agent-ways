@@ -130,7 +130,7 @@ engagement:
   absolute_refractory: 60    # seconds of complete suppression after burst
   decay_per_minute: 0.1      # relative refractory decay rate
 
-# Background signal-file cleanup inside `attend run`. Reaping is by project
+# Background signal-file cleanup inside the sensor host. Reaping is by project
 # liveness (ADR-136), not by age. `attend message cleanup` runs it by hand.
 cleanup:
   enabled: true

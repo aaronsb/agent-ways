@@ -8,7 +8,7 @@
 //! cannot be written, the counter never persists, so it would read 1 on
 //! every hook-forced continuation and the ceiling would never trip: an
 //! old backlog's note would block every Stop. A hook-forced drain that
-//! cannot record its round defers to the Monitor instead.
+//! cannot record its round defers to the next delivery instead.
 
 mod common;
 use common::{Fixture, MINUTE};

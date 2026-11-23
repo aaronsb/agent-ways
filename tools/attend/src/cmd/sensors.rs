@@ -38,7 +38,8 @@ use sensor_trait::Lapse;
 mod probe;
 pub(crate) use probe::probe;
 
-/// The project the sensors resolve for: the session's, as `attend run` uses.
+/// The project the sensors resolve for: the session's, as its sensor host
+/// uses.
 fn context() -> (Focus, Config) {
     context_of(None, "list", false)
 }

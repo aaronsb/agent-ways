@@ -337,8 +337,8 @@ pub(crate) fn scan_pending(
         // Escape-free by construction: the drain's output is
         // hook-injection text (or a pipe), never a styled terminal,
         // so it is drawn plain whatever the environment says (#388).
-        // The label is the same form the peers sensor shows under
-        // Monitor (#534); the wire `from` rides along as the id.
+        // The label is the form every reader shows (#534); the wire
+        // `from` rides along as the id.
         delivered.push(Drained {
             when: agent_fmt::compact_time(f.mtime, std::time::SystemTime::now()),
             mtime: f.mtime,

@@ -4,8 +4,8 @@
 
 //! The Stop-hook drain delivers only to a session enrolled in attend (#720).
 //!
-//! A session is enrolled when it ran `attend run` (it holds a slot in its
-//! project's instance registry) or joined a channel. For any other session
+//! A session is enrolled when it ran `attend listen on` or joined a
+//! channel. For any other session
 //! the drain is a silent no-op: it delivers nothing, from any tray, and
 //! writes nothing, so the session does not look alive to peers or to
 //! `/purge`.

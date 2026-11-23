@@ -468,7 +468,7 @@ pub fn deliverable(text: &str) -> String {
     crate::cmd::inbox::defuse_fence(&one)
 }
 
-/// What decides the sensors `attend run` polls: each user and project
+/// What decides the sensors the sensor host polls: each user and project
 /// sensor file's path, length and modification time, and the trusted
 /// projects of `attend.project_sensors`.
 pub type Stamp = (Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)>, Vec<String>);

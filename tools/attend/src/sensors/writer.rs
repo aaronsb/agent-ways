@@ -77,9 +77,8 @@ impl Writer {
     }
 }
 
-/// The magnitude an event-lane batch needs to be written: the cut at which
-/// `attend run` printed a batch instead of only logging it. A message-lane
-/// batch has no cut.
+/// The magnitude an event-lane batch needs to be written; one under it is
+/// logged alone. A message-lane batch has no cut.
 pub const EVENT_CUT: f64 = 3.0;
 
 /// Whether a batch that accumulated `magnitude` on `lane` falls under the
@@ -87,7 +86,7 @@ pub const EVENT_CUT: f64 = 3.0;
 ///
 /// References:
 /// - ADR-416 item 4: the host applies the event lane's salience before it
-///   writes, as `attend run` did before it printed.
+///   writes.
 pub fn below_cut(lane: sensor_spec::Lane, magnitude: f64) -> bool {
     lane == sensor_spec::Lane::Event && magnitude < EVENT_CUT
 }

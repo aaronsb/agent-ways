@@ -8,8 +8,8 @@
 //! project (`--to`) since the session began is delivered on enrollment
 //! whatever its age, while older addressed mail and an old `#open` message
 //! are baselined and announced, never consumed silently.
-//! Each enrollment path is covered: `attend channel join` (the drain runs first) and
-//! `/attend` (the peers sensor under `attend run` runs first).
+//! The enrollment path covered here is `attend channel join`, after which
+//! the drain runs first.
 
 mod common;
 use common::{Fixture, MINUTE};

@@ -7,7 +7,7 @@
 //! mod keeps it.
 //!
 //! The host polls the sensors the files declare for the session's
-//! directory through the same tick loop as `attend run`: scheduling,
+//! directory through the tick loop: scheduling,
 //! intervals and decay, the event lane's salience, refractory and governor,
 //! the checkpoint, the stamp sweep and the re-exec on a changed binary or
 //! sensor file. What the governor lets through becomes a system signal in
@@ -35,7 +35,7 @@
 //!
 //! References:
 //! - ADR-416 items 2 to 5: the host, its stdout, the store as transport,
-//!   the system sender and what the host keeps of `attend run`.
+//!   the system sender and what the host runs.
 //! - ADR-416 item 8: stores keyed by session, carried by a session's move.
 //! - ADR-129: the instance slot and its suffix.
 
@@ -80,7 +80,7 @@ fn end_on_signals() {
 
 /// The host's sink: each line a system signal, and a cue on stdout. An
 /// event-lane batch under the cut ([`crate::sensors::writer::EVENT_CUT`]) is
-/// logged and not written, as `attend run` logged it and did not print it.
+/// logged and not written.
 struct Signals {
     writer: Writer,
     /// A cue met a closed stdout: the mod stopped reading, and the host

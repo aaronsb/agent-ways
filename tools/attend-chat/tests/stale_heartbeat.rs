@@ -4,8 +4,8 @@
 
 //! A send to an agent whose heartbeat lapsed while its Claude Code process
 //! runs on and it listens goes through; a send to an agent whose process has
-//! exited is refused. A session hosted by the attend mod has no `attend run`
-//! touching its heartbeat, so it lapses during a turn longer than the grace,
+//! exited is refused. A session hosted by the attend mod has nothing
+//! touching its heartbeat while a turn runs, so it lapses during a turn longer than the grace,
 //! and the chat refused a DM to it (the mod-session liveness defect of
 //! 2026-10-13). Through the real Enter. In its own file, so its own fixture:
 //! the test process stands in for the live agent's Claude Code process.

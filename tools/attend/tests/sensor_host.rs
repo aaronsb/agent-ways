@@ -123,9 +123,8 @@ fn the_host_writes_a_trigger_as_a_system_signal_and_cues_each_write() {
 /// checkpoint.
 const CHECKPOINTED: &str = "a session trigger is spent; checkpointed";
 
-/// An event-lane batch under the cut of 3.0 is logged and not written, as
-/// `attend run` logged it and did not print it; one at the cut is written,
-/// and a message-lane line, which has no cut, is written whatever its
+/// An event-lane batch under the cut of 3.0 is logged and not written, one
+/// at the cut is written, and a message-lane line, which has no cut, is written whatever its
 /// magnitude. A test fire under the cut writes nothing either.
 #[test]
 fn an_event_batch_under_the_cut_writes_no_signal() {

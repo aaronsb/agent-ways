@@ -5,9 +5,9 @@
 //! The cold-start rule: what a conduit delivers on its first scan when the
 //! session has no seen-set yet.
 //!
-//! Both conduits apply it, the Stop-hook drain and the peers sensor under
-//! `attend run`, so a session sees the same messages whichever conduit runs
-//! first after it enrolls (ADR-172, addendum of 2026-10-01).
+//! The drain applies it, whichever runs it first after the session enrolls,
+//! the attend mod's poll or the Stop hook, so a session sees the same
+//! messages either way.
 //!
 //! A message is replayed to a session that was among those it was said to
 //! (ADR-404 D3b), judged by the [`Window`] the session's own records give:

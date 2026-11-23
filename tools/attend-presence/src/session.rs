@@ -14,8 +14,8 @@
 //! > UID from Claude Code's session record, paired with the *session
 //! > record's* cwd, never the process cwd.
 //!
-//! Why not process cwd: a shell `cd` that leaks into an `attend run`
-//! launch (or any subcommand) would otherwise put the session on the
+//! Why not process cwd: a shell `cd` that leaks into an attend
+//! subcommand would otherwise put the session on the
 //! bus as a different persona than its project — the "multiple
 //! personalities" failure #378 documents. The session record is the
 //! stable half of the tuple; process cwd is only ever a fallback for

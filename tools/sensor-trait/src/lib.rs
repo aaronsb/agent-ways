@@ -242,7 +242,7 @@ impl DeltaAccumulator {
     }
 
     /// Drain events as individual lines for paged emission.
-    /// Each event becomes its own notification line via Monitor.
+    /// Each event becomes its own line the host writes as a signal.
     pub fn drain_events(&self) -> Vec<String> {
         self.unique_events()
     }

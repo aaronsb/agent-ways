@@ -47,7 +47,7 @@ pub struct ChatConfig {
     pub send_delay: Duration,
 }
 
-/// Background signal-file cleanup inside `attend run`. Reaping is by
+/// Background signal-file cleanup inside the sensor host. Reaping is by
 /// project liveness (ADR-136), not by age.
 #[derive(Debug, Clone)]
 pub struct CleanupConfig {

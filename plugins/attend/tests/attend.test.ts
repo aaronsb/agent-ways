@@ -977,8 +977,8 @@ describe('active', () => {
     expect(h.count('message inbox') > before).toBe(true)
   })
 
-  // A session hosted here has no attend run: the drain, listen on and the
-  // beat are what touch its heartbeat, and attend-chat reads a heartbeat
+  // In a session hosted here the drain, listen on and the beat are what
+  // touch its heartbeat, and attend-chat reads a heartbeat
   // older than 90 s as a session that is gone (the mod-session liveness
   // defect of 2026-10-13).
   test('the heartbeat stays fresh through a turn longer than the grace and a slow poll longer than it', async ($, on) => {
