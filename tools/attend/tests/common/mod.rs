@@ -259,6 +259,7 @@ impl Fixture {
             .env_remove("CLAUDE_SESSION_ID")
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ATTEND_RELOADED_FROM")
+            .env_remove(attend_presence::session::SENSOR_HOST_VAR)
             .current_dir(&self.origin)
             .stdin(Stdio::null());
         c
@@ -378,6 +379,11 @@ pub struct Run {
 }
 
 impl Run {
+    /// The pid of `attend run`.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Whether the process has exited.
     pub fn exited(&mut self) -> bool {
         self.child.try_wait().ok().flatten().is_some()

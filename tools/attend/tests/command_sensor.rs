@@ -99,7 +99,9 @@ fn child_env(f: &Fixture, sensor: &str) -> std::collections::BTreeMap<String, St
 const ENV_SENSOR: &str = "kind: command\nargv: [sh, -c, \"env -0 | tr '\\\\n\\\\000' ' \\\\n' | sed 's/^/1|/'\"]\noutput: lines\nenv: {ADDED: by-file}\n";
 
 /// A user file's command inherits attend's environment less Claude
-/// Code's, Anthropic's and attend's variables; its `env` adds on top.
+/// Code's, Anthropic's and attend's variables; its `env` adds on top. The
+/// one `ATTEND_` variable it has is the sensor marker, naming the attend
+/// that ran it.
 #[test]
 fn a_user_command_inherits_the_environment_without_the_session_s_secrets() {
     let f = Fixture::new("cmd-env-user");
@@ -109,7 +111,9 @@ fn a_user_command_inherits_the_environment_without_the_session_s_secrets() {
     assert_eq!(seen.get("ADDED").map(String::as_str), Some("by-file"));
     assert!(!seen.contains_key("CLAUDE_CODE_SESSION_ID"), "the session id reached the command");
     assert!(!seen.contains_key("ANTHROPIC_API_KEY"), "the API key reached the command");
-    assert!(seen.keys().all(|k| !k.starts_with("CLAUDE") && !k.starts_with("ANTHROPIC_") && !k.starts_with("ATTEND_")), "{:?}", seen.keys().collect::<Vec<_>>());
+    let marker = attend_presence::session::SENSOR_HOST_VAR;
+    assert!(seen.get(marker).is_some_and(|v| attend_presence::session::parse_marker(v.trim()).is_some()), "the marker names a process: {:?}", seen.get(marker));
+    assert!(seen.keys().all(|k| !k.starts_with("CLAUDE") && !k.starts_with("ANTHROPIC_") && (!k.starts_with("ATTEND_") || k == marker)), "{:?}", seen.keys().collect::<Vec<_>>());
 }
 
 /// A project file's command starts from the fixed set alone, plus its
@@ -125,6 +129,7 @@ fn a_project_command_inherits_only_the_fixed_set() {
     assert_eq!(seen.get("ADDED").map(String::as_str), Some("by-file"));
     assert_eq!(seen.get("HOME").map(String::as_str), Some(f.home.to_str().unwrap()));
     assert!(seen.contains_key("PATH"));
+    assert!(seen.contains_key(attend_presence::session::SENSOR_HOST_VAR), "the sensor marker");
     for gone in ["KEEP_ME", "CLAUDE_CODE_SESSION_ID", "ANTHROPIC_API_KEY", "XDG_CONFIG_HOME"] {
         assert!(!seen.contains_key(gone), "{gone} reached a project command");
     }

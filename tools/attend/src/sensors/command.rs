@@ -19,13 +19,16 @@
 //! with only [`PROJECT_ENV`] carried over. The file's `env` adds to either.
 //!
 //! This is not a sandbox: the command runs as the operator. attend finds
-//! the session through parent processes, not the environment, and an
-//! `attend` the command runs sees a sensor host among its ancestors, so it
-//! refuses every verb that acts as the session.
+//! the session through parent processes, not the environment. An
+//! `attend` the command runs refuses every verb that acts as the session:
+//! it sees a sensor host among its ancestors, or, once it has detached
+//! from the host, the sensor marker [`sensor_env`] sets in its
+//! environment.
 //!
 //! References:
 //! - ADR-403 §1: the command kind's block and its recorded failures.
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::Path;
@@ -113,6 +116,19 @@ impl Source for Command {
     }
 }
 
+/// Give `cmd`, a process that runs a command a sensor file chose, its
+/// environment: the variables `inherit` keeps of attend's own, then
+/// `extra`, the sensor file's `env`, then the sensor marker naming this
+/// process ([`attend_presence::session::mark_sensor_child`]), last so
+/// neither the inherited variables nor the file can remove or replace it.
+/// A `command` sensor's child and an `mcp` sensor's server are built
+/// here; the compiled sensors that run `git` or `ways` mark those with
+/// `mark_sensor_child` directly.
+pub fn sensor_env(cmd: &mut Process, inherit: Inherit, extra: &BTreeMap<String, String>) {
+    cmd.env_clear().envs(inherit.filter(std::env::vars_os())).envs(extra);
+    attend_presence::session::mark_sensor_child(cmd);
+}
+
 /// Run `block` from `project` and return its stdout. The command runs in
 /// a process group of its own, so the timeout ends it and everything it
 /// started, and the timeout covers its pipes too: a process left behind
@@ -124,7 +140,8 @@ fn run(block: &CommandBlock, project: &Path, inherit: Inherit) -> Result<String,
         return Err(format!("its cwd {} is not a directory", cwd.display()));
     }
     let mut cmd = Process::new(program);
-    cmd.args(args).env_clear().envs(inherit.filter(std::env::vars_os())).envs(&block.env).current_dir(&cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    sensor_env(&mut cmd, inherit, &block.env);
+    cmd.args(args).current_dir(&cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|e| format!("cannot run {program}: {e}"))?;
@@ -229,7 +246,6 @@ fn lines(text: &str) -> Result<Vec<(f64, String)>, String> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     fn block(script: &str, output: Output, timeout: u64) -> CommandBlock {
         CommandBlock { argv: vec!["sh".into(), "-c".into(), script.into()], env: BTreeMap::from([("X_SENSOR".into(), "from-env".into())]), cwd: None, timeout, output }
@@ -301,6 +317,20 @@ mod tests {
         assert_eq!(Inherit::of(Some(sensor_spec::Origin::Project)), Inherit::Project);
         assert_eq!(Inherit::of(Some(sensor_spec::Origin::User)), Inherit::Stripped);
         assert_eq!(Inherit::of(Some(sensor_spec::Origin::Builtin)), Inherit::Stripped);
+    }
+
+    /// A command from either layer carries the sensor marker naming this
+    /// process, whatever the inherited environment or the file's `env`
+    /// set it to.
+    #[test]
+    fn every_layer_carries_the_sensor_marker() {
+        let own = attend_presence::session::marker_value(std::process::id());
+        for inherit in [Inherit::Stripped, Inherit::Project] {
+            let mut b = block(r#"printf '{"marker":"%s"}' "$ATTEND_SENSOR_HOST""#, Output::Json, 10);
+            b.env.insert(attend_presence::session::SENSOR_HOST_VAR.into(), "0".into());
+            let Ok(Fetched::Json(v)) = Command::new(b, "/", inherit).fetch() else { panic!("{inherit:?}") };
+            assert_eq!(v, serde_json::json!({ "marker": own }), "{inherit:?}");
+        }
     }
 
     /// A process the command leaves behind holding stdout open does not
