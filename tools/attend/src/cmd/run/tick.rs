@@ -368,6 +368,15 @@ pub(super) fn tick_iteration(s: &mut TickState) {
 
         let changed = s.slots[i].poll(s.focus);
 
+        // A trigger kept for the session that just became spent reaches
+        // the checkpoint now, before its line goes out, so a kill after
+        // the write cannot let it fire again in this session.
+        if s.slots[i].sensor.take_spent() {
+            emit::log(&format!("{}: a session trigger is spent; checkpointing", s.slots[i].name()));
+            s.state_store.checkpoint(&collect_snapshot(s.slots));
+            *s.last_checkpoint = Instant::now();
+        }
+
         // Only log when something changed — quiet polls are silent.
         if changed {
             s.governor.record_event();
