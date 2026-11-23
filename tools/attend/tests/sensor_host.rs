@@ -206,6 +206,78 @@ fn an_event_batch_under_the_cut_writes_no_signal() {
     assert!(from(&f, "low").is_empty());
 }
 
+/// A session trigger whose line the governor holds is not offered again
+/// while it waits, so its magnitude does not build up past the cut. Once
+/// the governor reopens the line is cut, once, and spent: it is never
+/// written, and the sensor's interval backs off instead of staying at its
+/// minimum.
+#[test]
+fn a_line_the_governor_holds_is_cut_once_and_not_offered_again() {
+    let f = quiet("host-held");
+    std::fs::write(f.home.join("config").join("attend").join("config.yaml"), "cleanup:\n  enabled: false\ngovernor:\n  base_cooldown: 5\n").unwrap();
+    beacon(&f, "high", "memory: session");
+    let (flag, low_polls) = (f.home.join("low.flag"), f.home.join("low.polls"));
+    let script = format!("echo x >> '{}'; if [ -f '{}' ]; then printf '{{\"up\": true}}'; else printf '{{\"up\": false}}'; fi", low_polls.display(), flag.display());
+    f.sensor(
+        "low",
+        &format!(
+            "kind: command\ninterval: 4\nmin_interval: 1\ndecay_threshold: 1\nthreshold: 1\nargv: [sh, -c, {}]\noutput: json\n\
+             triggers:\n  - {{name: up, path: \"$\", on: enters, where: {{up: true}}, magnitude: 1, memory: session, description: \"low is up\"}}\n",
+            serde_json::to_string(&script).unwrap()
+        ),
+    );
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("high's signal", Duration::from_secs(20), || !from(&f, "high").is_empty());
+    std::fs::write(&flag, "").unwrap();
+    host.wait_for("low held by the governor", Duration::from_secs(20), || host.stderr().contains("sensors ready but governor holding"));
+    host.wait_for("the governor to reopen", Duration::from_secs(40), || host.stderr().contains("low: under the event lane's cut") || !from(&f, "low").is_empty());
+    let (low_before, high_before) = (polls(&f, "low"), polls(&f, "high"));
+    host.wait_for("ten more polls of high", Duration::from_secs(30), || polls(&f, "high") >= high_before + 10);
+    assert!(from(&f, "low").is_empty(), "the held line built up past the cut and was written: {:?}", from(&f, "low"));
+    let log = host.stderr();
+    assert_eq!(log.matches("low: under the event lane's cut (1.0 of 3.0), not written: low is up").count(), 1, "{log}");
+    let low_after = polls(&f, "low") - low_before;
+    assert!(low_after <= 6, "low polled {low_after} times while high polled ten: its interval did not back off");
+}
+
+/// `attend run`'s stderr, which holds its log and its quiet events.
+fn run_err(f: &Fixture) -> String {
+    std::fs::read_to_string(f.home.join("run.err")).unwrap_or_default()
+}
+
+/// Under `attend run` a session line under the cut is logged once as a
+/// quiet event and spent, as on main: Monitor never prints it, and later
+/// polls offer nothing.
+#[test]
+fn attend_run_logs_a_low_session_line_once() {
+    let f = quiet("run-low");
+    beacon_at(&f, "low", 1, "memory: session");
+    let run = f.run();
+    run.wait_for("six polls of low", Duration::from_secs(30), |_| polls(&f, "low") >= 6);
+    drop(run);
+    assert_eq!(run_err(&f).matches("quiet (low): low is up").count(), 1, "{}", run_err(&f));
+    assert!(!std::fs::read_to_string(f.home.join(format!("run-{}.out", f.sid))).unwrap_or_default().contains("low is up"));
+}
+
+/// Under `attend run` a session line the cache gate drops is not offered
+/// again while the cache stays lapsed, so nothing churns; once the cache is
+/// warm the trigger fires again and its line goes out, once.
+#[test]
+fn attend_run_offers_a_gated_session_line_again_once_the_cache_is_warm() {
+    let f = quiet("run-gated");
+    f.last_turn(Some(Duration::from_secs(61 * 60)));
+    beacon(&f, "beacon", "memory: session");
+    let run = f.run();
+    run.wait_for("eight polls on a lapsed cache", Duration::from_secs(30), |_| polls(&f, "beacon") >= 8);
+    assert_eq!(run_err(&f).matches("beacon: dropped 1 event(s), the prompt cache has lapsed").count(), 1, "{}", run_err(&f));
+    assert!(!run.output().contains("beacon is up"), "{}", run.output());
+    f.last_turn(Some(Duration::ZERO));
+    run.wait_for("the line once the cache is warm", Duration::from_secs(30), |r| r.output().contains("beacon is up"));
+    let after = polls(&f, "beacon");
+    run.wait_for("four more polls", Duration::from_secs(30), |_| polls(&f, "beacon") >= after + 4);
+    assert_eq!(run.output().matches("beacon is up").count(), 1, "{}", run.output());
+}
+
 /// A trigger kept for the session is spent when its line is written, and
 /// the checkpoint follows at once, so a host killed after the write and
 /// that checkpoint, and started again, does not fire it a second time.

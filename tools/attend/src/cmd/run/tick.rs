@@ -22,7 +22,7 @@ use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
 use super::governor::{DisclosureGovernor, ScheduledSensor};
-use super::sink::{Disclosure, Sink};
+use super::sink::{Delivery, Disclosure, Sink};
 use crate::cmd::cleanup::run_cleanup;
 use crate::sensors::{Focus, SensorSlot};
 use crate::util::signals_base;
@@ -73,10 +73,26 @@ pub(super) struct TickState<'a> {
 #[derive(Default)]
 pub(super) struct CacheGate {
     checked: Option<(Instant, bool)>,
+    /// Event lines dropped while the cache had lapsed, by slot. Their
+    /// sensors hear of the drop once the cache is warm again, so a session
+    /// trigger fires again then, and not on every poll of a lapsed cache.
+    dropped: Vec<(usize, String)>,
 }
 
 impl CacheGate {
     const RECHECK: Duration = Duration::from_secs(10);
+
+    /// The most dropped lines kept for a warm cache; the oldest go first.
+    const DROPPED_MAX: usize = 256;
+
+    fn hold_drop(&mut self, slot: usize, line: String) {
+        if !self.dropped.iter().any(|(i, l)| *i == slot && *l == line) {
+            self.dropped.push((slot, line));
+            if self.dropped.len() > Self::DROPPED_MAX {
+                self.dropped.remove(0);
+            }
+        }
+    }
 
     /// Whether session `session_id`'s cache has lapsed, on keepwarm's clock.
     fn lapsed(&mut self, session_id: &str, working_dir: &str) -> bool {
@@ -434,6 +450,13 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // what the peers sensor surfaced, presence included, and it goes out
     // once the cache is warm. Messages that would wake the session wait
     // unseen in the sensor itself.
+    if let Some(gate) = s.cache_gate.as_deref_mut() {
+        if !gate.dropped.is_empty() && !gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
+            for (i, line) in std::mem::take(&mut gate.dropped) {
+                s.slots[i].sensor.dropped(&line);
+            }
+        }
+    }
     let gated = |i: &usize| !s.slots[*i].is_crate("keepwarm");
     let lapsed = match s.cache_gate.as_deref_mut() {
         Some(gate) if evt_ready.iter().any(gated) || msg_ready.iter().any(gated) => gate.lapsed(s.heartbeat_id, &s.focus.working_dir),
@@ -442,6 +465,11 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     if lapsed {
         for &i in &evt_ready {
             emit::log(&format!("{}: dropped {} event(s), the prompt cache has lapsed", s.slots[i].name(), s.slots[i].accumulator.event_count));
+            if let Some(gate) = s.cache_gate.as_deref_mut() {
+                for line in s.slots[i].accumulator.drain_events() {
+                    gate.hold_drop(i, line);
+                }
+            }
             s.slots[i].accumulator.reset();
         }
         evt_ready.clear();
@@ -452,10 +480,10 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // action-potential refractory that would later hold conversation.
     spent |= try_disclose(s.slots, &msg_ready, s.msg_governor, false, s.sink);
 
-    // A trigger kept for the session is spent once its line went out. The
-    // checkpoint follows at once, so a restart does not fire it again; a
-    // kill between the write and this checkpoint can, and a duplicate
-    // notice is the lesser loss.
+    // A trigger kept for the session is spent once its lines were written or
+    // cut. The checkpoint follows at once, so a restart does not fire it
+    // again; a kill between the write and this checkpoint can, and a
+    // duplicate notice is the lesser loss.
     if spent {
         s.state_store.checkpoint(&collect_snapshot(s.slots));
         *s.last_checkpoint = Instant::now();
@@ -561,15 +589,24 @@ fn try_disclose(
         batch.len(),
         governor.cooldown().as_secs_f64(),
     ));
-    let delivered = sink.deliver(&batch);
+    let verdicts = sink.deliver(&batch);
     let mut spent = false;
-    for ((&i, d), went) in ready.iter().zip(&batch).zip(&delivered) {
-        for ((line, _), _) in d.lines.iter().zip(went).filter(|(_, went)| **went) {
-            slots[i].sensor.delivered(line);
+    for ((&i, d), verdicts) in ready.iter().zip(&batch).zip(&verdicts) {
+        // A failed line releases its trigger first, so a trigger with one
+        // line written and another failed is not spent.
+        for ((line, _), v) in d.lines.iter().zip(verdicts) {
+            if *v == Delivery::Failed {
+                slots[i].sensor.dropped(line);
+            }
+        }
+        for ((line, _), v) in d.lines.iter().zip(verdicts) {
+            if *v != Delivery::Failed {
+                slots[i].sensor.delivered(line);
+            }
         }
         spent |= slots[i].sensor.take_spent();
     }
-    if delivered.iter().flatten().any(|went| *went) {
+    if verdicts.iter().flatten().any(|v| *v == Delivery::Written) {
         governor.record_disclosure();
         // Record engagement only for the event lane (refractory is its
         // noise-control). The message lane skips it so conversation never

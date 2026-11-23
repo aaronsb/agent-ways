@@ -179,22 +179,27 @@ fn after_a_fire_an_edit_fires_once_and_a_rename_does_not() {
     assert_eq!(run(&mut s, &edited, polls), fires(&[&["$"], &[], &[]]), "the edited condition fires once");
 }
 
-/// A session trigger is spent when its line is delivered, not when it
-/// fires. Until then each poll that still meets it fires it again, a
-/// condition that left and entered again included, and once its line is
-/// delivered it fires no more.
+/// A session trigger offers its line once and fires nothing more while the
+/// loop holds it. A dropped line releases it to fire on the next poll that
+/// meets it, a condition that left and entered again included, and once its
+/// line is handled it is spent and fires no more.
 #[test]
-fn a_session_trigger_fires_again_until_its_line_is_delivered() {
-    let d = Dir::new("undelivered");
+fn a_session_trigger_is_not_offered_again_while_its_line_is_out() {
+    let d = Dir::new("outstanding");
     let behind = || json!({"behind": true});
     let yaml = "triggers: [{name: late, path: \"$\", on: enters, where: {behind: true}, memory: session, description: \"behind\"}]\n";
     let mut s = declared(&d.0, yaml, Vec::new(), true);
     let line = vec![(1.0, "behind".to_string())];
     assert_eq!(s.evaluate(&behind()), line);
-    assert_eq!(s.evaluate(&behind()), line, "dropped on its way, it fires again");
-    assert!(!s.take_spent());
+    for _ in 0..3 {
+        assert_eq!(s.evaluate(&behind()), vec![], "held, it is not offered again");
+    }
+    s.dropped("behind");
+    assert_eq!(s.evaluate(&behind()), line, "dropped, it fires again");
+    s.dropped("behind");
     assert_eq!(s.evaluate(&json!({"behind": false})), vec![]);
-    assert_eq!(s.evaluate(&behind()), line, "an entry while undelivered fires");
+    assert_eq!(s.evaluate(&behind()), line, "an entry after the drop fires");
+    assert!(!s.take_spent());
     s.delivered("another line");
     assert!(!s.take_spent(), "another line spends nothing");
     s.delivered("behind");
@@ -203,6 +208,29 @@ fn a_session_trigger_fires_again_until_its_line_is_delivered() {
         assert_eq!(s.evaluate(&result), vec![], "spent by its delivery");
     }
     assert!(s.export_state().iter().any(|(k, v)| k == SESSION_MEMORY && v.contains("\"spent\":[\"")), "{:?}", s.export_state());
+}
+
+/// A session trigger that offers several lines is spent only once all of
+/// them are handled; one written and one dropped leaves it unspent, and it
+/// offers its lines again.
+#[test]
+fn a_trigger_with_several_lines_is_spent_only_when_every_line_is_handled() {
+    let d = Dir::new("several");
+    let yaml = "triggers: [{name: new, path: \"$.items[*]\", key: id, on: added, memory: session, description: \"new {id}\"}]\n";
+    let both = || json!({"items": [{"id": "a"}, {"id": "b"}]});
+    let lines = || vec![(1.0, "new a".to_string()), (1.0, "new b".to_string())];
+    let mut s = declared(&d.0, yaml, Vec::new(), true);
+    assert_eq!(s.evaluate(&both()), lines());
+    s.delivered("new a");
+    assert!(!s.take_spent(), "one line of two handled");
+    s.dropped("new b");
+    assert!(!s.take_spent());
+    assert_eq!(s.evaluate(&both()), lines(), "one line dropped: the trigger offers both again");
+    s.delivered("new b");
+    assert!(!s.take_spent(), "new a of this offer is still out");
+    s.delivered("new a");
+    assert!(s.take_spent(), "every line handled");
+    assert_eq!(s.evaluate(&both()), vec![]);
 }
 
 /// The host checkpoints the moment a session trigger is spent: the sensor

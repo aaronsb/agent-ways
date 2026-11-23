@@ -32,7 +32,7 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use super::governor::{DisclosureGovernor, ScheduledSensor};
-use super::sink::{Disclosure, Sink};
+use super::sink::{Delivery, Disclosure, Sink};
 use super::tick::{self, build_engagement, TickState};
 use crate::cli::HostArgs;
 use crate::sensors::{self, writer::Writer, Focus};
@@ -55,9 +55,9 @@ struct Signals {
 }
 
 impl Sink for Signals {
-    fn deliver(&mut self, batch: &[Disclosure]) -> Vec<Vec<bool>> {
+    fn deliver(&mut self, batch: &[Disclosure]) -> Vec<Vec<Delivery>> {
         let mut out = std::io::stdout().lock();
-        let written = batch
+        let verdicts = batch
             .iter()
             .map(|d| {
                 let lane = if d.message_lane { sensor_spec::Lane::Message } else { sensor_spec::Lane::Event };
@@ -65,7 +65,7 @@ impl Sink for Signals {
                     for (line, _) in &d.lines {
                         emit::log(&format!("{}: under the event lane's cut ({:.1} of {:.1}), not written: {line}", d.sensor, d.magnitude, crate::sensors::writer::EVENT_CUT));
                     }
-                    return vec![false; d.lines.len()];
+                    return vec![Delivery::Cut; d.lines.len()];
                 }
                 d.lines
                     .iter()
@@ -75,18 +75,18 @@ impl Sink for Signals {
                             if let Err(e) = writeln!(out, "signal {id}") {
                                 self.closed |= e.kind() == std::io::ErrorKind::BrokenPipe;
                             }
-                            true
+                            Delivery::Written
                         }
                         Err(why) => {
                             emit::log(&format!("{}: not written: {why}", d.sensor));
-                            false
+                            Delivery::Failed
                         }
                     })
                     .collect()
             })
             .collect();
         out.flush().ok();
-        written
+        verdicts
     }
 }
 

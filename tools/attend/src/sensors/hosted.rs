@@ -175,9 +175,9 @@ pub struct FileSensor {
     /// The declared state, as the store holds it.
     state: Option<StoredState>,
     session: SessionMemory,
-    /// The lines of session triggers that fired and have not been
-    /// delivered yet: each description with its trigger's fingerprint.
-    undelivered: Vec<(String, String)>,
+    /// The session triggers whose lines are out and not settled
+    /// ([`session`]).
+    outstanding: session::Outstanding,
     /// Whether a session trigger became spent since [`Sensor::take_spent`]
     /// last read it.
     newly_spent: bool,
@@ -233,7 +233,7 @@ impl FileSensor {
             stored: BTreeMap::new(),
             state: None,
             session: SessionMemory::default(),
-            undelivered: Vec::new(),
+            outstanding: session::Outstanding::new(),
             newly_spent: false,
             failure: None,
             discarded: None,
@@ -312,13 +312,13 @@ impl FileSensor {
     /// poll, or on [`FileSensor::commit`]. A fresh store's first poll sets a
     /// baseline. Session memory starts from nothing seen, and a trigger
     /// definition with it is delivered at most once in the session, whatever
-    /// it compares on. It is spent when its line is delivered
-    /// ([`FileSensor::spend`]); until then the keys that fired keep what the
-    /// trigger saw before, so it fires again on the next poll whose result
-    /// still meets it. Once spent, a later change, such as a condition that
-    /// leaves and enters again, fires nothing. The mark is kept by
-    /// fingerprint, so a renamed trigger stays spent and an edited one fires
-    /// once more.
+    /// it compares on. It fires nothing while its lines are out, and is
+    /// spent once they have all settled ([`session`]). Until then the keys
+    /// that fired keep what the trigger saw before, so a released trigger
+    /// fires again on the next poll whose result still meets it. Once spent,
+    /// a later change, such as a condition that leaves and enters again,
+    /// fires nothing. The mark is kept by fingerprint, so a renamed trigger
+    /// stays spent and an edited one fires once more.
     pub fn observe(&mut self, trigger: &Trigger, now: Seen) -> Vec<String> {
         let test = trigger.fingerprint();
         let mem = match trigger.memory {
@@ -343,6 +343,9 @@ impl FileSensor {
                     Some(v) => seen.insert(k.clone(), v.clone()),
                     None => seen.remove(k),
                 };
+            }
+            if self.outstanding.contains_key(&test) {
+                out.clear();
             }
         }
         mem.insert(trigger.name.clone(), Memo { test, seen });
@@ -392,6 +395,7 @@ impl FileSensor {
             let (now, items) = seen_by(t, result, &next);
             let before = self.prior(t).unwrap_or_default();
             let keys = self.observe(t, now);
+            let mut offered = std::collections::BTreeSet::new();
             for k in &keys {
                 let gone = keyed_item(t, k);
                 let item = items.get(k).or_else(|| before.get(k).filter(|v| !v.is_boolean())).or(gone.as_ref());
@@ -402,17 +406,15 @@ impl FileSensor {
                     None => format!("{} {}: {k}", self.name, t.name),
                 };
                 let text = super::deliverable(&text);
-                if t.memory == Memory::Session && !self.undelivered.iter().any(|(d, f)| *d == text && *f == t.fingerprint()) {
-                    self.undelivered.push((text.clone(), t.fingerprint()));
-                    if self.undelivered.len() > Self::UNDELIVERED_MAX {
-                        self.undelivered.remove(0);
-                    }
+                if t.memory == Memory::Session {
+                    offered.insert(text.clone());
                 }
                 if let Some(e) = t.expires {
                     self.lapses.push((text.clone(), e));
                 }
                 out.push((t.magnitude.unwrap_or(1.0), text));
             }
+            self.offer(t.fingerprint(), offered);
             self.verdicts.push(Verdict { trigger: t.name.clone(), fired: keys });
         }
         out
@@ -649,7 +651,11 @@ impl Sensor for FileSensor {
 
     /// Spend each session trigger whose line `description` is.
     fn delivered(&mut self, description: &str) {
-        self.spend_lines_of(description);
+        self.settle(description);
+    }
+
+    fn dropped(&mut self, description: &str) {
+        self.release(description);
     }
 
     fn take_spent(&mut self) -> bool {

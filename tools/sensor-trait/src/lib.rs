@@ -130,14 +130,21 @@ pub trait Sensor: Send {
         None
     }
 
-    /// The line `description` of an earlier poll went out. A trigger the
-    /// sensor keeps for the session becomes spent only here, so a line
-    /// dropped on its way, by the refractory, the governor or a failed
-    /// write, leaves the trigger to fire again. Default: nothing.
+    /// The line `description` of an earlier poll was handled: written, or
+    /// held under the event lane's cut. A trigger the sensor keeps for the
+    /// session becomes spent once all the lines it offered were handled.
+    /// Until each of its lines is handled or [`Sensor::dropped`], the
+    /// trigger offers nothing more. Default: nothing.
     fn delivered(&mut self, _description: &str) {}
 
+    /// The line `description` of an earlier poll was dropped on its way: by
+    /// the refractory, the cache gate or a failed write. A trigger the sensor
+    /// keeps for the session that offered it fires again on the next poll
+    /// that meets it. Default: nothing.
+    fn dropped(&mut self, _description: &str) {}
+
     /// Whether a trigger this sensor keeps for the session became spent
-    /// since the last call, because its line was [`Sensor::delivered`].
+    /// since the last call, because its lines were [`Sensor::delivered`].
     /// The loop checkpoints at once when it did, so a restart does not
     /// fire the trigger again. Default: never.
     fn take_spent(&mut self) -> bool {
@@ -390,6 +397,9 @@ impl SensorSlot {
         // Absolute refractory: drop all observations silently. The agent
         // needs a beat to process what just arrived.
         if self.engagement.in_absolute_refractory(tick) {
+            for (_, description) in &observations {
+                self.sensor.dropped(description);
+            }
             self.interval.on_change();
             return true;
         }
@@ -412,6 +422,8 @@ impl SensorSlot {
                 }
                 self.accumulator.accumulate(magnitude, description);
                 accepted += 1;
+            } else {
+                self.sensor.dropped(&description);
             }
         }
 
