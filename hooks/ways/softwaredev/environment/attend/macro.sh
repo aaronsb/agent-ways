@@ -28,19 +28,16 @@ field() { grep -o "\"$2\":[^,}]*" <<<"$1" | head -1 | cut -d: -f2-; }
 LISTEN=$(attend listen status --json 2>/dev/null) || exit 0
 [[ $(field "$LISTEN" resolved) == true ]] || exit 0
 LISTENING=$(field "$LISTEN" listening)
+# Only the attend mod delivers anything: a session listening
+# without it, from a shell's `attend listen on` or a join, gets nothing.
 MOD_HOST=$([[ $LISTENING == true && $(field "$LISTEN" host) == '"mod"' ]] && echo true)
-RUN_LIVE=$(field "$LISTEN" run_live)
 
 if [[ ${WAYS_SCOPE:-} == subagent || -n ${CLAUDE_AGENT_ID:-} ]]; then
   WHO="the parent session"
-  if [[ $RUN_LIVE == true && $MOD_HOST == true ]]; then
-    echo "**Status**: the parent session is listening through the attend mod, and its \`attend run\` is also live under Monitor."
-  elif [[ $RUN_LIVE == true ]]; then
-    echo "**Status**: the parent session's \`attend run\` is live under Monitor."
-  elif [[ $MOD_HOST == true ]]; then
+  if [[ $MOD_HOST == true ]]; then
     echo "**Status**: the parent session is listening through the attend mod."
   elif [[ $LISTENING == true ]]; then
-    echo "**Status**: the parent session is listening at the end of each turn only."
+    echo "**Status**: the parent session listens without the attend mod, so nothing is delivered to it."
   else
     echo "**Status**: the parent session is not listening. Listening is the head agent's call."
   fi
@@ -50,34 +47,30 @@ else
   # plugin in its settings; whether it loaded is in the tool list, which a
   # hook cannot see, so the wording leaves that check to the agent.
   if grep -qx 'attend@agent-ways' <<<"${WAYS_ENABLED_PLUGINS:-}"; then
-    START="call \`attend_listen\` when that tool is listed; otherwise start \`Monitor: attend run\`"
+    START="call \`attend_listen\` when that tool is listed; without it the attend mod is not loaded, nothing reaches this session, and the attend CLI works by hand"
   else
-    START="start \`Monitor: attend run\`"
+    START="note that the attend mod is not enabled here, so nothing reaches this session and the attend CLI works by hand; \`ways manage mod install attend --commit\` installs the mod for the next session"
   fi
-  if [[ $RUN_LIVE == true && $MOD_HOST == true ]]; then
-    echo "**Status**: listening through the attend mod, and \`attend run\` is also live under Monitor. ADR-406 item 9 says not to run both: the mod is enough, so the Monitor can stop."
-  elif [[ $RUN_LIVE == true ]]; then
-    echo "**Status**: \`attend run\` is live under Monitor for this session."
-  elif [[ $MOD_HOST == true ]]; then
-    echo "**Status**: listening through the attend mod. Send with \`attend_send\` and \`attend_reply\`; do not start Monitor."
+  if [[ $MOD_HOST == true ]]; then
+    echo "**Status**: listening through the attend mod. Send with \`attend_send\` and \`attend_reply\`."
   elif [[ $LISTENING == true ]]; then
-    echo "**Status**: listening at the end of each turn only; nothing wakes an idle session. For that, $START."
+    echo "**Status**: listening without the attend mod, so nothing is delivered to this session. For delivery, $START."
   else
     echo "**Status**: not listening. If the user asks to use attend, $START."
   fi
 fi
 
-# Joined channels (read-only: no state cleanup on a way fire). A listening
-# session also hears its project and #open.
+# Joined channels (read-only: no state cleanup on a way fire). A session the
+# mod listens for also hears its project and #open.
 JOINED=$(attend channel --joined --json 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | sed 's/^/#/' | paste -sd, - | sed 's/,/, /g')
-if [[ $LISTENING == true ]]; then
+if [[ $MOD_HOST == true ]]; then
   echo "**Channels**: $WHO hears project, #open${JOINED:+, $JOINED}"
 elif [[ -n $JOINED ]]; then
-  echo "**Channels**: $WHO joined $JOINED; nothing is delivered until it listens"
+  echo "**Channels**: $WHO joined $JOINED; nothing is delivered until the attend mod listens for it"
 fi
 
-# Messages that wait while the session does not listen.
-if [[ $LISTENING != true ]]; then
+# Messages that wait while nothing delivers them.
+if [[ $MOD_HOST != true ]]; then
   UNREAD=$(field "$(attend message unread --json 2>/dev/null)" unread)
   [[ $UNREAD =~ ^[1-9][0-9]*$ ]] && echo "**Unread**: $UNREAD for $WHO"
 fi

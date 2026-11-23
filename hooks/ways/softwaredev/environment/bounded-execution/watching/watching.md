@@ -22,4 +22,4 @@ refire: 0.2
 ## See Also
 
 - environment/bounded-execution(softwaredev) — parent: background forms, liveness signals, killing by pid
-- environment/attend(softwaredev) — peer messages and sensors under Monitor
+- environment/attend(softwaredev) — peer messages and sensor reports through the attend mod

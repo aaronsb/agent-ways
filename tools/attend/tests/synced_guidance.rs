@@ -37,6 +37,19 @@ fn the_synced_sources_say_the_operator_sets_listening_active() {
     }
 }
 
+/// The synchronized sources say the same `**What wakes you.**` paragraph,
+/// word for word.
+#[test]
+fn the_synced_sources_say_the_same_what_wakes_you() {
+    const MARK: &str = "**What wakes you.**";
+    let sources = sources();
+    let paragraphs: Vec<(&str, &str)> = sources
+        .iter()
+        .map(|(name, text)| (*name, text.lines().find(|l| l.starts_with(MARK)).unwrap_or_else(|| panic!("{name} lacks the paragraph"))))
+        .collect();
+    assert_eq!(paragraphs[0].1, paragraphs[1].1, "{} and {} differ", paragraphs[0].0, paragraphs[1].0);
+}
+
 /// The synchronized sources say alike that `#open` reaches every listening
 /// session, other projects included, and send project chatter to a named
 /// channel or a direct message.
