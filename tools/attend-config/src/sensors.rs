@@ -31,6 +31,7 @@ pub const SHIPPED: &[(&str, &str)] = &[
     ("keepwarm", include_str!("../../../attend/sensors/keepwarm.yaml")),
     ("peers", include_str!("../../../attend/sensors/peers.yaml")),
     ("processes", include_str!("../../../attend/sensors/processes.yaml")),
+    ("ways-update", include_str!("../../../attend/sensors/ways-update.yaml")),
 ];
 
 /// A compiled sensor a `crate` file may name: its own fields, the item
