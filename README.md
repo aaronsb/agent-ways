@@ -87,14 +87,14 @@ flowchart LR
     classDef store fill:#2d8e5e,stroke:#4a5568,color:#ffffff
     classDef external fill:#f6821f,stroke:#4a5568,color:#1a1a1a
 
-    CC["Claude Code<br>hooks · Monitor · MCP"]:::outside
+    CC["Claude Code<br>hooks · plugins · MCP"]:::outside
     W["ways CLI<br>the hook engine"]:::core
     E["way-embed<br>local embeddings"]:::compute
     R[("ways roots<br>project · user · core")]:::store
     A["ways-agent<br>judge daemon, holds the key"]:::core
     P["hosted provider<br>Anthropic or OpenRouter"]:::external
     M["ways-mcp<br>registered as agent-ways<br>ways_status"]:::core
-    AT["attend<br>sensor loop"]:::compute
+    AT["attend<br>sensor host"]:::compute
     B[("message bus<br>signal files · channels")]:::store
     CH["attend-chat<br>you, on the bus"]:::outside
     AU["ways-audit<br>compliance claims"]:::compute
@@ -105,7 +105,7 @@ flowchart LR
     W -->|read ways| R
     W -->|prompt and queued matches| A
     A -->|yes or no per way| P
-    CC -->|Monitor, Stop hook| AT
+    CC -->|attend mod, Stop hook| AT
     CC -->|MCP tools| M
     AT <--> B
     CH <--> B
@@ -120,11 +120,11 @@ The judge is the only part that sends conversation text off your machine, and on
 | `way-embed` | The embedding engine (C++, llama.cpp) for semantic matching. It is optional: without it, only `pattern:`, `commands:`, `files:` and `tool_name:` triggers fire. | [Matching](docs/hooks-and-ways/matching.md), [finishing an install](docs/finish-install.md) |
 | `ways-agent` | A resident per-user daemon that holds your provider key and runs the relevance judge. The hook starts it on first use. | [Relevance judge](docs/explanation/relevance-judge/), [ADR-502](docs/architecture/platform/ADR-502-the-ways-agent-one-resident-daemon-per-user-for-search-judging-and-key-custody.md) |
 | `ways-mcp` | The agent-ways MCP server, registered with Claude Code as `agent-ways`. Today it hosts one read-only tool, `ways_status`. ADR-501 plans attend and keepalive modules on it. | [ADR-501](docs/architecture/platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) |
-| `attend` | The awareness layer: sensors for git state, peer sessions and process activity, surfaced into a running session as notifications. | [Attend and Monitor](docs/attend-and-monitor/README.md) |
+| `attend` | The awareness layer: peer messages, and sensors for git state, peer sessions and process activity, delivered into a listening Claude Code session by the attend mod, a Claude Code plugin. | [Attend](docs/attend-and-monitor/README.md), [the attend mod](docs/attend-and-monitor/mod.md) |
 | `attend-chat` | A terminal chat that puts you on the same signal bus the agents use. | [`attend chat`](docs/attend-and-monitor/tui.md) |
 | `ways-audit` | Reports on the compliance claims ways carry: coverage, control traces, provenance lint. | [Governance](docs/governance.md) |
 
-Attend delivers a peer's message to a session two ways: a Monitor line wakes an idle session, and the Stop hook hands messages over at the end of a busy turn ([delivery](docs/attend-and-monitor/delivery.md)). Its keepwarm sensor, once armed, wakes an idle session before the prompt cache lapses ([keepwarm](docs/attend-and-monitor/keepwarm.md)). In `attend chat` you address agents by name or channel on the same bus:
+Attend reaches a Claude Code session only through the attend mod. The mod wakes an idle session for a message addressed to it, and the Stop hook hands over what is pending at the end of a busy turn, sensor reports included ([delivery](docs/attend-and-monitor/delivery.md)). While keepwarm is armed, the mod also wakes an idle session before its prompt cache lapses ([keepwarm](docs/attend-and-monitor/keepwarm.md)). A session without the mod, such as a `claude -p` run that loads no plugins, gets none of this. In `attend chat` you address agents by name or channel on the same bus:
 
 <img src="docs/images/attend/attend-chat-fanout.png" alt="attend-chat on the merged tab: messages from the agents Elio and Lachlan and from the operator, each with its project and channel mark, and a draft addressed to @Elio @Lachlan with both recipients flagged under the input" width="720" />
 

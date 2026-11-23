@@ -1,34 +1,34 @@
-# Attend and Monitor
+# Attend
 
-This directory documents the active awareness layer. Attend gives a session the awareness an employee would otherwise have ambiently — what is changing, who else is working, what deserves attention. Mechanically, it rides on top of Claude Code's `Monitor` tool to surface environmental changes as async notifications into a running session, and humans and other Claude agents can both participate in the same signal stream.
+This directory documents the active awareness layer. Attend gives a session the awareness an employee would otherwise have ambiently: what is changing, who else is working, and what deserves attention. In Claude Code it reaches a session through the attend mod, a Claude Code plugin that delivers what attend has for the session as turns ([`mod.md`](mod.md)), and humans and other Claude agents participate in the same signal stream. The directory's name dates from when attend ran under Claude Code's `Monitor` tool; every delivery now goes through the mod.
 
 ## The thesis
 
-Monitor is Claude Code's general-purpose async delivery mechanism: launch a command, stream its stdout as notifications. Anthropic's assumption in designing it seems to be that Claude will wire up whatever ad-hoc command fits the moment — a `tail -f`, a `cargo watch`, a bespoke shell pipeline — and let Monitor relay whatever comes out. That's a powerful primitive but it puts the burden on every Claude session to reinvent the observation logic from scratch.
+A Claude Code session sees what happens in its conversation and nothing else. A branch switch in another terminal, a build that finished, a peer session that started in the same repository, or a message from another agent arrives at an unknown time, and the agent only learns of it when someone asks. Each session could poll for such things with commands of its own, but then every session reinvents the observation logic from scratch.
 
-**Attend is Monitor with intention.** It's a long-lived logic module that Claude doesn't have to tune case by case. It knows what kinds of changes matter, it governs the rate of environmental events through a formal engagement model (ADR-123, borrowing the activation-decay shape from ACT-R), it routes messages between peer agents through channels (ADR-118, ADR-173) on a message lane that never drops them, and it cleans up after itself by reaping the messages of projects that are gone (both ADR-136). Its event-lane governor is alarm management (ISA-18.2) applied to agent notifications — rate-limiting what reaches the conversation so the channel stays trustworthy instead of noisy. A Claude session drops into attend and gets a stable, opinionated awareness channel for free.
+Attend is that observation logic, written once. It knows what kinds of changes matter, it governs the rate of environmental events through a formal engagement model, borrowing the activation-decay shape from ACT-R, it routes messages between peer agents through channels on a message lane that never drops them, and it cleans up after itself by reaping the messages of projects that are gone. Its event-lane governor is alarm management (ISA-18.2) applied to agent notifications: it rate-limits what reaches the conversation so the channel stays trustworthy instead of noisy. That editorial policy is calm technology (Weiser & Brown) applied to a coding session: most changes stay in the periphery, and only what deserves attention moves to the center. A Claude session that listens gets a stable, opinionated awareness channel without tuning it case by case.
 
-Said another way: **Monitor is a delivery mechanism; attend is the editorial layer that decides what's worth delivering.** That editorial policy is calm technology (Weiser & Brown) applied to a coding session: most changes stay in the periphery, and only what deserves attention moves to the center. The combination turns "sporadic unpredictable state" into a structured stream of observations the agent can act on.
+## The parts
 
-## The pair
+**The sensor host** is attend's sensor loop. It watches the local environment (git state, peer sessions, context pressure, process activity, and any sensor a user adds as a file) and, when something crosses a threshold, writes the observation into the signal store for its session. The attend mod starts one host per listening session, as its own child process (`attend sensor host`), and the host lives as long as the session listens ([`loop.md`](loop.md)).
 
-**Attend** is a sensor loop. It watches the local environment (git state, peer sessions, context pressure, process activity, peer messages, and any sensor a user adds as a file) and emits observations when something crosses a threshold. It runs as a single long-lived process inside the Claude Code session.
+**The attend mod** decides whether a session listens, polls the signal store while the session idles, and delivers what is pending as a turn when something in it should wake the session. It also serves typed tools for sending, draws one status row, and drives keepwarm ([`mod.md`](mod.md)). A Stop hook delivers whatever is pending at the end of each turn ([`delivery.md`](delivery.md)).
 
-**Monitor** is the Claude Code tool feature that launches a command and delivers each line of its stdout as an asynchronous notification into the conversation. It's general-purpose: build watchers, test runners, deploy pipelines, custom event logs all fit.
+**The signal store** is a directory of small files under attend's cache. Peer messages, human-typed lines and the sensor host's reports are all signals in it, and every reader marks what it delivered in one seen-set per session ([`signals.md`](signals.md)).
 
-The common thread across every Monitor use case is **sporadic unpredictable state** — changes the agent didn't cause, arriving at unknown times, that still need to land in the conversation in time to affect the next decision. Attend is one class of sporadic state — the class that comes from *complex interactions across peer agents plus ambient environmental awareness*. A build watcher is another class. They share the mechanism; they differ in what they observe.
+A session without the mod gets none of this delivered: no idle wake, no turn-end drain, no sensor reports and no keepwarm wake. That covers a `claude -p` run or an SDK host that loads no plugins, an install whose policy blocks plugins, and Claude Code before 2.1.296. The `attend` CLI still sends, reads and lists by hand there.
 
 ## Two consumers, one channel
 
-Attend is not exclusively for AI agents. A human can launch it too, and both consumers share the same signal bus. The peer layer underneath is workspace awareness (Dourish & Bellotti's CSCW term) applied to coding agents — knowing who else is working, where, and what they said — served to humans and agents through one protocol.
+Attend is not exclusively for AI agents. A human can use it too, and both consumers share the same signal bus. The peer layer underneath is workspace awareness (Dourish & Bellotti's CSCW term) applied to coding agents, meaning knowing who else is working, where, and what they said, served to humans and agents through one protocol.
 
-**Agent mode — `attend run`:** An AI agent session invokes attend through Monitor. The sensor loop emits notifications into the conversation, and a Stop hook delivers pending messages at the end of each turn. The agent responds to what it sees, sends peer messages back through `attend message send`, and participates in channels through `attend channel join`. See [`loop.md`](loop.md) for the sensor loop and [`delivery.md`](delivery.md) for the two delivery conduits. In Claude Code the attend mod takes Monitor's place: a session listens when its project is set active or when the user asks for attend, and the mod delivers, draws a status row and serves typed tools ([`mod.md`](mod.md)).
+**Agent mode, through the attend mod:** a session listens when its project is set active or when the user asks for attend and the agent calls `attend_listen`. The mod delivers messages and sensor reports, and the agent answers with the `attend_reply` and `attend_send` tools and joins channels with `attend_join` ([`mod.md`](mod.md)). See [`loop.md`](loop.md) for the sensor host and [`delivery.md`](delivery.md) for the two delivery conduits.
 
-**Human mode — `attend chat`:** A human opens attend-chat, a terminal chat screen on the same message bus. Every channel streams into it, and the human addresses Claude agents (`@Elio ship it`, `@Elio @Lachlan sync first`, `#deploy hold`) through the same signal files the agents use, and steers a multi-agent session from one surface. See [`tui.md`](tui.md).
+**Human mode, `attend chat`:** a human opens attend-chat, a terminal chat screen on the same message bus. Every channel streams into it, and the human addresses Claude agents (`@Elio ship it`, `@Elio @Lachlan sync first`, `#deploy hold`) through the same signal files the agents use, and steers a multi-agent session from one surface. See [`tui.md`](tui.md).
 
-The phrase that captures it: **humans wear the same clothes as an AI agent** as far as attend is concerned. Same signal protocol, same routing, same channels. The human just happens to have a keyboard and eyeballs instead of a context window.
+As far as attend is concerned, a human and an AI agent are the same kind of participant: same signal protocol, same routing, same channels. The human reads with a screen and types with a keyboard, where the agent reads its context window.
 
-This dual-consumer property is deliberate. It means the signal protocol is dogfooded — the human feels the routing semantics directly, and any friction in how messages land is friction the agents also experience. It also means a solo developer watching one agent gets as much value as a coordinator orchestrating four.
+This dual-consumer property is deliberate. It means the signal protocol is dogfooded: the human feels the routing semantics directly, and any friction in how messages land is friction the agents also experience. It also means a solo developer watching one agent gets as much value as a coordinator orchestrating four.
 
 ## Scale context
 
@@ -42,10 +42,10 @@ This is why **sensors of your own are a first-class design surface** — they're
 
 Every sensor is one YAML file under one spec (ADR-403), layered by name: the files attend ships, then your own under `$XDG_CONFIG_HOME/attend/sensors/`, then a project's under `.claude/attend/sensors/`. A file's `kind` says what polls:
 
-- **`crate`** configures a compiled sensor: a Rust crate or attend module implementing the `Sensor` trait from `sensor-trait`. The shipped sensors are of this kind: `context`, `git` and `disclosure` (modules of attend itself, always compiled), and the `sensor-peers`, `sensor-processes` and `sensor-keepwarm` crates. A file of your own changes any of their fields without a rebuild.
+- **`crate`** configures a compiled sensor: a Rust crate or attend module implementing the `Sensor` trait from `sensor-trait`. Most shipped sensors are of this kind: `context` and `git` (modules of attend itself, always compiled), and the `sensor-peers` and `sensor-processes` crates. A file of your own changes any of their fields without a rebuild.
 - **`command`** runs an argv and reads its output, and **`mcp`** calls one read-only tool on a stdio MCP server. Neither needs Rust or a recompile. attend runs both; an `mcp` sensor runs once `attend sensor probe` has recorded that reading its tool leaves it unchanged. The shipped `example-command.yaml` and `example-mcp.yaml` are the patterns to copy.
 
-**Every kind shares one constraint: the sensor author has to understand the loop's intention.** Events are not log lines — they're magnitude-weighted observations that feed an accumulator, decay over time, and fire disclosure only when they cross a refractory-aware threshold. A sensor that emits "something happened" on every tick will either flood the governor or get suppressed into silence by action potential. A well-designed sensor encodes *how much each kind of change matters* in the event magnitude, and lets the loop handle the rest.
+**Every kind shares one constraint: the sensor author has to understand the loop's intention.** Events are not log lines. They are magnitude-weighted observations that feed an accumulator, decay over time, and are disclosed only when they cross a refractory-aware threshold. A sensor that emits "something happened" on every tick will either flood the governor or get suppressed into silence by action potential. A well-designed sensor encodes *how much each kind of change matters* in the event magnitude, and lets the loop handle the rest.
 
 See [`authoring-sensors.md`](authoring-sensors.md) for the spec and the author's guide.
 
@@ -54,13 +54,13 @@ See [`authoring-sensors.md`](authoring-sensors.md) for the spec and the author's
 | File | Purpose |
 |---|---|
 | [`README.md`](README.md) | Orientation — you are here |
-| [`loop.md`](loop.md) | The sensor loop — state diagrams, timing, the two lanes |
+| [`loop.md`](loop.md) | The sensor host and its loop — state diagrams, timing, the two lanes |
 | [`first-sensor.md`](first-sensor.md) | Walkthrough — write your first sensor file |
 | [`authoring-sensors.md`](authoring-sensors.md) | The sensor file spec and writing sensors (reference) |
 | [`sensors.md`](sensors.md) | The shipped sensors, their states, and what each observes and emits |
 | [`engagement.md`](engagement.md) | The action-potential model on the event lane |
 | [`signals.md`](signals.md) | Signal file format, storage layout, lifecycle |
-| [`delivery.md`](delivery.md) | The Monitor line and the Stop-hook drain, enrollment, opt-out |
+| [`delivery.md`](delivery.md) | The mod's poll and the Stop-hook drain, system signals, enrollment, opt-out |
 | [`mod.md`](mod.md) | The attend mod in Claude Code: dormant and active sessions, its config, install |
 | [`channels.md`](channels.md) | Channel membership and lifecycle |
 | [`tui.md`](tui.md) | `attend chat` — the human on the bus |
@@ -70,12 +70,13 @@ See [`authoring-sensors.md`](authoring-sensors.md) for the spec and the author's
 
 ## Reading order
 
-1. **[`loop.md`](loop.md)** — if you only read one file, read this. The sensor loop is the substrate everything else rides on.
-2. **[`delivery.md`](delivery.md)** — how a peer message reaches a session, and how to opt out.
-3. **[`tui.md`](tui.md)** — if you're a human using attend directly, or coordinating multiple agents.
-4. **[`first-sensor.md`](first-sensor.md)** — if you want to tune or write a sensor and you've never done it before.
-5. **[`authoring-sensors.md`](authoring-sensors.md)** — the sensor file spec and design surface once the tutorial isn't enough.
-6. **[`sensors.md`](sensors.md)**, **[`engagement.md`](engagement.md)**, **[`signals.md`](signals.md)**, **[`channels.md`](channels.md)**, **[`keepwarm.md`](keepwarm.md)**, **[`configuration.md`](configuration.md)** — reference, read as needed.
+1. **[`mod.md`](mod.md)** — how a Claude Code session starts listening, and what the mod does while it listens.
+2. **[`loop.md`](loop.md)** — the sensor host, which every sensor report comes from.
+3. **[`delivery.md`](delivery.md)** — how a peer message or a sensor report reaches a session, and how to opt out.
+4. **[`tui.md`](tui.md)** — if you're a human using attend directly, or coordinating multiple agents.
+5. **[`first-sensor.md`](first-sensor.md)** — if you want to tune or write a sensor and you've never done it before.
+6. **[`authoring-sensors.md`](authoring-sensors.md)** — the sensor file spec and design surface once the tutorial isn't enough.
+7. **[`sensors.md`](sensors.md)**, **[`engagement.md`](engagement.md)**, **[`signals.md`](signals.md)**, **[`channels.md`](channels.md)**, **[`keepwarm.md`](keepwarm.md)**, **[`configuration.md`](configuration.md)** — reference, read as needed.
 
 The scenarios in [`../explanation/attend-messaging/`](../explanation/attend-messaging/00-overview.md) show the message lane at work with one, two and many Claudes and a human.
 
@@ -90,7 +91,6 @@ The scenarios in [`../explanation/attend-messaging/`](../explanation/attend-mess
 - **ADR-118** — channels (introduced as focus groups), dynamic agent grouping
 - **ADR-119** — action potential engagement model (superseded by ADR-123) <!-- adr-cite-ignore -->
 - **ADR-120** — interactive chat TUI, human in the signal loop
-- **ADR-122** — the disclosure sensor
 - **ADR-123** — firing dynamics unification; the engagement engine in force
 - **ADR-136** — the message lane, split from the event lane
 - **ADR-172** — turn-boundary delivery through the Stop-hook drain
@@ -106,9 +106,22 @@ The scenarios in [`../explanation/attend-messaging/`](../explanation/attend-mess
 - `tools/attend-chat/` — the chat screen, on `agent-tui`
 - `tools/attend-groups/`, `attend-presence/`, `attend-state/`, `attend-config/` — channels, heartbeats and enrollment, the per-session seen-set, the config schema
 - `tools/sensor-trait/` — base `Sensor` trait, `SensorSlot`, engagement state
-- `tools/attend/src/sensors/` (`context`, `git`, `disclosure`), `tools/sensor-peers/`, `sensor-processes/`, `sensor-keepwarm/` — the compiled sensors
+- `tools/attend/src/cmd/run/` — the sensor host (`attend sensor host`) and its loop
+- `tools/attend/src/sensors/` (`context`, `git`), `tools/sensor-peers/`, `sensor-processes/` — the compiled sensors
+- `tools/sensor-keepwarm/` — keepwarm's judgment, which `attend keepwarm check` runs
 - `attend/sensors/` — the shipped sensor files; `tools/sensor-spec/` parses, layers and checks them, and `tools/attend-config/src/sensors.rs` finds them
+- `plugins/attend/` — the attend mod
 - `hooks/ways/attend-drain-stop.sh` — the Stop hook that drains messages at the turn boundary
 - `tools/agent-fmt/` — shared terminal formatting (banners, tables, commands)
-- `skills/attend/SKILL.md` — the invocation skill the agent reads when the user asks for awareness
+- `skills/attend/SKILL.md` — the skill behind `/attend`, which calls `attend_listen` or says the mod is not loaded
 - `hooks/ways/softwaredev/environment/attend/` — the way that surfaces live attend state in the steering layer
+
+## References
+
+- ADR-118: channels, which route messages between peer agents.
+- ADR-122: the disclosure sensor, which ADR-416 removed.
+- ADR-123: the engagement model that governs the rate of environmental events.
+- ADR-136: the message lane, and reaping the messages of projects that are gone.
+- ADR-173: the channel vocabulary and chat verbs.
+- ADR-406: the attend mod.
+- ADR-416: awareness reaches a Claude Code session only through the attend mod, which starts the sensor host; Monitor delivery removed.

@@ -2,7 +2,7 @@
 
 Attend's engagement model governs *when a sensor is allowed to fire a disclosure*. The idea it implements is established: in cognitive architectures like ACT-R, base-level activation decays with disuse, and recent activity changes how easily the next stimulus gets through. Attend applies that idea per sensor, borrowing its shape from the neuronal action potential: resting baseline, rapid rise on stimulus, refractory period after a burst, gradual return to rest. The biology gives us a predictable, well-studied shape for a phenomenon we actually care about — how productive engagement with a stimulus decays naturally over time.
 
-Engagement gates the **event lane** only: `context`, `git`, `processes` and `disclosure`. The message lane (`peers` and `keepwarm`) skips it, so a peer message or a keepwarm wake is never held by a refractory (ADR-136, see [`delivery.md`](delivery.md)).
+Engagement gates the **event lane** only, which every shipped sensor that is on rides: `context`, `git`, `peers`, `processes` and `ways-update`. A sensor whose file declares the message lane skips it, so words a person wrote are never held by a refractory. Peer messages themselves pass through no sensor: the attend mod's drain delivers them ([`delivery.md`](delivery.md)).
 
 This page covers the model in prose and diagrams, explains what each parameter does, and walks through how it interacts with the disclosure governor. The canonical architecture is **[ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)** — the progression-axis unification that moved the firing-dynamics core into a shared crate consumed by both attend and ways. This page is the attend-specific, implementer-and-author-friendly explainer for how attend instantiates that core.
 
@@ -148,10 +148,6 @@ slots[i].engagement.record_fire(tick, 1.0);
 
 The `record_fire(tick, magnitude)` call replaces the pre-ADR-123 `record_disclosure()` — same moment in the flow, new API shape. Magnitude is `1.0` (unit-weight) for attend; the engine supports weighted fires for callers that want them, but attend's sensors all contribute equally to the burst count.
 
-## Per-peer boost
-
-`sensor-peers` multiplies a message's magnitude by how often the same peer has written within `peer_activity_window` (default 900 s): ×1.0 for the first message, ×1.75 for the second, ×2.5 from the third. Since peer messages ride the message lane, the boost only raises the line's priority. It does not decide whether a message is shown: every message is shown once. The sensor counts per peer in its own sliding window rather than through the curve engine, because the boost is per peer, not per sensor.
-
 ## Tuning with `attend config tune`
 
 The default engagement parameters are sized for a typical Claude session, but they're derivable from real data. `attend config tune` surveys recent sessions under `~/.claude/projects/` (the 10 most-recent active projects, 5 most-recent sessions each by default), computes percentiles on turn cycle durations (assistant → user, user → user), and proposes engagement parameters grounded in actual usage:
@@ -176,18 +172,16 @@ engagement:
   step_multiplier: 1.25     # yours, unchanged
   absolute_refractory: 32     # median think time
   decay_per_minute: 0.0256     # peak decays over ~2× burst-window equivalent
-  peer_activity_window: 1467    # sized from u2u p90 × burst_threshold
 
 (pass --apply to write these values to your attend config)
 ```
 
-`burst_threshold` and `step_multiplier` are yours: tune reads them from your user config and derives the other three from them and the survey.
+`burst_threshold` and `step_multiplier` are yours: tune reads them from your user config and derives the other two from them and the survey.
 
 - `absolute_refractory` is the median think time, clamped to 15–300 s.
-- `peer_activity_window` is the user→user p90 times `burst_threshold`, clamped to 300–3600 s.
-- `decay_per_minute` is chosen so a linear relaxation from the peak would reach rest over twice that window.
+- `decay_per_minute` is chosen so a linear relaxation from the peak would reach rest over twice the burst window, the user→user p90 times `burst_threshold`, clamped to 300–3600 s.
 
-Nothing is applied until you pass `--apply`, which writes only those three keys to your user-scope config through the settings writer, leaving comments and other keys as they were. Re-run it when your session rhythm changes.
+Nothing is applied until you pass `--apply`, which writes only those two keys to your user-scope config through the settings writer, leaving comments and other keys as they were. Re-run it when your session rhythm changes.
 
 Tune's arithmetic is linear and the engine's decay is exponential. At load time `decay_per_minute: 0.0256` becomes `multiplier_half_life ≈ 1611` s (~27 min). The two shapes are close in the first minutes after a burst and diverge in the tail, where the exponential never quite returns to 1.0.
 
@@ -197,7 +191,7 @@ Engagement is a **per-sensor** gate. The disclosure governor is a **global** gat
 
 - **Sensor refractory says NO** → event accumulates silently. No disclosure fires.
 - **Sensor refractory says YES, governor cooldown active** → sensor is "ready" but held. The loop logs `N sensors ready but governor holding`. When the cooldown rolls, accumulated sensors fire together.
-- **Both say YES** → disclosure fires. Events are emitted as Monitor notifications, governor records the disclosure, engagement records the burst count via `record_fire(tick, 1.0)`.
+- **Both say YES** → disclosure fires. The sensor host writes the events as system signals for the session ([`loop.md`](loop.md#the-sensor-host)), the governor records the disclosure, and engagement records the burst count via `record_fire(tick, 1.0)`.
 
 The governor protects against *global flood* — too many sensors all trying to fire at once. Engagement protects against *per-sensor spam* — one sensor firing too frequently on declining-value stimuli. They're complementary.
 
@@ -226,3 +220,7 @@ For the ways-side equivalent of this page see [ADR-123 Decision 4](../architectu
 - [`loop.md`](loop.md) — where engagement state sits in the loop iteration
 - [`authoring-sensors.md`](authoring-sensors.md) — how sensor authors design around engagement
 - [`configuration.md`](configuration.md) — full config schema for engagement parameters
+
+## References
+
+- ADR-136: the message lane, which engagement does not gate.

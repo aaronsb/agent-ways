@@ -1,6 +1,6 @@
 # Sensors — the shipped set
 
-Every sensor is one YAML file. attend embeds nine shipped files, kept in the repository under `attend/sensors/` and projected with the app to `$XDG_DATA_HOME/agent-ways/attend/sensors/`. Six are `crate` sensors, each configuring a compiled sensor: `context`, `git` and `disclosure` are modules of attend under `tools/attend/src/sensors/` and always compiled; `peers`, `processes` and `keepwarm` are the crates `sensor-peers`, `sensor-processes` and `sensor-keepwarm`, linked behind feature flags. `example-command` and `example-mcp` ship with `enabled: false` as patterns to copy. The ninth, `ways-update`, is a `command` sensor that tells the session when agent-ways has a newer release ([`ways-update`](#ways-update)). A file of the same name in your user or project layer changes any field of a shipped one; [`authoring-sensors.md`](authoring-sensors.md) has the spec.
+Every sensor is one YAML file. attend embeds seven shipped files, kept in the repository under `attend/sensors/` and projected with the app to `$XDG_DATA_HOME/agent-ways/attend/sensors/`. Four are `crate` sensors, each configuring a compiled sensor: `context` and `git` are modules of attend under `tools/attend/src/sensors/` and always compiled; `peers` and `processes` are the crates `sensor-peers` and `sensor-processes`, linked behind feature flags. `example-command` and `example-mcp` ship with `enabled: false` as patterns to copy. The seventh, `ways-update`, is a `command` sensor that tells the session when agent-ways has a newer release ([`ways-update`](#ways-update)). A file of the same name in your user or project layer changes any field of a shipped one; [`authoring-sensors.md`](authoring-sensors.md) has the spec. The sensor host the attend mod starts for each listening session runs them ([`loop.md`](loop.md#the-sensor-host)); a session without the mod runs none. Keepwarm is not a sensor: the mod runs `attend keepwarm check` on its own ([`keepwarm.md`](keepwarm.md)).
 
 `attend sensor list` shows every sensor the files declare:
 
@@ -8,12 +8,10 @@ Every sensor is one YAML file. attend embeds nine shipped files, kept in the rep
   Sensor          Kind    Origin  State  Lane    Interval   Source                 File
   ─────────────────────────────────────────────────────────────────────────────────────
   context         crate   builtin active event   60s / 20s  attend@0.33.0          -
-  disclosure      crate   builtin active event   60s / 20s  attend@0.33.0          -
   example-command command builtin off    event   300s / 60s sh                     -
   example-mcp     mcp     builtin off    message 120s / 60s slack/list_unread      -
   git             crate   builtin active event   30s / 10s  attend@0.33.0          -
-  keepwarm        crate   builtin active message 60s / 60s  sensor-keepwarm@0.1.0  -
-  peers           crate   builtin active message 30s / 10s  sensor-peers@0.6.0     -
+  peers           crate   builtin active event   30s / 10s  sensor-peers@0.6.0     -
   processes       crate   builtin active event   30s / 5s   sensor-processes@0.6.0 -
   ways-update     command builtin active event   604800s / 604800s ways               -
 ```
@@ -39,15 +37,13 @@ These are the shipped files' values.
 |---|---|---|---|---|---|---|
 | **context** | the session's own token usage | 60s / 20s | 1.5 | 3 | event | `Read` |
 | **git** | the working tree and its upstream | 30s / 10s | 2.0 | 4 | event | `Bash(git:*)` |
-| **peers** | other Claude sessions and peer messages | 30s / 10s | 2.0 | 5 | message | `Read` |
+| **peers** | other Claude Code sessions starting, leaving and changing state | 30s / 10s | 2.0 | 5 | event | `Read` |
 | **processes** | build and dev-tool processes | 30s / 5s | 2.0 | 5 | event | `Bash(ps:*)` |
-| **disclosure** | tokens since attend last taught the messaging contract | 60s / 20s | 1.5 | 3 | event | `Bash(ways:*)` |
-| **keepwarm** | idle time against the prompt-cache hour | 60s / 60s | 3.0 | 3 | message | `Bash(ways:*)` |
 | **ways-update** | a newer agent-ways release on the install's channel | 7d / 7d | 1.0 | 1 | event | `Bash(ways:*)` |
 
-Every sensor polls faster (toward its minimum interval) while it sees change and slower (toward its base interval) when quiet. Event-lane sensors pass through the action-potential refractory and the strict governor ([`engagement.md`](engagement.md)). Message-lane sensors skip the refractory and use the message lane's permissive governor ([`delivery.md`](delivery.md#the-monitor-line)).
+Every sensor polls faster (toward its minimum interval) while it sees change and slower (toward its base interval) when quiet. Every shipped sensor that is on rides the event lane, through the action-potential refractory and the strict governor ([`engagement.md`](engagement.md)). A file of your own that declares `lane: message` skips the refractory and uses the message lane's permissive governor ([`loop.md`](loop.md#disclosure-and-the-governor)).
 
-When a sensor discloses, its events print to stdout only if its accumulated magnitude has reached 3.0 (medium priority) or 5.0 (high). Below that they go to stderr, and if another sensor in the same batch did print, one `[attend] also: N quiet event(s) from …` line counts them. The sensor host applies the same cut to an event-lane batch: under 3.0 it is logged and not written ([`loop.md`](loop.md#the-sensor-host)).
+When a sensor discloses on the event lane, the sensor host writes its lines only if its accumulated magnitude has reached 3.0. Under that they are logged on stderr and not written ([`loop.md`](loop.md#the-sensor-host)). A written line reaches the session at its next turn and never wakes it ([`delivery.md`](delivery.md#system-signals)).
 
 ## `context`
 
@@ -85,9 +81,7 @@ It does not read commit messages, tags or hooks.
 
 ## `peers`
 
-Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads peer messages from the signals base. This is the sensor that makes multi-agent work possible: who else is working, where, and what they said.
-
-**Sessions.**
+Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and their transcripts, and reports their presence: who else is working, and where. It reads no messages; the attend mod's drain delivers those ([`delivery.md`](delivery.md)). Presence is no one's words, so its reports ride the event lane.
 
 | Event | Magnitude |
 |---|---|
@@ -95,12 +89,6 @@ Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads 
 | peer session exited, same project / other project | 2.0 / 0.5 |
 | same-project peer changed status (working, waiting) | 1.5 |
 | same-project peer crossed 80% context | 2.0 |
-
-**Messages.** Each poll scans the project tray, `_broadcast/` and every joined channel, and emits every unseen message. Base magnitudes are 7.0 for a message sent to the project, 5.0 for a channel and 4.0 for `#open`, raised by the per-peer boost ([`engagement.md`](engagement.md#per-peer-boost)). More than 8 messages in one poll become one count line. [`delivery.md`](delivery.md) covers the line format, the cold start and the Stop-hook drain.
-
-Its file declares `lane: message` with `author: sender`, the field of each message that names who wrote it. The lane is per sensor, so under `attend run` session events from the same poll ride the message lane and skip the refractory too. The sensor host ([`loop.md`](loop.md#the-sensor-host)) runs it presence-only: it reads no messages, which the mod's drain delivers, and its presence reports ride the event lane.
-
-The sensor re-reads `_groups.yaml` on every poll, so `attend channel join` and `attend channel leave` take effect on the next scan.
 
 ## `ways-update`
 
@@ -177,16 +165,6 @@ The format is `cmd|exit_code|unix_ts`. When a watched tool exits, the marker's `
 
 The sensor does not capture output.
 
-## `disclosure`
-
-Re-teaches the messaging contract when it has drifted out of the agent's recent context (ADR-122). Each poll reads the token count from `ways context --json`. The first poll of an `attend run` emits the contract (how to send, reply and scope messages, the drain, keepwarm, the rule that attend's tools and CLI are the contract), and it emits again each time the session has moved 25% of the context window since the last time. The magnitude is 5.0, so the line prints at high priority on a single poll.
-
-The body is `tools/attend/src/sensors/disclosures/messaging.md`, compiled into the binary. It is kept in step with the attend skill and the attend way. The ledger is in memory only, so a restarted run teaches again on its first poll.
-
-## `keepwarm`
-
-While armed, wakes an idle session once at 50 idle minutes so the prompt cache is read before its hour lapses. It emits at 3.0 on the message lane and needs a resolved session id; without one it does not start. Its wake has no author, and attend runs the compiled `keepwarm` sensor on the message lane whatever its files declare. Arming, the status card, the cost model and the agent's one-word contract are in [`keepwarm.md`](keepwarm.md).
-
 ## Choosing where a new observation goes
 
 1. **Does a shipped sensor cover it?** The `git` sensor already watches git state. A file of the same name in your user or project layer tunes it.
@@ -199,15 +177,13 @@ While armed, wakes an idle session once at 50 idle minutes so the prompt cache i
 - [`authoring-sensors.md`](authoring-sensors.md) — the sensor file spec and writing new sensors
 - [`first-sensor.md`](first-sensor.md) — a first sensor file, step by step
 - [`engagement.md`](engagement.md) — the event lane's refractory
-- [`delivery.md`](delivery.md) — the message lane and its two conduits
-- [`keepwarm.md`](keepwarm.md) — the keepwarm sensor in full
+- [`loop.md`](loop.md) — the sensor host that runs these sensors
+- [`delivery.md`](delivery.md) — how what the host writes reaches the session
 
 ## References
 
 - **ADR-113** — attend and the first context sensor
 - **ADR-117** — sensor crate extraction and feature flags
-- **ADR-122** — the disclosure sensor
 - **ADR-136** — the event and message lanes
-- **ADR-182** — keepwarm, and its wake on the message lane before the cache's hour lapses
 - **ADR-403** — sensors as files under one spec
-- **ADR-416** — the update check, and the `ways-update` sensor
+- **ADR-416** — the sensor host, the presence-only peers sensor, the update check and the `ways-update` sensor

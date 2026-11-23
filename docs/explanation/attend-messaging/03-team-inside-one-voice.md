@@ -81,9 +81,8 @@ If each accrued message had been injected as its own turn, the workflow would
 have been shredded by interrupts — or the messages dropped to protect it.
 Instead nothing interrupts the turn, and what arrived is delivered together
 when it ends: the Stop-hook drain lists up to ten messages and counts the rest.
-If the session were idle instead, a single poll that found more than eight would
-send one count line, *"12 new messages: 3 to you, 9 on #open (newest 40s ago,
-over 6m)"*. The **durable tray plus the coalesced delivery** is what lets Vale stay
+If the session were idle instead, the attend mod would deliver the whole
+burst as one turn. The **durable tray plus the coalesced delivery** is what lets Vale stay
 heads-down *and* lose nothing; Vale pulls detail with `attend message inbox` if a line
 warrants it.
 
@@ -91,5 +90,5 @@ warrants it.
 
 A "participant" is **one session = one tray**, not its internal team. Deep,
 turn-bound work (a workflow, a long reasoning pass) is exactly when wall-clock
-messages pile up — so the message lane's durability and digesting aren't a
+messages pile up — so the message lane's durability and batching aren't a
 nicety here, they're what makes delegation and conversation coexist.

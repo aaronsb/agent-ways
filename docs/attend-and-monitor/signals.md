@@ -1,6 +1,6 @@
 # Signals — wire format, storage, lifecycle
 
-Signals are attend's on-disk messaging primitive — the transport underneath its workspace awareness. Everything that flows between sessions — peer messages sent with `attend message send`, notifications rendered into the conversation via Monitor, human-typed lines in `attend chat` — is mediated by signal files on the local filesystem. This page covers the wire format, how signals are organized on disk, and the full lifecycle from arrival to deletion.
+Signals are attend's on-disk messaging primitive — the transport underneath its workspace awareness. Everything that flows to a session (peer messages sent with `attend message send`, human-typed lines in `attend chat`, and the reports the sensor host writes for its own session) is a signal file on the local filesystem. This page covers the wire format, how signals are organized on disk, and the full lifecycle from arrival to deletion.
 
 ## The wire format
 
@@ -21,14 +21,15 @@ from|project|cwd|re:signal-id|message
 - **`from`** — identifier of the sender, in the form `<kind>:<identity>`. Kinds seen in practice:
   - `claude:<session-id>` — a Claude Code session, identified by its 36-char session UUID
   - `external:<user>@<terminal>` — a human, sending from attend-chat or with `attend message send` from a terminal outside any Claude session
+  - `system:<sensor>` — a report the sensor host wrote for its own session, which carries its lane and expiry ([`delivery.md`](delivery.md#system-signals))
 - **`project`** — the last segment of the sender's directory (e.g., `api-service`). Used in display, not routing.
 - **`cwd`** — absolute path of the sender's working directory. The receiver's chip and label show its basename, and the cleanup sweep reads it to decide whether a `#open` or channel signal's project is still live.
-- **`re:signal-id`** — present only on a threaded reply. `attend message reply` writes it, pointing at the newest message the session received; `attend message send` has a hidden `--re <id>` flag for the same. One level only, no reply to a reply. The id is the parent's filename stem and must match `[A-Za-z0-9_-]+`, so prose that happens to start with `re:` round-trips as a plain message. The field is recorded on the wire, but no conduit renders threads: the Monitor line, the drain and attend-chat show a reply as an ordinary message.
+- **`re:signal-id`** — present only on a threaded reply. `attend message reply` writes it, pointing at the newest message the session received; `attend message send` has a hidden `--re <id>` flag for the same. One level only, no reply to a reply. The id is the parent's filename stem and must match `[A-Za-z0-9_-]+`, so prose that happens to start with `re:` round-trips as a plain message. The field is recorded on the wire, but no reader renders threads: the drain and attend-chat show a reply as an ordinary message.
 - **`message`** — the payload. Free text, usually the actual content the sender wants the receiver to see.
 
 The parser splits the leading fields on `|` and keeps the rest as the message, so a `|` inside the message survives.
 
-**Encoding and length.** UTF-8. `attend message send` and `attend message reply` refuse a body over 64 KiB with a `too_long` error, and readers skip, with a note, a signal file over 256 KiB, which no attend writes (ADR-412). The Monitor line carries the message on one line, and Monitor shows its first 500 characters (see [`delivery.md`](delivery.md#the-monitor-line)); `attend message inbox <id>` prints the whole message.
+**Encoding and length.** UTF-8. `attend message send` and `attend message reply` refuse a body over 64 KiB with a `too_long` error, and readers skip, with a note, a signal file over 256 KiB, which no attend writes. A drain delivers the whole message, and `attend message inbox <id>` prints it.
 
 ## Storage layout
 
@@ -88,8 +89,8 @@ A signal's journey from creation to deletion. Signals carry authored messages, s
 flowchart LR
     Create[attend message send<br/>or attend-chat]
     Write[write .tmp<br/>rename to .signal]
-    Scan[peers sensor or drain<br/>reads unseen files]
-    Present[Monitor line or<br/>Stop-hook drain]
+    Scan[drain<br/>reads unseen files]
+    Present[the attend mod's poll<br/>or the Stop-hook drain]
     Seen[marked seen<br/>file stays on disk]
     Cleanup[cleanup sweep<br/>every 10 min]
     Delete[file removed<br/>when its project is gone]
@@ -113,13 +114,13 @@ flowchart LR
 
 **Phase 1 — creation.** The sender (an agent with `attend message send` or `attend message reply`, or a human in attend-chat) builds the line and writes it atomically to the scope directory. `--channel <name>` writes to `@<name>/`, `--to <path>` to that project's tray, and no flag to `_broadcast/`. attend-chat writes one file per addressed recipient.
 
-**Phase 2 — scanning.** The peers sensor in `attend run` (every 10 to 30 seconds) and the Stop-hook drain (at each turn end) scan the session's project tray, `_broadcast/` and every joined `@<name>/`. A file not in the session's seen-set is read, parsed and added to it. A cold start applies the cold-start rule instead of replaying the backlog.
+**Phase 2 — scanning.** The attend mod's poll (every few seconds while the session idles) and the Stop-hook drain (at each turn end) scan the session's project tray, `_broadcast/` and every joined `@<name>/`. A file not in the session's seen-set is read, parsed and added to it. A cold start applies the cold-start rule instead of replaying the backlog.
 
-**Phase 3 — presentation.** The peers sensor prints unseen messages as Monitor lines, and the drain hands them to the ending turn. [`delivery.md`](delivery.md) covers both conduits, enrollment, the cold-start rule and what happens when the session id changes. A human running attend-chat sees every message as it lands.
+**Phase 3 — presentation.** The mod submits what its poll drains as a new turn, when something in it would wake the session, and the Stop-hook drain hands what is pending to the ending turn. [`delivery.md`](delivery.md) covers both conduits, enrollment, the cold-start rule and what happens when the session id changes. A human running attend-chat sees every message as it lands.
 
 **Phase 4 — retention.** Reading a signal marks it seen in that session's own seen-set; it does not delete the file. The file stays on disk for other peers and for `attend message inbox`. Nothing removes a signal because of its age.
 
-**Phase 5 — auto-cleanup.** Every `cleanup.interval` seconds (default 600, ten minutes), the attend loop sweeps the signals base when `cleanup.enabled` is true. A project is live while `~/.claude/projects/<encoded-cwd>/` exists. The sweep removes every signal in a project-scope directory whose project is gone, and removes a signal in `_broadcast/` or an `@group/` directory when the project named by its sender `cwd` field is gone. It then removes project directories left empty. The sweep never removes `_broadcast/` or an `@group/` directory.
+**Phase 5 — auto-cleanup.** Every `cleanup.interval` seconds (default 600, ten minutes), each sensor host sweeps the signals base when `cleanup.enabled` is true. A project is live while `~/.claude/projects/<encoded-cwd>/` exists. The sweep removes every signal in a project-scope directory whose project is gone, and removes a signal in `_broadcast/` or an `@group/` directory when the project named by its sender `cwd` field is gone. It then removes project directories left empty. The sweep never removes `_broadcast/` or an `@group/` directory.
 
 **Phase 6 — manual cleanup.** The operator can run `attend message cleanup` at any time to run the same sweep immediately. Flags:
 
@@ -160,7 +161,11 @@ Reading from `_broadcast/` gives you cross-agent visibility. Reading from `@<nam
 - **ADR-120** — attend-chat and the `re:` threading field
 - **ADR-136** — the message lane: delivery, retention, and cleanup by project liveness
 - **ADR-172** — the Stop-hook drain
-- [`delivery.md`](delivery.md) — the Monitor line and the Stop-hook drain
+- [`delivery.md`](delivery.md) — the attend mod's poll and the Stop-hook drain
 - [`channels.md`](channels.md) — channel membership and lifecycle
 - [`tui.md`](tui.md) — attend-chat
-- [`loop.md`](loop.md) — where the peers sensor runs
+- [`loop.md`](loop.md) — the sensor host, which writes system signals and runs the cleanup sweep
+
+## References
+
+- ADR-412: the 64 KiB send limit and the 256 KiB read limit.
