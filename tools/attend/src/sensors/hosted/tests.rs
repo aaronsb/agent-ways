@@ -3,6 +3,7 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 use super::*;
+use sensor_spec::bounds;
 use serde_json::json;
 
 /// A scratch store directory, removed when dropped.
