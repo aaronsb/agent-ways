@@ -663,6 +663,11 @@ async function poll($: $, mod: Mod) {
       // Listening turned off elsewhere (attend listen off, a private scene),
       // or an identity attend cannot resolve: the row says so.
       const listening = first.status === 'drained'
+      // Listening again after it was off: a join, or `attend listen on`
+      // from a shell, enrolls the session without a host, and listening off
+      // dropped the one the mod recorded. Recording the mod again keeps the
+      // Stop hook delivering at the end of each turn.
+      if (listening && mod.isListeningOff) await listenOn($)
       // The host runs while attend has the session listening.
       if (listening || first.status === 'not_listening') {
         mod.isListeningOff = !listening

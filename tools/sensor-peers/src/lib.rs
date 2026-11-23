@@ -394,6 +394,12 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 }
+                // A system signal past its expiry is read and never shown,
+                // as the drain treats it.
+                if sig.lapsed(sensor_trait::epoch_secs()) {
+                    self.seen_signals.insert(key);
+                    continue;
+                }
                 let age = mtime.elapsed().unwrap_or_default();
                 // The signal's id is its filename stem, the value `re:<id>`
                 // replies reference (ADR-120).
@@ -413,8 +419,9 @@ impl PeerSensor {
         // The wake rule (ADR-406 item 2): a line on stdout wakes an idle
         // session, so this poll emits only when something pending would
         // wake it: a post in one of its named channels, or a message
-        // addressed to it. Otherwise `#open` posts stay unseen and reach it
-        // with its next turn, through the Stop-hook drain.
+        // addressed to it, never an event-lane system signal. Otherwise
+        // what is pending stays unseen and goes out with the next poll that
+        // wakes the session.
         let due = found.iter().enumerate().any(|(i, f)| {
             let room = &scan_dirs[f.room].room;
             plan.as_ref().is_none_or(|p| p.deliver[i])
@@ -1057,12 +1064,14 @@ mod tests {
     /// the line names attend and the sensor, and its text carries no tag.
     /// A line from before the system sender reads as it did. Both lines
     /// carry no `to`, so they reach whatever session this test runs under,
-    /// which a test cannot choose.
+    /// which a test cannot choose. A system signal past its expiry is not
+    /// shown.
     #[test]
     fn the_monitor_line_reads_a_system_signal_from_attend() {
         use sensor_trait::{Focus, Sensor};
         let dir = temp_claude("system");
-        fs::write(dir.join("git-1-0.signal"), "system:git|proj|/src/cwd|from_kind:system|from_id:git|lane:event|expires:1790003600|branch switched to main\n").unwrap();
+        fs::write(dir.join("git-1-0.signal"), "system:git|proj|/src/cwd|from_kind:system|from_id:git|lane:event|expires:4102444800|branch switched to main\n").unwrap();
+        fs::write(dir.join("git-1-1.signal"), "system:git|proj|/src/cwd|from_kind:system|from_id:git|lane:event|expires:1790003600|an hour gone\n").unwrap();
         fs::write(dir.join("peer-2-0.signal"), "claude:peer|proj|/src/cwd|from_kind:agent|from_id:peer|lane:event|a peer's words\n").unwrap();
         let mut sensor = PeerSensor::new();
         let fixture = dir.clone();
@@ -1079,6 +1088,35 @@ mod tests {
         let peer = lines.iter().find(|l| l.contains("a peer's words")).expect("the peer's line");
         assert!(peer.ends_with(": lane:event|a peer's words"), "{peer}");
         assert!(!peer.starts_with("message from attend"), "{peer}");
+        assert!(!lines.iter().any(|l| l.contains("an hour gone")), "{lines:#?}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A lone event-lane system signal in one of the session's channels,
+    /// where a message would wake it, makes the poller emit nothing and
+    /// mark nothing seen. Once a peer posts there, one poll carries both.
+    #[test]
+    fn a_lone_event_lane_signal_waits_for_a_waking_message() {
+        use sensor_trait::{Focus, Sensor};
+        let dir = temp_claude("event-alone");
+        fs::write(dir.join("git-1-0.signal"), "system:git|proj|/src/cwd|from_kind:system|from_id:git|to:#room|lane:event|expires:4102444800|branch switched to main\n").unwrap();
+        let mut sensor = PeerSensor::new();
+        let fixture = dir.clone();
+        sensor.set_receive_dirs_provider(std::sync::Arc::new(move |_: &str| {
+            vec![attend_groups::ReceiveDir { path: fixture.clone(), room: Room::Channel("room".into()) }]
+        }));
+        sensor.import_state(&[("reply_hint_shown".to_string(), "true".to_string())]);
+        sensor.set_cache_lapsed_provider(std::sync::Arc::new(|_: &str| false));
+        let focus = Focus { description: String::new(), working_dir: "/src/cwd".to_string(), keywords: Vec::new() };
+        let messages = |lines: Vec<(f64, String)>| -> Vec<String> { lines.into_iter().map(|(_, l)| l).filter(|l| l.starts_with("message from")).collect() };
+        let _ = sensor.poll(&focus);
+        assert_eq!(messages(sensor.poll(&focus)), Vec::<String>::new(), "an event alone wakes nothing");
+        assert!(sensor.seen_signals.is_empty(), "and is not marked seen: {:?}", sensor.seen_signals);
+
+        fs::write(dir.join("peer-2-0.signal"), "claude:peer|proj|/src/cwd|to:#room|are you there\n").unwrap();
+        let lines = messages(sensor.poll(&focus));
+        assert!(lines.iter().any(|l| l.ends_with("branch switched to main")), "{lines:#?}");
+        assert!(lines.iter().any(|l| l.ends_with("are you there")), "{lines:#?}");
         fs::remove_dir_all(&dir).ok();
     }
 

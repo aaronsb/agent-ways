@@ -177,17 +177,46 @@ impl ParsedSignal<'_> {
     }
 
     /// Whether this signal starts a turn in the idle session reading as
-    /// `ids` (ADR-406 item 2): it was posted in a named channel the session
-    /// is a member of (`in_channel`), `to` names it, it sat in its tray
-    /// (`in_tray`) with no `to` (sent to its project by an older writer), or
-    /// it replies to a message the session sent. Anything else, an `#open`
-    /// post that names someone else among it, waits for the session's next
-    /// turn. The caller has already set aside the session's own signals.
+    /// `ids`: it rides the message lane, and it was posted in a named
+    /// channel the session is a member of (`in_channel`), `to` names it, it
+    /// sat in its tray (`in_tray`) with no `to` (sent to its project by an
+    /// older writer), or it replies to a message the session sent. Anything
+    /// else waits for the session's next turn: an `#open` post that names
+    /// someone else, and every signal on the event lane, even one addressed
+    /// to the session. The caller has already set aside the session's own
+    /// signals.
+    ///
+    /// Every reader that decides whether to wake a session asks this, so
+    /// the lane rule holds whichever conduit carries the signal.
+    ///
+    /// References:
+    /// - ADR-406 item 2: what wakes an idle session.
+    /// - ADR-416 §4: an event-lane signal never starts a turn.
     pub fn wakes(&self, in_tray: bool, in_channel: bool, ids: &[&str]) -> bool {
-        in_channel
-            || ids.iter().any(|id| self.addressed_to(id))
-            || (in_tray && self.to.is_none())
-            || self.reply_to.is_some_and(|re| ids.iter().any(|id| sent_by(re, id)))
+        self.on_lane() == Lane::Message
+            && (in_channel
+                || ids.iter().any(|id| self.addressed_to(id))
+                || (in_tray && self.to.is_none())
+                || self.reply_to.is_some_and(|re| ids.iter().any(|id| sent_by(re, id))))
+    }
+
+    /// Whether this signal has lapsed at `now`, in Unix seconds by the
+    /// reader's clock: `now` is past its `expires`. A signal with no
+    /// `expires` never lapses; the writer leaves the tag off for one kept
+    /// until its session reads it (`expires: session`), and writes the
+    /// event lane's default window as a value. A reader drops a lapsed
+    /// signal unread.
+    ///
+    /// The writer stamps `expires` from its own clock, and the reader
+    /// compares it with its own, so a skew between the two moves the lapse
+    /// by as much. Both are this host's clock when the sensor host writes
+    /// to its own session's store.
+    ///
+    /// References:
+    /// - ADR-401, The system sender: `expires` is the second after which
+    ///   the drain drops the signal unread, and its absence keeps it.
+    pub fn lapsed(&self, now: u64) -> bool {
+        self.expires.is_some_and(|at| now > at)
     }
 }
 
@@ -963,6 +992,39 @@ mod tests {
         // After `/clear`, the old id still counts: a DM to it, a reply to it.
         assert!(dm.wakes(false, false, &["new-id", me]) && reply.wakes(false, false, &["new-id", me]));
         assert!(!reply.wakes(false, false, &["new-id"]));
+    }
+
+    /// A system signal on the event lane never wakes, wherever it sits and
+    /// whoever it names; one on the message lane wakes as an addressed
+    /// message does. A system line without `lane:` rides the event lane.
+    #[test]
+    fn an_event_lane_signal_never_wakes() {
+        let me = "11111111-2222-3333-4444-555555555555";
+        let line = |lane: &str| format!("system:git|p|/x|from_kind:system|from_id:git|to:{me}|{lane}branch switched");
+        let (event, message, untagged) = (line("lane:event|"), line("lane:message|"), line(""));
+        let (event, message, untagged) = (parse_signal(&event).unwrap(), parse_signal(&message).unwrap(), parse_signal(&untagged).unwrap());
+        for (in_tray, in_channel) in [(true, false), (false, false), (false, true)] {
+            assert!(!event.wakes(in_tray, in_channel, &[me]), "event lane, tray {in_tray}, channel {in_channel}");
+            assert!(!untagged.wakes(in_tray, in_channel, &[me]), "no lane tag reads as the event lane");
+        }
+        assert!(message.wakes(true, false, &[me]), "the message lane wakes the session it names");
+        assert!(!message.wakes(true, false, &["someone-else"]), "and only that one");
+    }
+
+    /// A signal lapses once the reader's clock passes its `expires`, not at
+    /// that second. One with no `expires` never lapses: that is how the
+    /// writer records `expires: session`. A non-system line's `expires:`
+    /// text is its message, so it never lapses.
+    #[test]
+    fn a_signal_lapses_after_its_expiry() {
+        let at = |tags: &str| format!("system:git|p|/x|from_kind:system|from_id:git|to:s|lane:event|{tags}m");
+        let (dated, kept) = (at("expires:1000|"), at(""));
+        let (dated, kept) = (parse_signal(&dated).unwrap(), parse_signal(&kept).unwrap());
+        assert!(!dated.lapsed(999) && !dated.lapsed(1000), "not before or at the second");
+        assert!(dated.lapsed(1001), "after it");
+        assert!(!kept.lapsed(u64::MAX), "no expiry, no lapse");
+        let peer = parse_signal("claude:x|p|/x|to:*|expires:5|text").unwrap();
+        assert!(!peer.lapsed(u64::MAX), "a peer's text is not a tag");
     }
 
     #[test]

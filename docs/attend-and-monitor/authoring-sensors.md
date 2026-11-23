@@ -294,7 +294,7 @@ Two fields set where a trigger keeps what it last saw and how long what it repor
 - `expires` is a whole number of seconds from 1 to 2592000 (30 days), or `session`. A report lapses that many seconds after it is written, or with `session` stays until the session reads it. Unset is 3600, the event lane's decay window.
 - Any other value of either field makes the sensor invalid, and the lint message says what the field takes.
 
-The sensor host and `attend sensor poll` and `fire` write each report's `expires` into its signal as an `expires:` tag in Unix seconds, and write none for `session`. Dropping a lapsed event-lane report unread is the drain's work, which #1313 adds.
+The sensor host and `attend sensor poll` and `fire` write each report's `expires` into its signal as an `expires:` tag in Unix seconds, and write none for `session`. Once that second has passed by the reading session's clock, the drain records the report read and never delivers it ([system signals](delivery.md#system-signals)).
 
 ### Templates
 

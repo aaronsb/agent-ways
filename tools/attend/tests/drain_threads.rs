@@ -7,6 +7,7 @@
 //! item 10). Both through the CLI, as the mod and the Stop hook run it.
 
 mod common;
+use agent_identity::signal::short_id;
 use common::Fixture;
 
 /// Write a signal from `peer-sess` into `tray`, threaded under `re` when given.
@@ -30,6 +31,7 @@ fn peer_in(f: &Fixture, room: &str) {
 fn a_drained_reply_carries_its_parent_in_both_formats() {
     let f = Fixture::new("drain-threads-re");
     f.ok(&["channel", "join", "room"]);
+    f.ok(&["listen", "on", "--host", "mod"]);
     f.drain("plain");
     put_from_peer(&f, "_broadcast", "peer-sess-1-1", Some("me-1-0"), "an answer");
     put_from_peer(&f, "_broadcast", "peer-sess-1-2", None, "a new topic");
@@ -42,7 +44,8 @@ fn a_drained_reply_carries_its_parent_in_both_formats() {
 
     put_from_peer(&f, "_broadcast", "peer-sess-1-3", Some("me-1-0"), "another answer");
     let hook = f.drain_hook_with("{}");
-    assert!(hook.contains("id peer-sess-1-3, re me-1-0"), "{hook}");
+    let line = format!("another answer ~{} (re ~{})", short_id("peer-sess-1-3"), short_id("me-1-0"));
+    assert!(hook.contains(&line), "{hook}");
 }
 
 #[cfg(feature = "sensor-peers")]

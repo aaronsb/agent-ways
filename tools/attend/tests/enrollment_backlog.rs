@@ -31,6 +31,7 @@ fn with_backlog(tag: &str) -> Fixture {
 fn join_then_drain_delivers_addressed_and_announces_the_rest() {
     let f = with_backlog("backlog-join");
     f.ok(&["channel", "join", "side"]);
+    f.ok(&["listen", "on", "--host", "mod"]);
 
     let first = f.drain("plain");
     assert!(first.contains(ADDRESSED), "addressed mail must reach the session: {first}");
@@ -53,6 +54,7 @@ fn a_note_alone_does_not_block_the_stop() {
     f.put("_broadcast", "other-1-open", OLD_OPEN, 10 * MINUTE);
     let joined = f.ok(&["channel", "join", "side"]);
     assert!(joined.lines().any(|l| l.starts_with("you are ")), "the join names the session: {joined}");
+    f.ok(&["listen", "on", "--host", "mod"]);
 
     let hook = f.drain_hook_with("{}");
     assert!(hook.starts_with("{\"systemMessage\": "), "non-blocking: {hook}");
@@ -71,10 +73,11 @@ fn join_and_first_delivery_name_the_session() {
     let joined = f.ok(&["channel", "join", "side"]);
     let name = joined.lines().find_map(|l| l.strip_prefix("you are ")).unwrap_or_else(|| panic!("no name line: {joined}")).to_string();
     assert!(!name.is_empty());
+    f.ok(&["listen", "on", "--host", "mod"]);
 
     let hook = f.drain_hook_with("{}");
     assert!(hook.starts_with("{\"hookSpecificOutput\": "), "addressed mail continues the turn: {hook}");
-    assert!(hook.contains(&format!("(you are {name})")), "the delivery names the session: {hook}");
+    assert!(hook.contains(&format!("\\nyou are {name}\\n")), "the delivery names the session: {hook}");
 }
 
 fn drain_doc(out: &str) -> serde_json::Value {
@@ -206,7 +209,9 @@ fn attend_run_delivers_addressed_and_announces_the_rest() {
 /// seconds after `attend run` starts, before the peers sensor's first
 /// message scan (its first poll only baselines peer presence, yet
 /// checkpoints). A drain in that window must still apply the rule: the
-/// 50 cap on addressed mail, old `#open` held back, and the note.
+/// 50 cap on addressed mail, old `#open` held back, and the note. The JSON
+/// drain runs here: the Stop hook delivers only to a session the attend
+/// mod enrolled, and this one listens through `attend run`.
 // `attend run` has no sensor to scan the room without the peers sensor.
 #[cfg(feature = "sensor-peers")]
 #[test]
@@ -221,8 +226,9 @@ fn a_drain_before_the_sensor_scans_applies_the_rule() {
     }
     let run = f.run();
     run.wait_for("the sensor's first checkpoint", Duration::from_secs(10), |_| f.state_file(&f.sid).exists());
-    let hook = f.drain_hook_with("{}");
-    assert!(hook.contains("50 peer message(s)"), "the 50 cap: {hook}");
-    assert!(hook.contains("8 older messages held back; reading them is optional: attend message inbox"), "the note: {hook}");
-    assert!(!hook.contains("old open"), "old #open is held back: {hook}");
+    let doc = drain_doc(&f.ok(&["message", "inbox", "--drain", "--json"]));
+    assert_eq!(doc["messages"].as_array().map(Vec::len), Some(50), "the 50 cap: {doc}");
+    assert_eq!(doc["held_back"], 8, "{doc}");
+    assert_eq!(doc["note"], "8 older messages held back; reading them is optional: attend message inbox", "the note: {doc}");
+    assert!(!doc.to_string().contains("old open"), "old #open is held back: {doc}");
 }

@@ -182,7 +182,7 @@ pub(crate) fn brief_invited_room(ident: &Session, groups: &groups::Groups, name:
         let ids = attend_presence::enrollment::reading_ids(ident);
         let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
         let marks = attend_groups::tombstones::Marks::load(&signals_base());
-        let scan = crate::cmd::inbox::scan_pending(&groups.receive_dirs(&ident.origin_path), &seen, &ids, true, &marks);
+        let scan = crate::cmd::inbox::scan_pending(&groups.receive_dirs(&ident.origin_path), &seen, &ids, true, &marks, sensor_trait::epoch_secs());
         let owed: std::collections::HashSet<String> = scan.delivered.iter().map(|d| d.key.clone()).collect();
         store.baseline(scan.mark.into_iter().filter(|k| !owed.contains(k)));
         note = scan.note;

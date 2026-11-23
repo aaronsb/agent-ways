@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! `listen`: whether the Stop-hook drain delivers to this session, set
-//! without joining a channel (ADR-406 item 10).
+//! `listen`: whether the drain delivers to this session, set without
+//! joining a channel. The Stop hook delivers only to a session the attend
+//! mod enrolled (`--host mod`), or one whose `attend run` is live.
 //!
 //! Listening is enrollment (ADR-172, addendum of 2026-10-01). A session
 //! listens once it runs `attend listen on`, runs `attend run`, or joins a
 //! channel, and stops at `attend listen off` or `attend channel scene private`.
 //! While it is not listening the drain delivers nothing and marks nothing
 //! read; the messages wait in the store.
+//!
+//! References:
+//! - ADR-406 item 10: listening is set without joining a channel.
+//! - ADR-416, turn-end settlement and its amendment of 2026-11-23: who the
+//!   Stop hook delivers to.
 
 use crate::util::{adopt_previous_enrollment, current_session, enroll_as, Session};
 use attend_presence::enrollment::{self, Host, Source};

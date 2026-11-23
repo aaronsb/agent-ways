@@ -522,7 +522,8 @@ fn the_inbox_names_attends_notice_as_attend() {
 }
 
 /// Under `attend run` the peers sensor delivers beta's direct message and a
-/// newer notice from attend; a reply with no `re` goes to beta.
+/// newer notice from attend; a reply with no `re` goes to beta. The notice
+/// rides the message lane, since an event-lane one never wakes the poller.
 #[cfg(feature = "sensor-peers")]
 #[test]
 fn the_monitor_poller_leaves_attends_notice_out_of_the_reply_target() {
@@ -533,7 +534,7 @@ fn the_monitor_poller_leaves_attends_notice_out_of_the_reply_target() {
     let tray = f.project_tray();
     signal(&f, &tray, "beta-sess-1-1", &format!("claude:beta-sess|proj|{}|to:{}|alpha, a question", f.origin, f.sid));
     run.wait_for("beta's message", Duration::from_secs(30), |r| r.output().contains("alpha, a question"));
-    signal(&f, &tray, "git-1-2", &format!("system:git|proj|{}|from_kind:system|from_id:git|to:{}|lane:event|branch switched to main", f.origin, f.sid));
+    signal(&f, &tray, "git-1-2", &format!("system:git|proj|{}|from_kind:system|from_id:git|to:{}|lane:message|branch switched to main", f.origin, f.sid));
     run.wait_for("attend's notice", Duration::from_secs(30), |r| r.output().contains("message from attend (git)"));
 
     let out = f.attend(&["message", "reply", "--json", "--", "an answer"]);

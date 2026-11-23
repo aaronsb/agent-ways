@@ -100,7 +100,7 @@ Turn listening on or off for this session without joining a channel, or show it 
 
 ###### **Subcommands:**
 
-* `on` — Listen: the Stop-hook drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back
+* `on` — Listen: the drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back. The Stop hook delivers only with `--host mod`, or while an `attend run` is live
 * `off` — Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join, `attend run` or `listen on` listens again
 * `status` — Print `listening` or `not listening` (default)
 * `beat` — Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
@@ -113,13 +113,13 @@ Turn listening on or off for this session without joining a channel, or show it 
 
 ## `attend listen on`
 
-Listen: the Stop-hook drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back
+Listen: the drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back. The Stop hook delivers only with `--host mod`, or while an `attend run` is live
 
 **Usage:** `attend listen on [OPTIONS]`
 
 ###### **Options:**
 
-* `--host <HOST>` — What hosts delivery, when not Monitor or a shell: `mod`, the attend mod, whose agent answers with attend_reply and attend_send. The drain then delivers in the mod's format and names those tools
+* `--host <HOST>` — What hosts delivery, when not Monitor or a shell: `mod`, the attend mod, whose agent answers with attend_reply and attend_send. The Stop-hook drain then delivers to the session, in the mod's format and naming those tools
 
   Possible values:
   - `mod`:
@@ -182,8 +182,8 @@ Send, reply to, read, count and delete messages, and tombstone a session (defaul
 
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
-* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
-* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or a transcript not readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. A session with no turn yet has no cache to lose and is woken. The attend mod polls with it while idle
+* `--drain` — Atomically deliver pending messages and record their consumption. The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not listening (#720), and in hook format for a session that neither the attend mod enrolled (`attend listen on --host mod`) nor a live `attend run` holds. On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show. A system signal past its expiry is recorded read and never delivered
+* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts and attend's own event-lane notices alone wait for the next turn. Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or a transcript not readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. A session with no turn yet has no cache to lose and is woken. The attend mod polls with it while idle
 * `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
 
   Default value: `plain`
@@ -247,8 +247,8 @@ Read pending messages from peers
 
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
-* `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
-* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or a transcript not readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. A session with no turn yet has no cache to lose and is woken. The attend mod polls with it while idle
+* `--drain` — Atomically deliver pending messages and record their consumption. The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not listening (#720), and in hook format for a session that neither the attend mod enrolled (`attend listen on --host mod`) nor a live `attend run` holds. On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show. A system signal past its expiry is recorded read and never delivered
+* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts and attend's own event-lane notices alone wait for the next turn. Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or a transcript not readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. A session with no turn yet has no cache to lose and is woken. The attend mod polls with it while idle
 * `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
 
   Default value: `plain`
