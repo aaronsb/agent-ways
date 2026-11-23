@@ -334,7 +334,15 @@ fn a_host_whose_parent_is_gone_exits() {
     let err = f.home.join("orphan.err");
     let out = f
         .command_from(Path::new("sh"))
-        .args(["-c", "\"$0\" sensor host --session \"$1\" --cwd \"$2\" > /dev/null 2> \"$3\" & echo $!; sleep 1", env!("CARGO_BIN_EXE_attend"), &f.sid, &f.origin, &err.to_string_lossy()])
+        .args([
+            "-c",
+            "\"$0\" sensor host --session \"$1\" --cwd \"$2\" > /dev/null 2> \"$3\" & echo $!; \
+             until grep -q 'sensor host for session' \"$3\" 2> /dev/null; do sleep 0.05; done",
+            env!("CARGO_BIN_EXE_attend"),
+            &f.sid,
+            &f.origin,
+            &err.to_string_lossy(),
+        ])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -353,6 +361,41 @@ fn a_host_whose_parent_is_gone_exits() {
         std::thread::sleep(Duration::from_millis(100));
     }
     assert!(polls(&f, "beacon") >= 1 || read().contains("running 1 sensor(s): beacon"), "the host ran before its parent left:\n{}", read());
+}
+
+/// A host whose stdout is closed, as when the mod stopped reading, writes
+/// the signal, checkpoints, and exits on the failed cue.
+#[test]
+fn a_host_whose_cues_meet_a_closed_pipe_exits_after_its_checkpoint() {
+    let f = quiet("host-closed");
+    beacon(&f, "beacon", "memory: session");
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let err = f.home.join("closed.err");
+    let mut child = f
+        .command()
+        .args(["sensor", "host", "--session", &f.sid, "--cwd", &f.origin])
+        .stdout(writer)
+        .stderr(Stdio::from(std::fs::File::create(&err).unwrap()))
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > Duration::from_secs(20) {
+            child.kill().ok();
+            child.wait().ok();
+            panic!("the host kept running on a closed stdout:\n{}", std::fs::read_to_string(&err).unwrap_or_default());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let log = std::fs::read_to_string(&err).unwrap_or_default();
+    assert!(status.success(), "{status:?}: {log}");
+    assert_eq!(from(&f, "beacon").len(), 1);
+    let (checkpointed, exits) = (log.find(CHECKPOINTED), log.find("stdout is closed, so no one reads the cues; the sensor host exits"));
+    assert!(checkpointed.is_some() && exits.is_some() && checkpointed < exits, "{log}");
 }
 
 /// `attend sensor poll` and `fire` deliver through the host's writer: a

@@ -49,6 +49,9 @@ const WAKE_INTERVAL: Duration = Duration::from_secs(1);
 /// logged and not written, as `attend run` logged it and did not print it.
 struct Signals {
     writer: Writer,
+    /// A cue met a closed stdout: the mod stopped reading, and the host
+    /// exits once the tick that wrote it has checkpointed.
+    closed: bool,
 }
 
 impl Sink for Signals {
@@ -69,7 +72,9 @@ impl Sink for Signals {
                     .map(|(line, lapse)| match self.writer.write(&d.sensor, lane, *lapse, line) {
                         Ok(id) => {
                             emit::log(&format!("{}: wrote {id}: {line}", d.sensor));
-                            writeln!(out, "signal {id}").ok();
+                            if let Err(e) = writeln!(out, "signal {id}") {
+                                self.closed |= e.kind() == std::io::ErrorKind::BrokenPipe;
+                            }
                             true
                         }
                         Err(why) => {
@@ -86,13 +91,23 @@ impl Sink for Signals {
 }
 
 pub(crate) fn cmd_host(a: &HostArgs) {
+    // The parent is read first, so a parent that leaves during startup is
+    // still seen to leave.
+    let parent = parent_id();
+    // A cue written to a closed pipe returns an error to handle, rather than
+    // ending the host before the tick that wrote it checkpoints. A child
+    // the host runs, and the host re-executed, get the default back.
+    #[cfg(unix)]
+    // SAFETY: setting a signal disposition before any thread starts.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
     std::env::remove_var("ATTEND_RELOADED_FROM");
     let refuse = |why: String| -> ! { crate::cmd::refuse_usage(&format!("attend sensor host: {why}"), &why, false) };
     if !std::path::Path::new(&a.cwd).is_dir() {
         refuse(format!("{} is not a directory", a.cwd));
     }
     let writer = Writer::new(&a.session, &a.cwd).unwrap_or_else(|why| refuse(why));
-    let parent = parent_id();
     let session = writer.session().to_string();
     let mut focus = Focus::default_focus();
     focus.working_dir = writer.cwd().to_string();
@@ -141,7 +156,7 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     let mut last_instance_touch = Instant::now();
     let mut last_cleanup: Option<Instant> = None;
     let registry = attend_instances::Registry::new();
-    let mut sink = Signals { writer };
+    let mut sink = Signals { writer, closed: false };
 
     let self_exe = std::env::current_exe().ok();
     let mut exe_mtime = self_exe.as_ref().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
@@ -188,6 +203,10 @@ pub(crate) fn cmd_host(a: &HostArgs) {
             cache_gate: None,
             sink: &mut sink,
         });
+        if sink.closed {
+            emit::log("stdout is closed, so no one reads the cues; the sensor host exits");
+            return;
+        }
     }
 }
 
