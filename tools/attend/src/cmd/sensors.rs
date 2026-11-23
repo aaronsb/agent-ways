@@ -261,15 +261,21 @@ fn find(all: Vec<Hosted>, name: &str, json: bool) -> Hosted {
     })
 }
 
-/// Exit 3 when `h` is not a sensor attend can poll here. A fire calls no
-/// server, so it takes an mcp sensor that has no probe record yet.
+/// Exit 3 when `h` is not a sensor attend can poll here. A poll of an mcp
+/// sensor calls its tool, so it needs a probe record that holds whether
+/// or not the sensor is enabled; a fire calls no server, so it takes one
+/// with no record yet.
 fn require_hosted(h: &Hosted, verb: &str, json: bool) {
     let runnable = h.state.runs() || h.state == State::Off || (verb == "fire" && matches!(h.state, State::Unprobed(_)));
     let kind_runs = matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate | Kind::Command | Kind::Mcp));
-    if runnable && kind_runs {
+    let gap = (verb == "poll").then(|| h.probe_gap()).flatten();
+    if runnable && kind_runs && gap.is_none() {
         return;
     }
-    let why = format!("{} is {}{}", h.name(), h.state.label(), h.state.detail().map(|d| format!(": {d}")).unwrap_or_default());
+    let why = match &gap {
+        Some(g) => format!("{} has no probe record that holds: {g}", h.name()),
+        None => format!("{} is {}{}", h.name(), h.state.label(), h.state.detail().map(|d| format!(": {d}")).unwrap_or_default()),
+    };
     if json {
         crate::cmd::print_json(&json!({ "sensor": h.name(), "state": h.state.label(), "detail": h.state.detail(), "error": why }));
     } else {
@@ -547,11 +553,11 @@ mod tests {
         let user = std::path::Path::new("/c/attend/sensors");
         layers.push(file_layer("weather", Origin::User, Some(&user.join("weather.yaml")), "kind: command\nargv: [curl, -s, x]\noutput: json\n"));
         layers.push(file_layer("chat", Origin::User, Some(&user.join("chat.yaml")), "kind: mcp\nserver: slack\ntool: list\n"));
-        let probed = "kind: mcp\nserver: slack\ntool: list\nallow_unannotated: true\nprobe: {server: slack, tool: list, args: {}, calls_match: true, confirmed: true}\n";
+        let probed = "kind: mcp\nserver: slack\ntool: list\nallow_unannotated: true\nprobe: {server: slack, binding: user:0, tool: list, args: {}, calls_match: true, confirmed: true}\n";
         layers.push(file_layer("probed", Origin::User, Some(&user.join("probed.yaml")), probed));
         layers.push(file_layer("git", Origin::User, Some(&user.join("git.yaml")), "interval: 90\n"));
         let loaded = from_layers(&layers, std::path::Path::new("/nonexistent/p"), &[]);
-        sensors::catalog_of(loaded, |_| None).iter().map(entry).collect()
+        sensors::catalog_of(loaded, "/nonexistent/p", |_| None).iter().map(entry).collect()
     }
 
     #[test]
@@ -573,7 +579,7 @@ mod tests {
         assert_eq!((weather["path"].as_str(), weather["source"].as_str(), weather["detail"].as_str()), (Some("/c/attend/sensors/weather.yaml"), Some("curl"), None));
         let chat = find("chat");
         assert_eq!((chat["kind"].as_str(), chat["state"].as_str()), (Some("mcp"), Some("degraded")));
-        assert_eq!(chat["detail"].as_str(), Some("no probe record; run `attend sensor probe chat`"), "{chat}");
+        assert_eq!(chat["detail"].as_str(), Some("no probe record; run `attend sensor probe chat` at a terminal"), "{chat}");
         // One whose record holds runs, and its override is noted.
         let probed = find("probed");
         assert_eq!((probed["state"].as_str(), probed["detail"].as_str()), (Some("active"), None), "{probed}");

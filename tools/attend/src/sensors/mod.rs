@@ -128,6 +128,8 @@ pub struct Hosted {
     pub notes: Vec<String>,
     pub compiled: Option<Compiled>,
     pub last: Option<Poll>,
+    /// The project the sensor was loaded for.
+    pub project: String,
 }
 
 impl Hosted {
@@ -138,6 +140,21 @@ impl Hosted {
     /// The lane it runs on, when it loads.
     pub fn lane(&self) -> Option<Lane> {
         self.loaded.spec.as_ref().map(|s| s.lane())
+    }
+
+    /// Why an mcp sensor may not call its tool, whether or not it is
+    /// enabled: it has no probe record that holds for it here. None for
+    /// any other sensor.
+    pub fn probe_gap(&self) -> Option<String> {
+        match self.loaded.spec.as_ref().map(|s| &s.block) {
+            Some(Block::Mcp(m)) => unprobed(&self.loaded, m, &self.project),
+            _ => None,
+        }
+    }
+
+    /// Whether a file of the project's own layer defines part of it.
+    pub fn in_project(&self) -> bool {
+        self.loaded.files.iter().any(|f| f.origin == sensor_spec::Origin::Project && !f.refused)
     }
 
     /// The compiled sensor its file names, when it is a crate sensor.
@@ -161,23 +178,24 @@ pub fn catalog(cfg: &Config, project: &str) -> Vec<Hosted> {
 pub fn catalog_for(cfg: &Config, project: &str, session: Option<&str>) -> Vec<Hosted> {
     let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
     let polls = hosted::last_polls(project, session);
-    catalog_of(loaded, |name| polls.get(name).cloned())
+    catalog_of(loaded, project, |name| polls.get(name).cloned())
 }
 
-/// The sensors `loaded` declares, each with its last poll from `last`.
-pub(crate) fn catalog_of(loaded: Vec<Loaded>, last: impl Fn(&str) -> Option<Poll>) -> Vec<Hosted> {
+/// The sensors `loaded` declares for the project at `project`, each with
+/// its last poll from `last`.
+pub(crate) fn catalog_of(loaded: Vec<Loaded>, project: &str, last: impl Fn(&str) -> Option<Poll>) -> Vec<Hosted> {
     let mut out: Vec<Hosted> = loaded
         .into_iter()
         .map(|l| {
             let poll = last(&l.name);
-            host(l, poll)
+            host(l, project, poll)
         })
         .collect();
     claim_crates(&mut out);
     out
 }
 
-fn host(loaded: Loaded, last: Option<Poll>) -> Hosted {
+fn host(loaded: Loaded, project: &str, last: Option<Poll>) -> Hosted {
     let mut notes: Vec<String> = loaded
         .findings
         .iter()
@@ -196,11 +214,11 @@ fn host(loaded: Loaded, last: Option<Poll>) -> Hosted {
         Some(Block::Crate(c)) => compiled(&c.id),
         _ => None,
     };
-    let state = state_of(&loaded, compiled.is_some(), last.as_ref());
-    Hosted { loaded, state, notes, compiled, last }
+    let state = state_of(&loaded, project, compiled.is_some(), last.as_ref());
+    Hosted { loaded, state, notes, compiled, last, project: project.to_string() }
 }
 
-fn state_of(l: &Loaded, compiled: bool, last: Option<&Poll>) -> State {
+fn state_of(l: &Loaded, project: &str, compiled: bool, last: Option<&Poll>) -> State {
     if l.is_refused() {
         return State::Refused(l.refused.clone().unwrap_or_default());
     }
@@ -215,7 +233,7 @@ fn state_of(l: &Loaded, compiled: bool, last: Option<&Poll>) -> State {
         return State::Off;
     }
     if let Block::Mcp(m) = &spec.block {
-        if let Some(why) = unprobed(&l.name, m) {
+        if let Some(why) = unprobed(l, m, project) {
             return State::Unprobed(why);
         }
     }
@@ -228,23 +246,28 @@ fn state_of(l: &Loaded, compiled: bool, last: Option<&Poll>) -> State {
     }
 }
 
-/// Why the mcp sensor `name` does not run for want of a probe, or none
-/// when its record holds: taken with its server, tool and args, with the
-/// calls matching and the operator's confirmation.
+/// Why the mcp sensor `l` does not run for want of a probe in the project
+/// at `project`, or none when its record holds: taken with its server,
+/// tool and args, bound to its server's definition, for this project when
+/// a project file defines part of the sensor, with the calls matching and
+/// the operator's confirmation. A named server's binding is checked again
+/// at each call, since only resolving it reads its definition.
 ///
 /// References:
 /// - ADR-403 §4: a sensor with no record, a failed comparison or no
-///   confirmation stays disabled.
-fn unprobed(name: &str, m: &sensor_spec::McpBlock) -> Option<String> {
-    let again = format!("run `attend sensor probe {name}`");
+///   confirmation stays disabled, and a change voids the record.
+fn unprobed(l: &Loaded, m: &sensor_spec::McpBlock, project: &str) -> Option<String> {
+    let again = format!("run `attend sensor probe {}` at a terminal", l.name);
     let Some(p) = &m.probe else { return Some(format!("no probe record; {again}")) };
-    if m.probe_holds() {
-        return None;
-    }
+    let canon = |s: &str| std::fs::canonicalize(s).unwrap_or_else(|_| std::path::PathBuf::from(s));
+    let in_project = l.files.iter().any(|f| f.origin == sensor_spec::Origin::Project && !f.refused);
+    let stale = p.server != m.server.label() || p.tool != m.tool || p.args != m.args || p.binding.is_none() || mcp::inline_binding(&m.server).is_some_and(|b| p.binding.as_deref() != Some(b.as_str()));
     Some(match () {
-        _ if p.server != m.server.label() || p.tool != m.tool || p.args != m.args => format!("the probe record was taken with another server, tool or args; {again}"),
+        _ if stale => format!("the probe record was taken with another server, tool or args; {again}"),
+        _ if in_project && p.project.as_deref().map(canon) != Some(canon(project)) => format!("the probe record is for another project; {again}"),
         _ if !p.calls_match => format!("the probe's second call did not return what the first did, so reading may change the tool's result; {again} once that is fixed"),
-        _ => format!("the probe record has no confirmation that the items were left untouched; check in another client, then {again} --confirm"),
+        _ if !p.confirmed => format!("the probe record has no confirmation that the items were left untouched; check in another client, then {again}"),
+        _ => return None,
     })
 }
 
@@ -381,14 +404,20 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
 /// `project`. Nothing starts until its first call.
 pub fn mcp_source(h: &Hosted, cfg: &Config, project: &str) -> Result<mcp::Mcp, String> {
     let Some(Block::Mcp(m)) = h.loaded.spec.as_ref().map(|s| &s.block) else { return Err(format!("{} is not an mcp sensor", h.name())) };
-    let lookup = mcp::Lookup { user_json: mcp::Lookup::user_json(), trusted: attend_config::sensors::is_trusted(std::path::Path::new(project), &cfg.project_sensors) };
-    Ok(mcp::Mcp::new((**m).clone(), project, command::Inherit::of(h.loaded.command_from), lookup))
+    let lookup = mcp::Lookup::new(attend_config::sensors::is_trusted(std::path::Path::new(project), &cfg.project_sensors));
+    Ok(mcp::Mcp::new(h.name(), (**m).clone(), project, command::Inherit::of(h.loaded.command_from), lookup))
 }
 
 /// End every MCP server this process started, before a re-exec replaces
 /// it.
 pub fn end_mcp_servers() {
     mcp::end_servers();
+}
+
+/// End the MCP servers a killed process left running for the project at
+/// `project`; how many.
+pub fn sweep_mcp_servers(project: &str) -> usize {
+    mcp::ledger::sweep(&mcp::ledger::dir(), std::path::Path::new(project))
 }
 
 /// A slot for `sensor`, on the lane `lane`, running the compiled sensor
@@ -534,7 +563,7 @@ mod tests {
     /// name, with a description and a `crate@version` source.
     #[test]
     fn the_shipped_crate_files_name_compiled_sensors_with_metadata() {
-        let all = catalog_of(loaded(&[]), |_| None);
+        let all = catalog_of(loaded(&[]), "/nonexistent/p", |_| None);
         let mut compiled_n = 0;
         for h in all.iter().filter(|h| matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate))) {
             assert!(!matches!(h.state, State::Invalid(_)), "{}: {:?}", h.name(), h.state);
@@ -554,7 +583,7 @@ mod tests {
 
     #[test]
     fn the_lane_comes_from_the_file() {
-        let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), |_| None);
+        let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), "/nonexistent/p", |_| None);
         let lane = |n: &str| all.iter().find(|h| h.name() == n).and_then(Hosted::lane);
         assert_eq!(lane("peers"), Some(Lane::Message));
         assert_eq!(lane("keepwarm"), Some(Lane::Message));
@@ -568,7 +597,7 @@ mod tests {
     /// lane whatever its file says, and every other sensor on its file's.
     #[test]
     fn the_host_runs_peers_on_the_event_lane_and_the_rest_on_their_file_s() {
-        let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), |_| None);
+        let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), "/nonexistent/p", |_| None);
         let lane = |n: &str| all.iter().find(|h| h.name() == n).map(host_lane);
         assert_eq!(lane("chat"), Some(Lane::Event), "the peers crate, under any name and whatever its file says");
         assert_eq!(lane("keepwarm"), Some(Lane::Message));

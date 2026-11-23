@@ -264,12 +264,14 @@ pub(crate) enum SensorCmd {
     /// The probe calls the tool twice in a row and checks that the second
     /// call returned every item of the first, by each trigger's key, or for
     /// state triggers the same state. It cannot see read state the service
-    /// keeps, such as a message marked read, so it asks you to confirm in
-    /// another client that the items are untouched; --confirm gives that
-    /// answer without the question. It writes the record as `probe` in the
-    /// sensor's user file, created with that field alone when the sensor
-    /// has none. An mcp sensor runs only once its record holds: taken with
-    /// its server, tool and args, with the calls matching and confirmed.
+    /// keeps, such as a message marked read, so it asks you at the terminal
+    /// to confirm in another client that the items are untouched; with no
+    /// terminal the record says they were not confirmed. From Claude Code,
+    /// run it as `! attend sensor probe <name>`. It writes the record as
+    /// `probe` in the sensor's user file, created with that field alone
+    /// when the sensor has none. An mcp sensor runs only once its record
+    /// holds: taken with its server's definition, tool and args, with the
+    /// calls matching and confirmed.
     Probe(ProbeArgs),
 
     /// Compare each sensor's `requires:` against settings.json
@@ -325,10 +327,6 @@ pub(crate) struct PollArgs {
 pub(crate) struct ProbeArgs {
     /// The mcp sensor's name
     pub(crate) name: String,
-    /// Record that you checked in another client that the items the calls
-    /// returned are still unread or otherwise untouched
-    #[arg(long)]
-    pub(crate) confirm: bool,
     /// Print the record as one JSON document
     #[arg(long)]
     pub(crate) json: bool,

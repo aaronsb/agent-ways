@@ -7,19 +7,25 @@
 //! a command's JSON output is.
 //!
 //! The server is the file's inline `command`, `args` and `env`, or a server
-//! of Claude Code's MCP configuration by name: the project's entry in
-//! `~/.claude.json` first, then the project's `.mcp.json`, then the user's
-//! entries in `~/.claude.json`. A `.mcp.json` server is code the
-//! repository chose, so it starts only for a project in
-//! `attend.project_sensors`. Only stdio servers run.
+//! of Claude Code's MCP configuration by name ([`lookup`]). Only stdio
+//! servers run. A poll runs only when the sensor's probe record is bound to
+//! the server's definition as it resolves now; a changed command, args or
+//! env voids the record.
 //!
 //! A server lives across polls: one per distinct launch (program, args,
-//! env, directory and environment rule) in a process, shared by every
-//! sensor that names it, started at the first poll that needs it, and
-//! ended when the last sensor holding it is dropped, so a sensor host
+//! env, directory, environment rule and binding) in a process, shared by
+//! every sensor that names it, started at the first poll that needs it,
+//! and ended when the last sensor holding it is dropped, so a sensor host
 //! keeps its servers for the life of its session. A server that fails, by
 //! exiting, timing out or breaking the protocol, is ended at once and the
 //! poll records why. The next poll starts it again.
+//!
+//! A server is ended in the order the MCP stdio transport gives: its input
+//! is closed, then its process group is sent TERM, then KILL, each after a
+//! wait for the leader to exit; a failed server gets shorter waits. Each
+//! running server has an entry in the [`ledger`], so a host killed with
+//! SIGKILL, which ends nothing, has its servers ended by the next host for
+//! the project.
 //!
 //! Each step has a deadline: the start (spawn, `initialize` and the
 //! `initialized` notice), the `tools/list` that follows it, and each
@@ -43,7 +49,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command as Process, Stdio};
 use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -54,8 +60,12 @@ use serde_json::{json, Value};
 use super::command::{kill_group, leader_exited, sensor_env, Inherit};
 use super::hosted::{Fetched, Source};
 
+pub mod ledger;
 mod lookup;
-pub use lookup::{resolve, Lookup};
+pub use lookup::{inline_binding, resolve, Lookup};
+
+/// How many messages from a server wait unread before its reader waits.
+const BACKLOG: usize = 64;
 
 /// The most one message from a server may hold, in bytes.
 const MAX_MESSAGE: u64 = 1024 * 1024;
@@ -96,6 +106,27 @@ pub struct Launch {
     pub env: BTreeMap<String, String>,
     pub cwd: PathBuf,
     pub inherit: Inherit,
+    /// Where the definition came from and a hash of it ([`lookup`]).
+    pub binding: String,
+}
+
+/// How long an ending server is given to exit at each step: after its
+/// input closes, and after TERM.
+#[derive(Debug, Clone, Copy)]
+enum Grace {
+    /// A server ended because nothing uses it.
+    Normal,
+    /// A server that already failed.
+    Short,
+}
+
+impl Grace {
+    fn waits(self) -> (Duration, Duration) {
+        match self {
+            Grace::Normal => (Duration::from_secs(1), Duration::from_secs(1)),
+            Grace::Short => (Duration::from_millis(100), Duration::from_millis(250)),
+        }
+    }
 }
 
 /// What the reader thread passes on from a server's stdout.
@@ -111,8 +142,11 @@ enum Incoming {
 struct Session {
     launch: Launch,
     child: Child,
-    stdin: ChildStdin,
+    /// The server's input; none once it is closed.
+    stdin: Option<ChildStdin>,
     rx: mpsc::Receiver<Incoming>,
+    /// The server's entry in the ledger, removed when it ends.
+    noted: Option<PathBuf>,
     /// The last line the server wrote on stderr.
     said: Arc<Mutex<String>>,
     /// Set when the server's stderr closed.
@@ -135,7 +169,7 @@ pub fn end_servers() {
     let held: Vec<_> = SERVERS.lock().map(|mut l| l.drain(..).filter_map(|(_, w)| w.upgrade()).collect()).unwrap_or_default();
     for s in held {
         if let Ok(mut s) = s.lock() {
-            s.end();
+            s.end(Grace::Short);
         }
     }
 }
@@ -143,7 +177,7 @@ pub fn end_servers() {
 impl Session {
     /// Spawn the server, then `initialize` and `tools/list` it, each step
     /// within its limit.
-    fn start(launch: &Launch, limits: Limits) -> Result<Session, String> {
+    fn start(launch: &Launch, limits: Limits, ledger: &Path) -> Result<Session, String> {
         let mut cmd = Process::new(&launch.program);
         sensor_env(&mut cmd, launch.inherit, &launch.env);
         cmd.args(&launch.args).current_dir(&launch.cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -155,7 +189,8 @@ impl Session {
             child.wait().ok();
             return Err(format!("cannot start server {}: no pipes", launch.label));
         };
-        let (tx, rx) = mpsc::channel();
+        let noted = ledger::note(ledger, &launch.cwd, child.id());
+        let (tx, rx) = mpsc::sync_channel(BACKLOG);
         std::thread::spawn(move || read_messages(stdout, tx));
         let said = Arc::new(Mutex::new(String::new()));
         let said_all = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -171,7 +206,7 @@ impl Session {
             }
             closed.store(true, std::sync::atomic::Ordering::Release);
         });
-        let mut s = Session { launch: launch.clone(), child, stdin, rx, said, said_all, next_id: 0, tools: BTreeMap::new(), ended: false };
+        let mut s = Session { launch: launch.clone(), child, stdin: Some(stdin), rx, noted, said, said_all, next_id: 0, tools: BTreeMap::new(), ended: false };
         let deadline = Instant::now() + limits.start;
         let init = json!({ "protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": { "name": "attend", "version": env!("CARGO_PKG_VERSION") } });
         s.request("initialize", init, deadline, limits.start)?;
@@ -209,7 +244,8 @@ impl Session {
         let _quiet = PipeQuiet::new();
         let mut line = msg.to_string();
         line.push('\n');
-        if self.stdin.write_all(line.as_bytes()).and_then(|_| self.stdin.flush()).is_err() {
+        let sent = self.stdin.as_mut().is_some_and(|i| i.write_all(line.as_bytes()).and_then(|_| i.flush()).is_ok());
+        if !sent {
             return Err(self.gone());
         }
         Ok(())
@@ -217,7 +253,7 @@ impl Session {
 
     /// Send `method` and wait until `deadline` for its answer. A request the
     /// server makes meanwhile is answered: `ping` with an empty result, any
-    /// other with method-not-found. Notifications are read and dropped.
+    /// other with method-not-found. The reader drops notifications.
     fn request(&mut self, method: &str, params: Value, deadline: Instant, limit: Duration) -> Result<Value, String> {
         self.next_id += 1;
         let id = self.next_id;
@@ -259,7 +295,7 @@ impl Session {
         while Instant::now() < until && !matches!(leader_exited(&mut self.child), Ok(true)) {
             std::thread::sleep(Duration::from_millis(10));
         }
-        let status = self.end();
+        let status = self.end(Grace::Short);
         // The group is gone, so stderr closes unless something outside it
         // holds it; its last line is read for a moment.
         let until = Instant::now() + Duration::from_millis(200);
@@ -277,22 +313,44 @@ impl Session {
         }
     }
 
-    /// End the server and return `why`.
+    /// End the failed server and return `why`.
     fn fail(&mut self, why: String) -> String {
-        self.end();
+        self.end(Grace::Short);
         why
     }
 
-    /// End the server's process group and reap it, once. The leader is
-    /// reaped only here, after the group kill, so its group id stays
-    /// reserved until then.
-    fn end(&mut self) -> Option<std::process::ExitStatus> {
+    /// End the server, once: close its input and wait for the leader to
+    /// exit, then TERM its process group and wait again, then KILL the
+    /// group and reap the leader. The group is signalled even when the
+    /// leader exited, so what it started ends too. The leader is reaped
+    /// only after the KILL, so its group id stays reserved until then.
+    fn end(&mut self, grace: Grace) -> Option<std::process::ExitStatus> {
         if self.ended {
             return None;
         }
         self.ended = true;
+        let (eof, term) = grace.waits();
+        self.stdin = None;
+        let exited = |child: &mut Child, wait: Duration| {
+            let until = Instant::now() + wait;
+            while !matches!(leader_exited(child), Ok(true)) && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        exited(&mut self.child, eof);
+        #[cfg(unix)]
+        // SAFETY: kill(2) takes no pointers; the unreaped leader keeps the
+        // group id ours.
+        unsafe {
+            libc::kill(-(self.child.id() as libc::pid_t), libc::SIGTERM);
+        }
+        exited(&mut self.child, term);
         kill_group(&mut self.child);
-        self.child.wait().ok()
+        let status = self.child.wait().ok();
+        if let Some(p) = self.noted.take() {
+            ledger::forget(&p);
+        }
+        status
     }
 
     /// Why `tool` may not be called on this server, if it may not.
@@ -325,13 +383,16 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.end();
+        self.end(Grace::Normal);
     }
 }
 
-/// Pass each line of a server's stdout on as a message, until it closes
-/// or sends what is not one.
-fn read_messages(out: impl Read, tx: mpsc::Sender<Incoming>) {
+/// Pass each answer and request on a server's stdout on as a message,
+/// until it closes or sends what is not one. A notification carries no
+/// id, needs no answer, and is dropped here, so a server that sends them
+/// between polls fills nothing. The channel is bounded: a reader with a
+/// full backlog waits, and so does the server writing to it.
+fn read_messages(out: impl Read, tx: mpsc::SyncSender<Incoming>) {
     let mut r = BufReader::new(out);
     loop {
         let mut buf = Vec::new();
@@ -351,6 +412,7 @@ fn read_messages(out: impl Read, tx: mpsc::Sender<Incoming>) {
             continue;
         }
         let msg = match serde_json::from_str::<Value>(line.trim()) {
+            Ok(v) if v.is_object() && v.get("id").is_none() => continue,
             Ok(v) if v.is_object() => Incoming::Message(v),
             _ => Incoming::Bad(format!("a line that is not a JSON-RPC message: {}", line.trim().chars().take(80).collect::<String>())),
         };
@@ -392,24 +454,35 @@ impl Drop for PipeQuiet {
 
 /// An mcp sensor's poll, for the project at `project`.
 pub struct Mcp {
+    /// The sensor's name.
+    name: String,
     block: McpBlock,
     project: PathBuf,
     inherit: Inherit,
     lookup: Lookup,
     limits: Limits,
+    /// Where the servers' entries are noted ([`ledger`]).
+    ledger: PathBuf,
     /// The server this sensor last polled through.
     held: Option<Arc<Mutex<Session>>>,
 }
 
 impl Mcp {
-    pub fn new(block: McpBlock, project: &str, inherit: Inherit, lookup: Lookup) -> Mcp {
-        Mcp { block, project: PathBuf::from(project), inherit, lookup, limits: Limits::default(), held: None }
+    pub fn new(name: &str, block: McpBlock, project: &str, inherit: Inherit, lookup: Lookup) -> Mcp {
+        Mcp { name: name.to_string(), block, project: PathBuf::from(project), inherit, lookup, limits: Limits::default(), ledger: ledger::dir(), held: None }
     }
 
     /// The same, with each step's limit set.
     #[cfg(test)]
     pub fn with_limits(mut self, limits: Limits) -> Mcp {
         self.limits = limits;
+        self
+    }
+
+    /// The same, noting its servers under `dir`.
+    #[cfg(test)]
+    pub fn with_ledger(mut self, dir: &Path) -> Mcp {
+        self.ledger = dir.to_path_buf();
         self
     }
 
@@ -427,17 +500,36 @@ impl Mcp {
             self.held = Some(Arc::clone(&s));
             return Ok(s);
         }
-        let s = Arc::new(Mutex::new(Session::start(launch, self.limits)?));
+        let s = Arc::new(Mutex::new(Session::start(launch, self.limits, &self.ledger)?));
         all.push((launch.clone(), Arc::downgrade(&s)));
         self.held = Some(Arc::clone(&s));
         Ok(s)
     }
 
-    /// One call of the tool, as a JSON result.
+    /// One call of the tool, as a JSON result. Refused unless the probe
+    /// record is bound to the server's definition as it resolves now.
     pub fn call(&mut self) -> Result<Value, String> {
         let launch = resolve(&self.block.server, &self.project, self.inherit, &self.lookup)?;
+        if self.block.probe.as_ref().and_then(|p| p.binding.as_deref()) != Some(launch.binding.as_str()) {
+            return Err(format!(
+                "the probe record was not taken with server {} as it is defined now; run `attend sensor probe {}`",
+                launch.label, self.name
+            ));
+        }
+        self.call_on(&launch)
+    }
+
+    /// One call of the tool for `attend sensor probe`, which takes the
+    /// record, so no record binds it: the result, and the binding of the
+    /// server it ran on.
+    pub fn probe_call(&mut self) -> Result<(Value, String), String> {
+        let launch = resolve(&self.block.server, &self.project, self.inherit, &self.lookup)?;
+        Ok((self.call_on(&launch)?, launch.binding))
+    }
+
+    fn call_on(&mut self, launch: &Launch) -> Result<Value, String> {
         let args = serde_json::to_value(&self.block.args).map_err(|e| format!("its args are not JSON: {e}"))?;
-        let server = self.server(&launch)?;
+        let server = self.server(launch)?;
         let mut s = server.lock().map_err(|_| format!("server {} is poisoned", launch.label))?;
         if let Some(why) = s.refuses(&self.block.tool, self.block.allow_unannotated) {
             return Err(why);

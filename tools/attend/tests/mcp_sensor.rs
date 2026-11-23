@@ -3,11 +3,17 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! An mcp sensor end to end, on a stdio server written in sh: it stays
-//! disabled until `attend sensor probe` records two matching calls and
-//! the operator's confirmation, a tool that is not declared read-only is
-//! refused and the refusal recorded, and under the sensor host a trigger
-//! on the tool's result becomes a system signal. No server outlives the
-//! process that started it, a re-exec included.
+//! disabled until `attend sensor probe` records two matching calls and the
+//! operator's confirmation at a terminal, the record lives in the user's
+//! file and is bound to the server's definition, a tool that is not
+//! declared read-only is refused and the refusal recorded, and under the
+//! sensor host a trigger on the tool's result becomes a system signal. No
+//! server outlives the process that started it: not a re-exec, not a host
+//! ended by TERM, and not a host killed with SIGKILL, whose servers the
+//! next host ends.
+//!
+//! The tests have no terminal, so a probe records `confirmed: false`; a
+//! test stands in for the operator's answer by editing the record.
 
 #![cfg(unix)]
 
@@ -37,14 +43,14 @@ fn quiet(tag: &str) -> Fixture {
 }
 
 /// The text of the mcp sensor `name`, polled every second, calling `tool`
-/// on the fixture server over the items file at `items`, its servers'
-/// pids noted in `pids`, with one trigger that fires for each item it has
-/// not seen this session.
-fn sensor_text(name: &str, tool: &str, items: &Path, pids: &Path) -> String {
+/// on the fixture server in `mode` over the items file at `items`, its
+/// servers' pids noted in `pids`, with one trigger that fires for each
+/// item it has not seen this session.
+fn sensor_text(name: &str, mode: &str, tool: &str, items: &Path, pids: &Path) -> String {
     format!(
         "# {name}: an mcp sensor on the fixture server\n\
          kind: mcp\ninterval: 1\nmin_interval: 1\nthreshold: 1\n\
-         server: {{command: sh, args: [{script}, serve], env: {{FIXTURE_PIDS: {pids}}}}}\n\
+         server: {{command: sh, args: [{script}, {mode}], env: {{FIXTURE_PIDS: {pids}}}}}\n\
          tool: {tool}\nargs: {{file: {items}}}\n\
          triggers:\n  - {{name: new, path: \"$.items[*]\", key: id, on: added, memory: session, magnitude: 3, description: \"new item {{id}}\"}}\n",
         script = server_script(),
@@ -53,18 +59,45 @@ fn sensor_text(name: &str, tool: &str, items: &Path, pids: &Path) -> String {
     )
 }
 
-/// Write the sensor `name` on `tool` over items `a`, and return the path
-/// of its pid file.
-fn mcp_sensor(f: &Fixture, name: &str, tool: &str) -> PathBuf {
+/// The items file and pid file of the sensor `name`, with items `a`.
+fn files(f: &Fixture, name: &str) -> (PathBuf, PathBuf) {
     let items = f.home.join(format!("{name}.items.json"));
     std::fs::write(&items, json!({"items": [{"id": "a"}]}).to_string()).unwrap();
-    let pids = f.home.join(format!("{name}.pids"));
-    f.sensor(name, &sensor_text(name, tool, &items, &pids));
+    (items, f.home.join(format!("{name}.pids")))
+}
+
+/// Write the user sensor `name` on `tool` of the fixture server in `mode`,
+/// and return the path of its pid file.
+fn mcp_sensor(f: &Fixture, name: &str, mode: &str, tool: &str) -> PathBuf {
+    let (items, pids) = files(f, name);
+    f.sensor(name, &sensor_text(name, mode, tool, &items, &pids));
     pids
 }
 
+fn user_path(f: &Fixture, name: &str) -> PathBuf {
+    f.home.join("config").join("attend").join("sensors").join(format!("{name}.yaml"))
+}
+
 fn user_file(f: &Fixture, name: &str) -> String {
-    std::fs::read_to_string(f.home.join("config").join("attend").join("sensors").join(format!("{name}.yaml"))).unwrap()
+    std::fs::read_to_string(user_path(f, name)).unwrap()
+}
+
+/// Probe `name` with no terminal, which records the calls unconfirmed,
+/// and return what it printed.
+fn probe(f: &Fixture, name: &str) -> Value {
+    let out = f.attend(&["sensor", "probe", name, "--json"]);
+    assert_eq!(out.status.code(), Some(3), "an unconfirmed record does not hold: {}", String::from_utf8_lossy(&out.stderr));
+    doc(&out.stdout)
+}
+
+/// Probe `name`, then answer yes for the operator, as a terminal would.
+fn probe_and_confirm(f: &Fixture, name: &str) {
+    let rec = probe(f, name);
+    assert_eq!((rec["calls_match"].as_bool(), rec["confirmed"].as_bool()), (Some(true), Some(false)), "{rec}");
+    let path = user_path(f, name);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(text.matches("confirmed: false").count(), 1, "{text}");
+    std::fs::write(&path, text.replace("confirmed: false", "confirmed: true")).unwrap();
 }
 
 /// The sensor `name` as `attend sensor list --json` shows it.
@@ -81,9 +114,9 @@ fn alive(pid: &str) -> bool {
     std::process::Command::new("kill").args(["-0", pid]).stderr(Stdio::null()).status().unwrap().success()
 }
 
-/// The pids of `file` still running after up to five seconds.
+/// The pids of `file` still running after up to eight seconds.
 fn left_behind(file: &Path) -> Vec<String> {
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + Duration::from_secs(8);
     loop {
         let live: Vec<String> = noted(file).into_iter().filter(|p| alive(p)).collect();
         if live.is_empty() || Instant::now() > until {
@@ -94,38 +127,49 @@ fn left_behind(file: &Path) -> Vec<String> {
 }
 
 /// An mcp sensor reads degraded and does not poll until a probe records
-/// two matching calls and a confirmation; a probe without the
-/// confirmation records that and leaves it disabled.
+/// two matching calls and a confirmation; with no terminal the probe
+/// records none and says where to answer.
 #[test]
 fn an_mcp_sensor_runs_only_once_a_confirmed_probe_holds() {
     let f = quiet("mcp-probe");
-    let pids = mcp_sensor(&f, "watch", "list_items");
+    let pids = mcp_sensor(&f, "watch", "serve", "list_items");
     let row = listed(&f, "watch");
     assert_eq!((row["kind"].as_str(), row["state"].as_str()), (Some("mcp"), Some("degraded")), "{row}");
-    assert_eq!(row["detail"].as_str(), Some("no probe record; run `attend sensor probe watch`"), "{row}");
+    assert_eq!(row["detail"].as_str(), Some("no probe record; run `attend sensor probe watch` at a terminal"), "{row}");
 
     let poll = f.attend(&["sensor", "poll", "watch", "--dry-run"]);
     assert_eq!(poll.status.code(), Some(3), "an unprobed sensor does not poll");
     assert!(String::from_utf8_lossy(&poll.stderr).contains("no probe record"), "{}", String::from_utf8_lossy(&poll.stderr));
     assert!(noted(&pids).is_empty(), "the refused poll started no server");
 
-    let unconfirmed = f.attend(&["sensor", "probe", "watch", "--json"]);
-    assert_eq!(unconfirmed.status.code(), Some(3), "a record without confirmation does not hold");
-    let rec = doc(&unconfirmed.stdout);
+    let rec = probe(&f, "watch");
     assert_eq!((rec["calls_match"].as_bool(), rec["confirmed"].as_bool(), rec["holds"].as_bool()), (Some(true), Some(false), Some(false)), "{rec}");
+    assert!(rec["then"].as_str().unwrap().contains("`! attend sensor probe watch` in Claude Code"), "{rec}");
+    assert!(rec["binding"].as_str().unwrap().starts_with("inline:"), "{rec}");
     assert!(listed(&f, "watch")["detail"].as_str().unwrap().contains("no confirmation"));
-
-    let confirmed = doc(f.ok(&["sensor", "probe", "watch", "--confirm", "--json"]).as_bytes());
-    assert_eq!((confirmed["calls_match"].as_bool(), confirmed["confirmed"].as_bool(), confirmed["holds"].as_bool()), (Some(true), Some(true), Some(true)), "{confirmed}");
     let text = user_file(&f, "watch");
     assert!(text.starts_with("# watch: an mcp sensor on the fixture server\nkind: mcp\n"), "the rest of the file is kept: {text}");
-    assert!(text.contains("probe:") && text.contains("calls_match: true") && text.contains("confirmed: true"), "{text}");
-    assert_eq!(listed(&f, "watch")["state"].as_str(), Some("active"));
 
+    probe_and_confirm(&f, "watch");
+    assert_eq!(listed(&f, "watch")["state"].as_str(), Some("active"));
     let out = doc(f.ok(&["sensor", "poll", "watch", "--dry-run", "--json"]).as_bytes());
     assert_eq!(out["failure"], Value::Null, "{out}");
     assert_eq!(out["result"], json!([{"magnitude": 3.0, "description": "new item a"}]), "{out}");
     assert_eq!(left_behind(&pids), Vec::<String>::new(), "each command ended the servers it started");
+}
+
+/// A poll of a disabled mcp sensor with no record that holds is refused
+/// too, and starts no server.
+#[test]
+fn a_disabled_unprobed_sensor_does_not_poll() {
+    let f = quiet("mcp-off");
+    let (items, pids) = files(&f, "off");
+    f.sensor("off", &(sensor_text("off", "serve", "list_items", &items, &pids) + "enabled: false\n"));
+    assert_eq!(listed(&f, "off")["state"].as_str(), Some("off"));
+    let poll = f.attend(&["sensor", "poll", "off", "--dry-run"]);
+    assert_eq!(poll.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&poll.stderr).contains("off has no probe record that holds: no probe record"), "{}", String::from_utf8_lossy(&poll.stderr));
+    assert!(noted(&pids).is_empty(), "the refused poll started no server");
 }
 
 /// A tool that declares itself read-only and still changes its listing
@@ -133,10 +177,8 @@ fn an_mcp_sensor_runs_only_once_a_confirmed_probe_holds() {
 #[test]
 fn a_tool_whose_second_call_loses_items_fails_the_probe() {
     let f = quiet("mcp-drain");
-    mcp_sensor(&f, "drain", "drain_items");
-    let out = f.attend(&["sensor", "probe", "drain", "--confirm", "--json"]);
-    assert_eq!(out.status.code(), Some(3));
-    let rec = doc(&out.stdout);
+    mcp_sensor(&f, "drain", "serve", "drain_items");
+    let rec = probe(&f, "drain");
     assert_eq!((rec["calls_match"].as_bool(), rec["confirmed"].as_bool()), (Some(false), Some(false)), "{rec}");
     assert_eq!(rec["difference"].as_str(), Some("trigger new: the second call did not return the item a"), "{rec}");
     let row = listed(&f, "drain");
@@ -145,22 +187,24 @@ fn a_tool_whose_second_call_loses_items_fails_the_probe() {
 }
 
 /// A tool without `readOnlyHint` is refused: the probe writes no record,
-/// and a poll under a hand-written record fails saying why. A host
-/// records the refusal as the sensor's state.
+/// and a poll under a record taken on the same server fails saying why. A
+/// host records the refusal as the sensor's state.
 #[test]
 fn a_tool_without_read_only_hint_is_refused_and_the_refusal_recorded() {
     let f = quiet("mcp-bare");
-    let pids = mcp_sensor(&f, "bare", "bare");
+    let pids = mcp_sensor(&f, "bare", "serve", "bare");
     let refusal = "tool bare does not declare readOnlyHint: true, so attend does not call it; allow_unannotated: true calls it anyway";
-    let probe = f.attend(&["sensor", "probe", "bare", "--confirm"]);
-    assert_eq!(probe.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&probe.stderr).contains(refusal), "{}", String::from_utf8_lossy(&probe.stderr));
+    let out = f.attend(&["sensor", "probe", "bare"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(refusal), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(!user_file(&f, "bare").contains("probe:"), "a refused probe writes no record");
 
-    let items = f.home.join("bare.items.json");
-    let record = format!("probe: {{server: sh, tool: bare, args: {{file: {}}}, calls_match: true, confirmed: true}}\n", items.display());
-    f.sensor("bare", &(sensor_text("bare", "bare", &items, &pids) + &record));
-    assert_eq!(listed(&f, "bare")["state"].as_str(), Some("active"), "the hand-written record holds");
+    // A record taken on the same server with a readable tool, then pointed
+    // at bare, as a hand edit would.
+    mcp_sensor(&f, "bare", "serve", "list_items");
+    probe_and_confirm(&f, "bare");
+    std::fs::write(user_path(&f, "bare"), user_file(&f, "bare").replace("tool: list_items", "tool: bare")).unwrap();
+    assert_eq!(listed(&f, "bare")["state"].as_str(), Some("active"), "the edited record holds");
     let out = doc(f.ok(&["sensor", "poll", "bare", "--dry-run", "--json"]).as_bytes());
     assert_eq!(out["failure"].as_str(), Some(refusal), "{out}");
 
@@ -171,17 +215,70 @@ fn a_tool_without_read_only_hint_is_refused_and_the_refusal_recorded() {
     assert_eq!(left_behind(&pids), Vec::<String>::new());
 }
 
+/// The record is bound to the server's definition: an inline server's
+/// changed args void it at once, and a named server's changed definition
+/// voids it at the next call.
+#[test]
+fn a_changed_server_definition_voids_the_record() {
+    let f = quiet("mcp-bind");
+    mcp_sensor(&f, "inline", "serve", "list_items");
+    probe_and_confirm(&f, "inline");
+    assert_eq!(listed(&f, "inline")["state"].as_str(), Some("active"));
+    std::fs::write(user_path(&f, "inline"), user_file(&f, "inline").replace(", serve]", ", serve, --extra]")).unwrap();
+    let row = listed(&f, "inline");
+    assert_eq!((row["state"].as_str(), row["detail"].as_str()), (Some("degraded"), Some("the probe record was taken with another server, tool or args; run `attend sensor probe inline` at a terminal")), "{row}");
+
+    let (items, pids) = files(&f, "named");
+    let entry = |env: Value| json!({ "mcpServers": { "fx": { "command": "sh", "args": [server_script(), "serve"], "env": env } } }).to_string();
+    let claude_json = f.home.join(".claude.json");
+    std::fs::write(&claude_json, entry(json!({ "FIXTURE_PIDS": pids }))).unwrap();
+    f.sensor("named", &sensor_text("named", "serve", "list_items", &items, &pids).replace(&format!("server: {{command: sh, args: [{}, serve], env: {{FIXTURE_PIDS: {}}}}}", server_script(), pids.display()), "server: fx"));
+    probe_and_confirm(&f, "named");
+    let out = doc(f.ok(&["sensor", "poll", "named", "--dry-run", "--json"]).as_bytes());
+    assert_eq!(out["failure"], Value::Null, "{out}");
+    std::fs::write(&claude_json, entry(json!({ "FIXTURE_PIDS": pids, "EXTRA": "1" }))).unwrap();
+    let out = doc(f.ok(&["sensor", "poll", "named", "--dry-run", "--json"]).as_bytes());
+    assert_eq!(out["failure"].as_str(), Some("the probe record was not taken with server fx as it is defined now; run `attend sensor probe named`"), "{out}");
+    assert_eq!(left_behind(&pids), Vec::<String>::new());
+}
+
+/// A project's sensor keeps its record in a user overlay naming the
+/// project; a record in the project's own file is ignored, with a note.
+#[test]
+fn a_project_sensor_s_record_lives_in_the_user_overlay() {
+    let f = quiet("mcp-project");
+    std::fs::write(f.home.join("config").join("attend").join("config.yaml"), format!("cleanup:\n  enabled: false\nproject_sensors:\n  - {}\n", f.origin)).unwrap();
+    let (items, pids) = files(&f, "repo");
+    let dir = Path::new(&f.origin).join(".claude").join("attend").join("sensors");
+    std::fs::create_dir_all(&dir).unwrap();
+    let text = sensor_text("repo", "serve", "list_items", &items, &pids);
+    std::fs::write(dir.join("repo.yaml"), &text).unwrap();
+    assert_eq!(listed(&f, "repo")["state"].as_str(), Some("degraded"));
+
+    probe_and_confirm(&f, "repo");
+    let overlay = user_file(&f, "repo");
+    assert!(overlay.starts_with("probe:") && overlay.contains(&format!("project: {}", f.origin)), "an overlay holds the record alone: {overlay}");
+    assert!(!overlay.contains("kind:"), "{overlay}");
+    assert_eq!(listed(&f, "repo")["state"].as_str(), Some("active"));
+
+    std::fs::write(dir.join("repo.yaml"), format!("{text}{overlay}")).unwrap();
+    std::fs::remove_file(user_path(&f, "repo")).unwrap();
+    let row = listed(&f, "repo");
+    assert_eq!((row["state"].as_str(), row["detail"].as_str()), (Some("degraded"), Some("no probe record; run `attend sensor probe repo` at a terminal")), "{row}");
+    assert!(row["notes"].to_string().contains("a probe record is read only from your user sensor file; this one in a project file is ignored"), "{row}");
+}
+
 /// Under the host, a trigger on the tool's result is a system signal to
 /// the session. A sensor file change re-executes the host, which ends the
-/// server it held first; the host's end leaves none.
+/// server it held first; TERM ends the host, which ends its servers, even
+/// one that keeps running when its input closes.
 #[test]
 fn the_host_writes_an_mcp_trigger_as_a_system_signal_and_leaves_no_server() {
     let f = quiet("mcp-host");
-    let pids = mcp_sensor(&f, "watch", "list_items");
-    f.ok(&["sensor", "probe", "watch", "--confirm"]);
-    assert_eq!(left_behind(&pids), Vec::<String>::new(), "the probe's server ended with it");
-    let probed = pids.with_extension("probe-pids");
-    std::fs::rename(&pids, &probed).unwrap();
+    let pids = mcp_sensor(&f, "watch", "deaf", "list_items");
+    probe_and_confirm(&f, "watch");
+    assert_eq!(left_behind(&pids), Vec::<String>::new(), "the probe's servers ended with it");
+    std::fs::remove_file(&pids).unwrap();
 
     let host = Host::start(&f);
     host.wait_for("the signal", Duration::from_secs(20), || !from(&f, "watch").is_empty());
@@ -192,14 +289,38 @@ fn the_host_writes_an_mcp_trigger_as_a_system_signal_and_leaves_no_server() {
     let first = noted(&pids);
     assert_eq!(first.len(), 1, "one server across the host's polls: {first:?}");
 
-    let file = f.home.join("config").join("attend").join("sensors").join("watch.yaml");
-    std::fs::write(&file, user_file(&f, "watch") + "# touched\n").unwrap();
-    host.wait_for("the re-executed host's server", Duration::from_secs(30), || noted(&pids).len() >= 2);
+    std::fs::write(user_path(&f, "watch"), user_file(&f, "watch") + "# touched\n").unwrap();
+    host.wait_for("the re-executed host's server", Duration::from_secs(30), || noted(&pids).len() >= 3);
     assert!(!alive(&first[0]), "the server from before the re-exec is still running");
     assert_eq!(from(&f, "watch").len(), 1, "the trigger kept for the session stays spent");
 
     drop(host);
     assert_eq!(left_behind(&pids), Vec::<String>::new(), "the host's end left a server running");
+}
+
+/// A host killed with SIGKILL ends nothing, and its server runs on; the
+/// next host for the project ends it before it starts its own.
+#[test]
+fn the_next_host_ends_the_servers_a_killed_host_left() {
+    let f = quiet("mcp-sweep");
+    let pids = mcp_sensor(&f, "watch", "deaf", "list_items");
+    probe_and_confirm(&f, "watch");
+    assert_eq!(left_behind(&pids), Vec::<String>::new());
+    std::fs::remove_file(&pids).unwrap();
+
+    let host = Host::start(&f);
+    // Killed once its server has answered, so the server is waiting on its
+    // input and not writing to a reader that is gone.
+    host.wait_for("the host's poll", Duration::from_secs(20), || !from(&f, "watch").is_empty());
+    let orphan = noted(&pids)[0].clone();
+    host.kill();
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(alive(&orphan), "a server that ignores the end of its input outlives a killed host");
+
+    let next = Host::start(&f);
+    next.wait_for("the sweep", Duration::from_secs(10), || !alive(&orphan));
+    drop(next);
+    assert_eq!(left_behind(&pids), Vec::<String>::new());
 }
 
 /// The signals sensor `sensor` wrote to the fixture's project tray, each
@@ -228,7 +349,8 @@ struct Host {
 
 impl Host {
     fn start(f: &Fixture) -> Host {
-        let err = f.home.join("host.err");
+        let n = std::fs::read_dir(&f.home).map(|d| d.count()).unwrap_or(0);
+        let err = f.home.join(format!("host-{n}.err"));
         let child = f
             .command()
             .args(["sensor", "host", "--session", &f.sid, "--cwd", &f.origin])
@@ -250,10 +372,19 @@ impl Host {
         }
         panic!("timed out waiting for {what}; the host logged:\n{}", std::fs::read_to_string(&self.err).unwrap_or_default());
     }
+
+    /// End it at once, as `kill -9` would.
+    fn kill(mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
 }
 
 impl Drop for Host {
     fn drop(&mut self) {
+        if !matches!(self.child.try_wait(), Ok(None)) {
+            return;
+        }
         // SAFETY: kill(2) on the process group the unreaped child leads.
         unsafe { libc::kill(-(self.child.id() as libc::pid_t), libc::SIGTERM) };
         let start = Instant::now();

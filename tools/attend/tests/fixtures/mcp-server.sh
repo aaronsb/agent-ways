@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 # SPDX-FileCopyrightText: 2026 Aaron Bockelie
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # From agent-ways: https://github.com/aaronsb/agent-ways
@@ -14,6 +14,8 @@
 #   hang       answers nothing, with a background child holding its pipes
 #   hang-call  answers initialize and tools/list, then holds the call with a
 #              background child
+#   deaf       as serve, but keeps running when its input closes, and exits
+#              on TERM, noting `term` in "$FIXTURE_PIDS.term"
 #
 # Tools:
 #   list_items  readOnlyHint: true; returns the JSON in the file its
@@ -44,6 +46,9 @@ hold() {
 }
 
 [ "$mode" = hang ] && hold
+if [ "$mode" = deaf ]; then
+	trap '[ -n "$FIXTURE_PIDS" ] && echo term >> "$FIXTURE_PIDS.term"; exit 0' TERM
+fi
 
 reply() { printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$1" "$2"; }
 
@@ -89,3 +94,5 @@ while IFS= read -r line; do
 		;;
 	esac
 done
+
+[ "$mode" = deaf ] && hold

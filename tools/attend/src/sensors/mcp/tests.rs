@@ -3,7 +3,8 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 use super::*;
-use sensor_spec::Server;
+use super::lookup::Vars;
+use sensor_spec::{ProbeRecord, Server};
 use std::path::Path;
 
 fn fixture() -> String {
@@ -18,8 +19,20 @@ fn scratch(tag: &str) -> PathBuf {
     d
 }
 
-/// An mcp sensor on the fixture server in `mode`, calling `tool` on the
-/// result file `items` holds, its pids noted in `dir`.
+/// The probe record a sensor on `server` calling `tool` holds.
+fn record(server: &Server, tool: &str, args: &serde_yaml::Mapping) -> ProbeRecord {
+    let binding = inline_binding(server);
+    ProbeRecord { server: server.label().into(), binding, project: None, tool: tool.into(), args: args.clone(), calls_match: true, confirmed: true, at: None }
+}
+
+/// A lookup that reads no user file and no environment.
+fn no_lookup(dir: &Path) -> Lookup {
+    Lookup { user_json: dir.join("no-claude.json"), trusted: false, vars: |_| None }
+}
+
+/// An mcp sensor `t` on the fixture server in `mode`, calling `tool` on
+/// the result file `items` holds, with a probe record bound to its server,
+/// its pids and its ledger in `dir`.
 fn sensor(dir: &Path, mode: &str, tool: &str, allow_unannotated: bool) -> Mcp {
     let items = dir.join("items.json");
     if !items.exists() {
@@ -32,9 +45,9 @@ fn sensor(dir: &Path, mode: &str, tool: &str, allow_unannotated: bool) -> Mcp {
     };
     let mut args = serde_yaml::Mapping::new();
     args.insert("file".into(), items.display().to_string().into());
-    let block = McpBlock { server, tool: tool.into(), args, allow_unannotated, probe: None };
-    let lookup = Lookup { user_json: dir.join("no-claude.json"), trusted: false };
-    Mcp::new(block, dir.to_str().unwrap(), Inherit::Stripped, lookup)
+    let probe = Some(record(&server, tool, &args));
+    let block = McpBlock { server, tool: tool.into(), args, allow_unannotated, probe };
+    Mcp::new("t", block, dir.to_str().unwrap(), Inherit::Stripped, no_lookup(dir)).with_ledger(&dir.join("ledger"))
 }
 
 fn quick(m: Mcp) -> Mcp {
@@ -50,10 +63,10 @@ fn alive(pid: &str) -> bool {
     Process::new("kill").args(["-0", pid]).stderr(Stdio::null()).status().unwrap().success()
 }
 
-/// Wait up to two seconds for every pid in `dir` to be gone, and name
+/// Wait up to five seconds for every pid in `dir` to be gone, and name
 /// any that is not.
 fn left_behind(dir: &Path) -> Vec<String> {
-    let until = Instant::now() + Duration::from_secs(2);
+    let until = Instant::now() + Duration::from_secs(5);
     loop {
         let live: Vec<String> = pids(dir).into_iter().filter(|p| alive(p)).collect();
         if live.is_empty() || Instant::now() > until {
@@ -163,6 +176,7 @@ fn a_missing_program_cannot_start() {
     let dir = scratch("missing");
     let mut m = sensor(&dir, "serve", "list_items", false);
     m.block.server = Server::Inline { command: "/nonexistent/mcp-server".into(), args: vec![], env: BTreeMap::new() };
+    m.block.probe = Some(record(&m.block.server, "list_items", &m.block.args));
     assert!(m.call().unwrap_err().starts_with("cannot start server /nonexistent/mcp-server: "));
 }
 
@@ -186,7 +200,7 @@ fn a_named_server_is_looked_up_as_claude_code_does() {
     )
     .unwrap();
     std::fs::write(project.join(".mcp.json"), json!({ "mcpServers": { "both": { "command": "repo-both" } } }).to_string()).unwrap();
-    let at = |name: &str, trusted: bool| resolve(&Server::Named(name.into()), &project, Inherit::Stripped, &Lookup { user_json: user_json.clone(), trusted });
+    let at = |name: &str, trusted: bool| resolve(&Server::Named(name.into()), &project, Inherit::Stripped, &Lookup { user_json: user_json.clone(), trusted, vars: |_| None });
     let local = at("local", false).unwrap();
     assert_eq!((local.program.as_str(), local.args.clone(), local.env.get("K").map(String::as_str), local.inherit), ("local-cmd", vec!["-x".to_string()], Some("v"), Inherit::Stripped));
     assert_eq!(at("u", false).unwrap().program, "user-u");
@@ -195,4 +209,148 @@ fn a_named_server_is_looked_up_as_claude_code_does() {
     assert!(at("both", false).unwrap_err().contains("the project is not in attend.project_sensors"));
     assert_eq!(at("web", false).unwrap_err(), "server web is a http server; attend runs stdio servers only");
     assert!(at("none", false).unwrap_err().starts_with("no MCP server named none in "));
+}
+
+/// A poll runs only under a record bound to the server as it is defined
+/// now: an inline server's changed args void it.
+#[test]
+fn a_record_taken_with_another_server_definition_refuses_the_poll() {
+    let dir = scratch("binding");
+    let mut m = sensor(&dir, "serve", "list_items", false);
+    let Server::Inline { args, .. } = &mut m.block.server else { panic!() };
+    args.push("--extra".into());
+    assert_eq!(m.call().unwrap_err(), "the probe record was not taken with server sh as it is defined now; run `attend sensor probe t`");
+    assert!(pids(&dir).is_empty(), "the refused poll started no server");
+    assert!(m.probe_call().is_ok(), "the probe itself takes the record, so no record binds it");
+}
+
+/// A server that keeps running when its input closes gets TERM, and one
+/// that exits on TERM is not killed: its TERM handler ran.
+#[test]
+fn an_ending_server_gets_term_before_kill() {
+    let dir = scratch("term");
+    let mut m = sensor(&dir, "deaf", "list_items", false);
+    assert!(m.call().is_ok());
+    assert_eq!(std::fs::read_dir(dir.join("ledger")).unwrap().count(), 1, "the running server is in the ledger");
+    let started = Instant::now();
+    drop(m);
+    assert_eq!(left_behind(&dir), Vec::<String>::new());
+    assert_eq!(std::fs::read_to_string(dir.join("pids.term")).unwrap_or_default(), "term\n", "the server handled TERM");
+    assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
+    let entries: usize = std::fs::read_dir(dir.join("ledger")).unwrap().flatten().map(|d| std::fs::read_dir(d.path()).unwrap().count()).sum();
+    assert_eq!(entries, 0, "the ended server's entry is removed");
+}
+
+/// The sweep leaves a server whose owner runs, such as another host's,
+/// and ends one whose owner is gone.
+#[test]
+fn the_sweep_ends_only_servers_whose_owner_is_gone() {
+    let dir = scratch("sweep");
+    let mut m = sensor(&dir, "deaf", "list_items", false);
+    assert!(m.call().is_ok());
+    assert_eq!(ledger::sweep(&dir.join("ledger"), &dir), 0, "this process owns it and runs");
+    assert_eq!(left_behind_now(&dir), pids(&dir), "the sweep left a live owner's server running");
+
+    let mut orphan = Process::new("sh");
+    orphan.args(["-c", "sleep 600"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    std::os::unix::process::CommandExt::process_group(&mut orphan, 0);
+    let mut orphan = orphan.spawn().unwrap();
+    let group = orphan.id();
+    let mut done = Process::new("true").spawn().unwrap();
+    let gone = done.id();
+    done.wait().unwrap();
+    let entry = json!({ "group": group, "leader_start": attend_presence::process::start_time(group), "owner": gone, "owner_start": "a process that ended" });
+    let at = std::fs::read_dir(dir.join("ledger")).unwrap().flatten().next().unwrap().path();
+    std::fs::write(at.join(format!("{group}.json")), entry.to_string()).unwrap();
+    let swept = ledger::sweep(&dir.join("ledger"), &dir);
+    let until = Instant::now() + Duration::from_secs(3);
+    while orphan.try_wait().unwrap().is_none() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let ended = orphan.try_wait().unwrap().is_some();
+    if !ended {
+        // SAFETY: kill(2) on the group the unreaped child leads, so a
+        // failed sweep leaves nothing running.
+        unsafe { libc::kill(-(group as libc::pid_t), libc::SIGKILL) };
+        orphan.wait().ok();
+    }
+    assert_eq!((swept, ended), (1, true), "the orphaned group was not ended");
+    assert!(!at.join(format!("{group}.json")).exists(), "its entry is removed");
+    drop(m);
+    assert_eq!(left_behind(&dir), Vec::<String>::new());
+}
+
+/// The pids of `dir` running now.
+fn left_behind_now(dir: &Path) -> Vec<String> {
+    pids(dir).into_iter().filter(|p| alive(p)).collect()
+}
+
+/// A `~/.claude.json` entry expands `${NAME}` and `${NAME:-default}` from
+/// attend's environment and names a reference it cannot expand; a
+/// repository's `.mcp.json` entry expands nothing and is refused, naming
+/// the reference.
+#[test]
+fn a_user_entry_expands_variables_and_a_repository_entry_is_refused() {
+    let dir = scratch("vars");
+    let project = dir.join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let user_json = dir.join("claude.json");
+    std::fs::write(
+        &user_json,
+        json!({ "mcpServers": {
+            "u": { "command": "${MCP_BIN}", "args": ["--at", "${MCP_HOME:-/fallback}/x"], "env": { "TOKEN": "${MCP_TOKEN}" } },
+            "unset": { "command": "srv", "env": { "TOKEN": "${MCP_MISSING}" } }
+        } })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(project.join(".mcp.json"), json!({ "mcpServers": { "repo": { "command": "srv", "env": { "KEY": "${HOME}" } } } }).to_string()).unwrap();
+    let vars: Vars = |k| match k {
+        "MCP_BIN" => Some("/bin/srv".into()),
+        "MCP_TOKEN" => Some("t0k".into()),
+        _ => None,
+    };
+    let at = |name: &str| resolve(&Server::Named(name.into()), &project, Inherit::Stripped, &Lookup { user_json: user_json.clone(), trusted: true, vars });
+    let u = at("u").unwrap();
+    assert_eq!((u.program.as_str(), u.args.clone(), u.env.get("TOKEN").map(String::as_str)), ("/bin/srv", vec!["--at".to_string(), "/fallback/x".to_string()], Some("t0k")));
+    assert!(u.binding.starts_with("user:"), "{}", u.binding);
+    assert_eq!(at("unset").unwrap_err(), "server unset uses ${MCP_MISSING}, which is not set in attend's environment, so it is left unexpanded");
+    assert_eq!(at("repo").unwrap_err(), "server repo in the project's .mcp.json uses ${HOME}; attend does not expand variables for a repository's server");
+}
+
+/// A malformed `.mcp.json` is read only when the project's entry misses,
+/// leaves the user's servers usable, and fails only a server nothing else
+/// defines.
+#[test]
+fn a_malformed_mcp_json_fails_only_a_server_it_alone_could_define() {
+    let dir = scratch("malformed");
+    let project = dir.join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let user_json = dir.join("claude.json");
+    let p = project.display().to_string();
+    std::fs::write(&user_json, json!({ "mcpServers": { "u": { "command": "user-u" } }, "projects": { p: { "mcpServers": { "local": { "command": "local-cmd" } } } } }).to_string()).unwrap();
+    std::fs::write(project.join(".mcp.json"), "{ not json").unwrap();
+    let at = |name: &str| resolve(&Server::Named(name.into()), &project, Inherit::Stripped, &Lookup { user_json: user_json.clone(), trusted: true, vars: |_| None });
+    assert_eq!(at("local").unwrap().program, "local-cmd");
+    assert_eq!(at("u").unwrap().program, "user-u");
+    let why = at("none").unwrap_err();
+    assert!(why.contains(".mcp.json is not JSON"), "{why}");
+}
+
+/// A named server's binding follows its definition, and an inline
+/// server's follows its command, args and env.
+#[test]
+fn a_binding_changes_with_the_definition() {
+    let dir = scratch("bind");
+    let user_json = dir.join("claude.json");
+    let at = |def: Value| {
+        std::fs::write(&user_json, json!({ "mcpServers": { "s": def } }).to_string()).unwrap();
+        resolve(&Server::Named("s".into()), &dir, Inherit::Stripped, &Lookup { user_json: user_json.clone(), trusted: false, vars: |_| Some("v".into()) }).unwrap().binding
+    };
+    let one = at(json!({ "command": "srv", "env": { "T": "${X}" } }));
+    assert_eq!(one, at(json!({ "command": "srv", "env": { "T": "${X}" } })));
+    assert_ne!(one, at(json!({ "command": "srv", "env": { "T": "${Y}" } })));
+    assert!(!one.contains("srv"), "the binding holds no value of the definition: {one}");
+    let inline = |args: &[&str]| inline_binding(&Server::Inline { command: "srv".into(), args: args.iter().map(|a| a.to_string()).collect(), env: BTreeMap::new() });
+    assert_ne!(inline(&["a"]), inline(&["b"]));
 }
