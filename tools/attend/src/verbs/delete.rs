@@ -15,7 +15,8 @@
 //! A live recipient is a session `attend_presence::alive` counts live that
 //! is enrolled or keeps a heartbeat. What it holds is the drain's own scan,
 //! `scan_pending(receive_dirs, seen, reading_ids, baselining)`, the count
-//! `attend message unread` reports for it. A person in attend-chat keeps no
+//! `attend message unread` reports for it. A system signal past its expiry
+//! is no longer pending for anyone. A person in attend-chat keeps no
 //! seen-set and holds nothing.
 
 use std::collections::HashSet;
@@ -270,7 +271,7 @@ fn pending_for(base: &Path, id: &str, enrolled: bool, marks: &Marks) -> HashSet<
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
     let ids = attend_presence::enrollment::reading_ids(&identity_of(id, origin));
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-    crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining, marks).delivered.into_iter().map(|d| d.key).collect()
+    crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining, marks, sensor_trait::epoch_secs()).delivered.into_iter().map(|d| d.key).collect()
 }
 
 /// The subdirectories of `dir`, with their names.

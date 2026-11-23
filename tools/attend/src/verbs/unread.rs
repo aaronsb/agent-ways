@@ -11,9 +11,15 @@
 //! Claude Code process made under its id before `/clear` moves to the
 //! current id, and an opt-out whose `attend run` has exited is applied.
 //!
-//! When a message addressed to the session waits, it also reports whether
-//! the session's prompt cache has lapsed, which holds that message for the
-//! operator's next turn.
+//! When a message that would wake the session waits, it also reports
+//! whether the session's prompt cache has lapsed, which holds that message
+//! for the operator's next turn.
+//!
+//! An event-lane notice from attend counts as unread: the next turn or the
+//! next waking delivery carries it. It never wakes the session, so it alone
+//! never reports a lapsed cache, and `N waiting · cold` appears only when
+//! something that would wake the session waits. One past its expiry is not
+//! counted, since no reader will deliver it.
 //!
 //! A session that is not listening, or that no conduit has baselined yet,
 //! is counted as its cold start would deliver when it listens: addressed
@@ -71,7 +77,7 @@ pub fn unread() -> Unread {
     let ids = attend_presence::enrollment::reading_ids(&me);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let marks = attend_groups::tombstones::Marks::load(&crate::util::signals_base());
-    let scan = crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining, &marks);
+    let scan = crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining, &marks, sensor_trait::epoch_secs());
 
     let mut rooms: Vec<RoomCount> = Vec::new();
     for dir in &dirs {
@@ -86,8 +92,9 @@ pub fn unread() -> Unread {
         let count = scan.delivered.iter().filter(|d| d.room == dir.room).count();
         rooms.push(RoomCount { label, kind, name, count });
     }
-    // Read only when something addressed waits: the clock costs a `ways`
-    // run, and with nothing to hold there is no hold to report.
+    // Read only when something that would wake the session waits: the
+    // clock costs a `ways` run, and with nothing to hold there is no hold
+    // to report.
     let cache_lapsed = scan.delivered.iter().any(|d| d.wakes) && crate::util::cache_lapsed(&me);
     Unread {
         unread: scan.delivered.len(),
@@ -99,7 +106,8 @@ pub fn unread() -> Unread {
 }
 
 /// The count in one phrase: `N unread`, or `N waiting · cold` while the
-/// prompt cache has lapsed under an addressed message.
+/// prompt cache has lapsed under a message that would wake the session. `N`
+/// counts everything unread, which all waits for the next turn.
 pub fn headline(u: &Unread) -> String {
     if u.cache_lapsed {
         format!("{} waiting · cold", u.unread)

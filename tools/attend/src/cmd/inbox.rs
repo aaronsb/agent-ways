@@ -144,11 +144,14 @@ fn inbox_footer(out: &mut String, page: usize, total: usize, shown: usize, older
 // `attend message inbox --drain` — the ADR-172 turn-boundary consumption path.
 // ---------------------------------------------------------------------------
 
-/// Consecutive drain-fired continuations allowed before the drain defers
-/// to the Monitor conduit (ADR-172 Decision 6). Two actively conversing
-/// sessions can otherwise injection-trigger each other's turns without
-/// bound. Deferring delivers nothing and marks nothing — the messages
-/// stay pending for the poller or the next fresh turn boundary.
+/// Consecutive drain-fired continuations allowed before the drain stands
+/// down. Two actively conversing sessions can otherwise
+/// injection-trigger each other's turns without bound. Standing down
+/// delivers nothing and marks nothing: the messages stay pending for the
+/// next delivery, the mod's poll or the next fresh turn boundary.
+///
+/// References:
+/// - ADR-172 Decision 6: re-entry is bounded.
 const MAX_DRAIN_ROUNDS: u32 = 5;
 
 /// Cap on messages rendered in full in one drain; the remainder is
@@ -226,7 +229,8 @@ fn room_label(room: &Room) -> String {
 /// `/clear` ([`attend_presence::enrollment::reading_ids`]): a message to
 /// or from any of them is the session's own.
 ///
-/// Own messages and those a tombstoned session sent are marked read
+/// Own messages, those a tombstoned session sent, and those past their
+/// expiry at `now` (Unix seconds, the reader's clock) are marked read
 /// without delivering; a message a delete marked is passed over unrecorded
 /// (`marks`, ADR-404 D3e). Under
 /// `baselining` (no seen-set yet) the messages from others go through
@@ -241,6 +245,7 @@ pub(crate) fn scan_pending(
     ids: &[&str],
     baselining: bool,
     marks: &attend_groups::tombstones::Marks,
+    now: u64,
 ) -> Scan {
     let own_session_id = ids.first().copied().unwrap_or_default();
     struct Found {
@@ -303,6 +308,12 @@ pub(crate) fn scan_pending(
                 mark.push(key);
                 continue;
             }
+            // Past its expiry: read, never shown, and not counted with what
+            // a cold start holds back.
+            if sig.lapsed(now) {
+                mark.push(key);
+                continue;
+            }
             found.push(Found { room, key, path, mtime, content });
         }
     }
@@ -357,15 +368,17 @@ pub(crate) fn scan_pending(
 /// Drain pending authored messages for this session: deliver the unseen,
 /// record their consumption in the shared seen-set, and (in `hook`
 /// format) emit the Stop-hook JSON that continues the ending turn with
-/// them. Every guard degrades to "deliver nothing, mark nothing":
-/// unresolved identity and the re-entry ceiling leave the tray for the
-/// Monitor conduit; a cold start applies `attend_state::cold_start`,
+/// them. Every guard degrades to "deliver nothing, mark nothing", which
+/// leaves what is pending for the next delivery: unresolved identity, the
+/// re-entry ceiling, and a `hook` drain in a session neither the attend
+/// mod nor a live `attend run` delivers to. A cold start applies `attend_state::cold_start`,
 /// announces what it held back, and always persists the state file so it
 /// happens exactly once.
 ///
 /// With `wake`, the drain delivers and marks nothing unless a pending
 /// message would wake the session (ADR-406 item 2); then it delivers all
-/// that is pending. A session whose prompt cache has lapsed is never woken:
+/// that is pending, event-lane signals included, which never wake it on
+/// their own. A session whose prompt cache has lapsed is never woken:
 /// the drain holds what is pending for the operator's next turn and reports
 /// `cache_lapsed`. The attend mod polls this way while the session idles.
 pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
@@ -382,11 +395,11 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
 
     // Resolved-gate (ADR-172 Decision 4): marking consumption under a
     // pid-fallback identity would alias sessions and corrupt the shared
-    // seen-set. Under unresolved identity, Monitor remains the conduit.
+    // seen-set. Under unresolved identity the drain marks nothing.
     let ident = attend_presence::session::identity();
     if !ident.resolved() {
         if !hook_mode {
-            eprintln!("(identity unresolved — drain is a no-op; the Monitor poller still delivers)");
+            eprintln!("(identity unresolved — the drain delivers and marks nothing)");
         }
         if mode == DrainMode::Json {
             print_drain_json("unresolved", &[], 0, None, None, false);
@@ -426,12 +439,27 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // empty drain (below), so continuations forced by OTHER Stop hooks
     // cannot inflate it across turns.
     let stop_active = hook_mode && stdin_stop_hook_active();
+    // The Stop hook delivers to a session the attend mod enrolled
+    // (`attend listen on --host mod`), whose turn-end conduit it is, and to
+    // one whose `attend run` is live, so a Monitor session keeps its
+    // turn-end delivery until `attend run` is removed. Any other listening
+    // session, one that ran `attend listen on` or joined a channel from a
+    // shell, gets nothing from it and has nothing marked. The hook's
+    // payload is read first, so its writer never meets a closed pipe.
+    //
+    // References:
+    // - ADR-416 §1 and its turn-end settlement, with its amendment of
+    //   2026-11-23: no delivery outside the mod, the Stop-hook drain kept
+    //   for the mod, and for a live `attend run` until #1316.
+    if hook_mode && host != Some(Host::Mod) && !attend_presence::heartbeat::run_is_live(&session_id) {
+        return;
+    }
     // The ceiling fails closed: a forced continuation that cannot record
     // its round (state dir unwritable) would read round 1 forever.
     let rounds = match bump_drain_rounds(&session_id, stop_active) {
         Some(r) => r,
         None if stop_active => {
-            eprintln!("(cannot record the drain round — deferring to the Monitor conduit)");
+            eprintln!("(cannot record the drain round — the messages stay pending for the next delivery)");
             return;
         }
         None => 1,
@@ -439,7 +467,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // Only the hook path reads stop_hook_active, so only a hook drain counts
     // rounds past 1: a JSON drain never reaches this ceiling.
     if rounds > MAX_DRAIN_ROUNDS {
-        eprintln!("(drain round {rounds} > {MAX_DRAIN_ROUNDS} — deferring to the Monitor conduit)");
+        eprintln!("(drain round {rounds} > {MAX_DRAIN_ROUNDS} — the messages stay pending for the next delivery)");
         return;
     }
 
@@ -456,7 +484,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let cwd = ident.origin_path.clone();
     let ids = attend_presence::enrollment::reading_ids(&ident);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining, &attend_groups::tombstones::Marks::load(&base));
+    let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining, &attend_groups::tombstones::Marks::load(&base), sensor_trait::epoch_secs());
     // The cache gate (ADR-406 item 2): waking a session whose prompt cache
     // has lapsed would rewrite its whole context at the cache-write price,
     // so a message that would wake it waits for the operator's next turn
@@ -673,7 +701,8 @@ fn drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Optio
 /// rides only the delivery, the one part of the output the model reads.
 ///
 /// `host` is what hosts the session's delivery: the attend mod gets its own
-/// format and tools ([`render_mod_delivery`]), any other host the CLI's.
+/// format and tools ([`render_mod_delivery`]), and a session under a live
+/// `attend run`, the only other one the hook delivers to, the CLI's.
 /// `form` is [`StopForm::Block`] only for a Claude Code older than the
 /// first build that reads a Stop hook's `additionalContext`.
 fn hook_output(
@@ -818,6 +847,12 @@ enum StopForm {
     /// Code older than [`CONTEXT_SINCE`] reads. An older build ignores
     /// `additionalContext`, and the drain has already marked the messages
     /// read, so they would be lost.
+    ///
+    /// A session the attend mod hosts never gets it: the mod needs Claude
+    /// Code 2.1.296 or later. The Stop hook also delivers to a session
+    /// whose `attend run` is live, and `attend run` under Monitor sets no
+    /// floor on the Claude Code it runs in, so this form stays for such a
+    /// session until `attend run` is removed.
     Block,
 }
 
@@ -1414,7 +1449,7 @@ mod drain_tests {
         let key = write_signal(&old, "m1", "claude:other-session", "once");
         let seen: std::collections::HashSet<String> = [key].into_iter().collect();
         std::fs::rename(old.join("m1.signal"), new.join("m1.signal")).unwrap();
-        let scan = scan_pending(&dirs(&new, Room::Project), &seen, &["my-session"], false, &Default::default());
+        let scan = scan_pending(&dirs(&new, Room::Project), &seen, &["my-session"], false, &Default::default(), NOW);
         assert!(scan.delivered.is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
@@ -1425,7 +1460,7 @@ mod drain_tests {
         let k1 = write_signal(&dir, "peer-1", "claude:other-session", "already seen");
         let k2 = write_signal(&dir, "peer-2", "claude:other-session", "new message");
         let seen: std::collections::HashSet<String> = [k1].into_iter().collect();
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &seen, &["my-session"], false, &Default::default());
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &seen, &["my-session"], false, &Default::default(), NOW);
         assert_eq!(delivered.len(), 1);
         assert_eq!(delivered[0].body, "new message");
         assert_eq!(delivered[0].scope, "#open");
@@ -1438,7 +1473,7 @@ mod drain_tests {
     fn scan_marks_own_messages_without_delivering() {
         let dir = scan_fixture("own");
         let k = write_signal(&dir, "self-1", "claude:my-session", "my own send");
-        let Scan { delivered, mark, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default());
+        let Scan { delivered, mark, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default(), NOW);
         assert!(delivered.is_empty(), "own message must not deliver");
         assert_eq!(mark, vec![k], "own message must still be marked (dedup bookkeeping)");
         std::fs::remove_dir_all(&dir).ok();
@@ -1451,7 +1486,7 @@ mod drain_tests {
     fn baseline_delivers_fresh_messages() {
         let dir = scan_fixture("baseline-fresh");
         let k = write_signal(&dir, "peer-1", "claude:other-session", "arrived just now");
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default());
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default(), NOW);
         assert_eq!(delivered.len(), 1, "fresh message must survive the baseline");
         assert_eq!(mark, vec![k]);
         assert_eq!(note, None);
@@ -1466,7 +1501,7 @@ mod drain_tests {
         let k = write_signal(&dir, "peer-1", "claude:other-session", "durable backlog");
         age(&dir, "peer-1", std::time::Duration::from_secs(600));
 
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default());
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true, &Default::default(), NOW);
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
         assert_eq!(note.as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
@@ -1482,13 +1517,16 @@ mod drain_tests {
         write_signal(&dir, "peer-1", "claude:other-session", "sent with --to an hour ago");
         age(&dir, "peer-1", std::time::Duration::from_secs(3600));
 
-        let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], true, &Default::default());
+        let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], true, &Default::default(), NOW);
         assert!(scan.delivered.is_empty());
         assert_eq!(scan.note.as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
     const SYS_SID: &str = "11111111-2222-3333-4444-555555555555";
+
+    /// The reader's clock in these scans: before the fixture's expiry.
+    const NOW: u64 = 1_790_000_000;
 
     /// A system signal on each lane, and a line from before the system
     /// sender, written literally into the session's tray.
@@ -1505,25 +1543,56 @@ mod drain_tests {
 
     /// The drain parses a system signal's lane, expiry and sender and
     /// carries them on the delivered row, and a line from before the system
-    /// sender reads as it did. The wake rule is not changed here: a system
-    /// signal addressed to the session wakes it as a direct message does.
+    /// sender reads as it did. An event-lane system signal addressed to the
+    /// session does not wake it; a message-lane one does, as a direct
+    /// message does.
     #[test]
     fn scan_carries_a_system_signals_lane_expiry_and_sender() {
         use agent_identity::signal::{Kind, Lane};
         let dir = scan_fixture("system");
         write_system_fixture(&dir);
-        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &[SYS_SID], false, &Default::default());
+        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &[SYS_SID], false, &Default::default(), NOW);
         let row = |id: &str| delivered.iter().find(|d| d.id == id).unwrap_or_else(|| panic!("{id} not delivered"));
         let git = row("git-1-0");
         assert_eq!((git.kind, git.lane, git.expires), (Some(Kind::System), Lane::Event, Some(1_790_003_600)));
         assert_eq!((git.sender.as_str(), git.sender_id.as_str(), git.body.as_str()), ("attend (git)", "system:git", "branch switched to main"));
-        assert!(git.wakes);
+        assert!(!git.wakes, "the event lane never wakes");
         let update = row("ways-update-1-0");
         assert_eq!((update.kind, update.lane, update.expires), (Some(Kind::System), Lane::Message, None));
         assert_eq!((update.sender.as_str(), update.body.as_str()), ("attend (ways-update)", "agent-ways has a newer release"));
+        assert!(update.wakes, "the message lane wakes as an addressed message");
         let peer = row("peer-1-0");
         assert_eq!((peer.kind, peer.lane, peer.expires), (Some(Kind::Agent), Lane::Message, None));
         assert_eq!(peer.body, "lane:event|a peer's words", "a lane tag after an agent sender is text");
+        assert!(peer.wakes, "a peer's lane-looking text does not quiet its message");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Past its expiry by the reader's clock, a system signal is marked
+    /// read and never delivered, on a cold start too, where it is not
+    /// counted among what was held back. At its expiry it is still
+    /// delivered. A signal with no expiry, two hours old, is delivered: no
+    /// tag is how the writer records `expires: session`.
+    #[test]
+    fn an_expired_signal_is_marked_and_never_delivered() {
+        let dir = scan_fixture("expired");
+        let line = |tags: &str, text: &str| format!("system:git|proj|/src/cwd|from_kind:system|from_id:git|to:{SYS_SID}|lane:event|{tags}{text}\n");
+        std::fs::write(dir.join("git-1-1.signal"), line("expires:1000|", "lapsed")).unwrap();
+        std::fs::write(dir.join("git-1-2.signal"), line("expires:2000|", "at its second")).unwrap();
+        std::fs::write(dir.join("notice-1-3.signal"), line("", "kept until read")).unwrap();
+        age(&dir, "notice-1-3", std::time::Duration::from_secs(7200));
+        let lapsed = attend_state::seen_key("git-1-1.signal");
+        for baselining in [false, true] {
+            let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &[SYS_SID], baselining, &Default::default(), 2000);
+            let mut bodies: Vec<&str> = scan.delivered.iter().map(|d| d.body.as_str()).collect();
+            bodies.sort_unstable();
+            let expect = if baselining { vec!["at its second"] } else { vec!["at its second", "kept until read"] };
+            assert_eq!(bodies, expect, "baselining {baselining}");
+            assert!(scan.mark.contains(&lapsed), "the lapsed one is marked read, baselining {baselining}");
+            // The undated two-hour-old notice is the cold start's backlog;
+            // the lapsed one is not counted with it.
+            assert_eq!(scan.held_back, usize::from(baselining), "baselining {baselining}");
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1532,7 +1601,7 @@ mod drain_tests {
     fn drain_json_carries_the_system_fields() {
         let dir = scan_fixture("system-json");
         write_system_fixture(&dir);
-        let Scan { mut delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &[SYS_SID], false, &Default::default());
+        let Scan { mut delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &[SYS_SID], false, &Default::default(), NOW);
         delivered.sort_by(|a, b| a.id.cmp(&b.id));
         let doc = drain_json("drained", &delivered, 0, None, None, false);
         let fields: Vec<(String, String, String, String)> = doc["messages"]
@@ -1567,7 +1636,7 @@ mod drain_tests {
         let dir = scan_fixture("conduits");
         write_signal(&dir, "peer-1", "claude:other-session", "same name on both");
         // Drain path.
-        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], false, &Default::default());
+        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], false, &Default::default(), NOW);
         assert_eq!(delivered.len(), 1);
         let drained = &delivered[0];
 
