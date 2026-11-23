@@ -261,6 +261,35 @@ pub(crate) enum SensorCmd {
 
     /// Compare each sensor's `requires:` against settings.json
     Permissions,
+
+    /// Run one session's sensors and write what they report to it as system signals
+    ///
+    /// The attend mod starts one host for each listening session and stops
+    /// it when the session stops listening. The host polls the sensors the
+    /// files declare for --cwd, except keepwarm and disclosure, and the
+    /// peers sensor reports sessions starting and leaving but no messages.
+    /// Each report the governor lets through becomes a signal from
+    /// `system:<sensor>` addressed to --session, on the sensor's lane, with
+    /// the expiry its trigger sets; the mod delivers it as it delivers a
+    /// message. Each signal written prints one line on stdout, `signal
+    /// <id>`, and nothing else does; logs go to stderr. A changed binary or
+    /// sensor file re-executes the host in place.
+    Host(HostArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct HostArgs {
+    /// The session the signals are addressed to
+    #[arg(long)]
+    pub(crate) session: String,
+    /// The session's directory: the project the sensors watch, whose tray
+    /// the signals go to
+    #[arg(long)]
+    pub(crate) cwd: String,
+    /// The id the session had before /clear: its sensor stores and the
+    /// memory of triggers kept for the session move to --session
+    #[arg(long, value_name = "OLD_ID")]
+    pub(crate) moved_from: Option<String>,
 }
 
 #[derive(Args)]

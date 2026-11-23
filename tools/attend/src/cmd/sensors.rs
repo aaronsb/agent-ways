@@ -206,7 +206,7 @@ fn require_hosted(h: &Hosted, verb: &str, json: bool) {
 fn open(h: &Hosted, cfg: &Config, project: &str, record: bool, verb: &str) -> sensors::hosted::FileSensor {
     let ident = attend_presence::session::identity();
     let session = ident.session_resolved.then_some(ident.session_id.as_str());
-    sensors::file_sensor(h, &Ctx { cfg, groups: None, session }, project, record).unwrap_or_else(|why| {
+    sensors::file_sensor(h, &Ctx { cfg, groups: None, session, host: false }, project, record).unwrap_or_else(|why| {
         eprintln!("attend sensor {verb}: {}: {why}", h.name());
         std::process::exit(agent_settings::exit::REJECTED);
     })

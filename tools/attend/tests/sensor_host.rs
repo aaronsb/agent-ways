@@ -1,0 +1,298 @@
+// SPDX-FileCopyrightText: 2026 Aaron Bockelie
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// From agent-ways: https://github.com/aaronsb/agent-ways
+
+//! `attend sensor host`: the session's sensors run, and what they report
+//! lands in the session's project tray as system signals, each addressed to
+//! the session with its lane and expiry, and each cued by one stdout line.
+//! A trigger kept for the session fires once across a restart, a kill
+//! right after the fire included, and across `--moved-from`. A command the
+//! host runs does not act as the session.
+
+#![cfg(unix)]
+
+mod common;
+
+use std::path::{Path, PathBuf};
+use std::process::{Child, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use common::Fixture;
+use serde_json::Value;
+
+/// A running `attend sensor host`, its stdout and stderr in files. Killed
+/// (SIGKILL) on drop.
+struct Host {
+    child: Child,
+    out: PathBuf,
+    err: PathBuf,
+}
+
+impl Host {
+    fn start(f: &Fixture, session: &str, extra: &[&str]) -> Host {
+        let n = std::fs::read_dir(&f.home).map(|d| d.count()).unwrap_or(0);
+        let (out, err) = (f.home.join(format!("host-{n}.out")), f.home.join(format!("host-{n}.err")));
+        let child = f
+            .command()
+            .args(["sensor", "host", "--session", session, "--cwd", &f.origin])
+            .args(extra)
+            .stdout(Stdio::from(std::fs::File::create(&out).unwrap()))
+            .stderr(Stdio::from(std::fs::File::create(&err).unwrap()))
+            .spawn()
+            .unwrap();
+        Host { child, out, err }
+    }
+
+    fn stdout(&self) -> String {
+        std::fs::read_to_string(&self.out).unwrap_or_default()
+    }
+
+    fn stderr(&self) -> String {
+        std::fs::read_to_string(&self.err).unwrap_or_default()
+    }
+
+    fn wait_for(&self, what: &str, limit: Duration, done: impl Fn() -> bool) {
+        let start = Instant::now();
+        while start.elapsed() < limit {
+            if done() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!("timed out waiting for {what}; the host logged:\n{}", self.stderr());
+    }
+
+    /// End it at once, as a crash or `kill -9` would.
+    fn kill(mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
+}
+
+fn now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
+/// The signal files in `tray`, by name, each with its text.
+fn signals(tray: &Path) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = std::fs::read_dir(tray)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "signal"))
+        .map(|e| (e.file_name().to_string_lossy().into_owned(), std::fs::read_to_string(e.path()).unwrap()))
+        .collect();
+    out.sort();
+    out
+}
+
+/// The signals sensor `sensor` wrote to the fixture's project tray.
+fn from(f: &Fixture, sensor: &str) -> Vec<(String, String)> {
+    signals(&f.signals().join(f.project_tray())).into_iter().filter(|(_, t)| t.starts_with(&format!("system:{sensor}|"))).collect()
+}
+
+/// A command sensor polled every second whose output says `{"up": true}`,
+/// appending a line to `<home>/<name>.polls` on each poll, with one
+/// trigger that fires when `up` enters true.
+fn beacon(f: &Fixture, name: &str, trigger: &str) {
+    let polls = f.home.join(format!("{name}.polls"));
+    let script = format!("echo x >> '{}'; printf '{{\"up\": true}}'", polls.display());
+    f.sensor(
+        name,
+        &format!(
+            "kind: command\ninterval: 1\nmin_interval: 1\nthreshold: 1\nargv: [sh, -c, {}]\noutput: json\ntriggers:\n  - {{name: up, path: \"$\", on: enters, where: {{up: true}}, magnitude: 1, description: \"{name} is up\", {trigger}}}\n",
+            serde_json::to_string(&script).unwrap()
+        ),
+    );
+}
+
+fn polls(f: &Fixture, name: &str) -> usize {
+    std::fs::read_to_string(f.home.join(format!("{name}.polls"))).map(|t| t.lines().count()).unwrap_or(0)
+}
+
+/// The fixture with peers off too, so only the test's own sensors run.
+fn quiet(tag: &str) -> Fixture {
+    let f = Fixture::new(tag);
+    f.sensor("peers", "enabled: false\n");
+    f
+}
+
+/// A command sensor's trigger becomes a system signal to the session: from
+/// `system:<sensor>`, addressed to it, on the event lane, lapsing when the
+/// trigger says, or never for `expires: session`. Each write prints one
+/// `signal <id>` line and stdout carries nothing else. `attend message
+/// inbox --json` shows the sender's kind, the addressee, the lane and the
+/// expiry.
+#[test]
+fn the_host_writes_a_trigger_as_a_system_signal_and_cues_each_write() {
+    let f = quiet("host-write");
+    beacon(&f, "beacon", "memory: session, expires: 120");
+    beacon(&f, "notice", "memory: session, expires: session");
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("both signals", Duration::from_secs(20), || from(&f, "beacon").len() + from(&f, "notice").len() >= 2);
+    let started = now();
+    host.wait_for("a few more polls", Duration::from_secs(20), || polls(&f, "beacon") >= 3);
+
+    let beacon = from(&f, "beacon");
+    assert_eq!(beacon.len(), 1, "a session trigger fires once: {beacon:?}");
+    let line = agent_identity::signal::wire_line(&beacon[0].1);
+    let s = agent_identity::parse_signal(line).unwrap();
+    assert_eq!((s.from.as_ref(), s.from_kind, s.from_id, s.to), ("system:beacon", Some("system"), Some("beacon"), Some(f.sid.as_str())), "{line}");
+    assert_eq!((s.lane, s.message), (Some(agent_identity::signal::Lane::Event), "beacon is up"), "{line}");
+    let expires = s.expires.unwrap_or_else(|| panic!("no expiry: {line}"));
+    assert!(expires.abs_diff(started + 120) <= 10, "expires {expires}, written about {started}: {line}");
+    let notice = from(&f, "notice");
+    assert_eq!(notice.len(), 1, "{notice:?}");
+    assert!(!notice[0].1.contains("expires:"), "expires: session writes no tag: {}", notice[0].1);
+
+    let ids: Vec<String> = signals(&f.signals().join(f.project_tray())).iter().map(|(n, _)| n.trim_end_matches(".signal").to_string()).collect();
+    let cues: Vec<String> = host.stdout().lines().map(str::to_string).collect();
+    assert_eq!(cues.len(), ids.len(), "one cue per write: {cues:?} for {ids:?}");
+    for cue in &cues {
+        let id = cue.strip_prefix("signal ").unwrap_or_else(|| panic!("stdout carries only cues: {cue:?}"));
+        assert!(ids.iter().any(|i| i == id), "{cue} names no signal written: {ids:?}");
+    }
+
+    let inbox: Value = serde_json::from_str(&f.ok(&["message", "inbox", "--json"])).unwrap();
+    let row = inbox["messages"].as_array().unwrap().iter().find(|m| m["from"] == "system:beacon").unwrap_or_else(|| panic!("{inbox}"));
+    assert_eq!((row["from_kind"].as_str(), row["to"].as_str(), row["lane"].as_str()), (Some("system"), Some(f.sid.as_str()), Some("event")), "{row}");
+    assert_eq!(row["expires"].as_u64(), Some(expires), "{row}");
+    let row = inbox["messages"].as_array().unwrap().iter().find(|m| m["from"] == "system:notice").unwrap();
+    assert!(row["expires"].is_null(), "{row}");
+}
+
+/// A trigger kept for the session reaches the checkpoint when it fires, so
+/// a host killed the moment its signal lands, and started again, does not
+/// fire it a second time.
+#[test]
+fn a_session_trigger_fires_once_across_a_kill_right_after_the_fire() {
+    let f = quiet("host-kill");
+    beacon(&f, "beacon", "memory: session");
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("the signal", Duration::from_secs(20), || !from(&f, "beacon").is_empty());
+    host.kill();
+    let before = polls(&f, "beacon");
+    let again = Host::start(&f, &f.sid, &[]);
+    again.wait_for("three polls after the restart", Duration::from_secs(20), || polls(&f, "beacon") >= before + 3);
+    assert_eq!(from(&f, "beacon").len(), 1, "the trigger fired again after the kill; the restarted host logged:\n{}", again.stderr());
+    assert!(again.stdout().is_empty(), "{}", again.stdout());
+}
+
+/// `--moved-from` carries the old id's sensor stores to the new id, and the
+/// memory of a trigger kept for the session, so a trigger spent under the
+/// old id stays spent.
+#[test]
+fn moved_from_carries_the_stores_and_the_spent_triggers() {
+    let f = quiet("host-moved");
+    beacon(&f, "beacon", "memory: session");
+    beacon(&f, "stored", "memory: store");
+    let store_dir = f.home.join("state").join("agent-ways").join("attend").join("sensor-state");
+    let sessions = || -> Vec<String> {
+        std::fs::read_dir(&store_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| serde_json::from_str::<Value>(&std::fs::read_to_string(e.path()).ok()?).ok())
+            .map(|r| format!("{}:{}", r["sensor"].as_str().unwrap_or(""), r["session"].as_str().unwrap_or("")))
+            .collect()
+    };
+    let old = Host::start(&f, "sess-old", &[]);
+    old.wait_for("the old id's signal and stores", Duration::from_secs(20), || {
+        !from(&f, "beacon").is_empty() && sessions().iter().any(|s| s == "stored:sess-old")
+    });
+    old.kill();
+    let before = polls(&f, "beacon");
+    let new = Host::start(&f, "sess-new", &["--moved-from", "sess-old"]);
+    new.wait_for("three polls under the new id", Duration::from_secs(20), || polls(&f, "beacon") >= before + 3);
+    let beacon = from(&f, "beacon");
+    assert_eq!(beacon.len(), 1, "the spent trigger fired again under the new id: {beacon:?}\n{}", new.stderr());
+    let stores = sessions();
+    assert!(stores.iter().any(|s| s == "stored:sess-new"), "{stores:?}");
+    assert!(!stores.iter().any(|s| s.ends_with(":sess-old")), "the old id kept a store: {stores:?}");
+}
+
+/// The control for the test above: without `--moved-from`, a new id starts
+/// with its own session memory and fires once of its own.
+#[test]
+fn without_moved_from_a_new_id_fires_once_of_its_own() {
+    let f = quiet("host-fresh");
+    beacon(&f, "beacon", "memory: session");
+    let old = Host::start(&f, "sess-old", &[]);
+    old.wait_for("the old id's signal", Duration::from_secs(20), || !from(&f, "beacon").is_empty());
+    old.kill();
+    let new = Host::start(&f, "sess-new", &[]);
+    new.wait_for("the new id's signal", Duration::from_secs(20), || from(&f, "beacon").len() == 2);
+    assert!(from(&f, "beacon").iter().any(|(_, t)| t.contains("|to:sess-new|")));
+}
+
+/// A command the host runs does not act as the session: its `attend
+/// message send` is refused, and writes no signal.
+#[test]
+fn a_command_the_host_runs_does_not_act_as_the_session() {
+    let f = quiet("host-guard");
+    let probe = f.home.join("probe");
+    std::fs::create_dir_all(&probe).unwrap();
+    let script = format!(
+        "a='{bin}'; o='{out}'; \"$a\" message send from-a-sensor 2> \"$o/send.err\"; echo $? > \"$o/send.code\"; echo '{{}}'",
+        bin = env!("CARGO_BIN_EXE_attend"),
+        out = probe.display()
+    );
+    f.sensor("probe", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: [sh, -c, {}]\noutput: json\n", serde_json::to_string(&script).unwrap()));
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("the probe", Duration::from_secs(20), || probe.join("send.code").exists() && std::fs::read_to_string(probe.join("send.code")).is_ok_and(|c| !c.is_empty()));
+    let read = |n: &str| std::fs::read_to_string(probe.join(n)).unwrap_or_default();
+    assert_eq!(read("send.code").trim(), "3", "{}", read("send.err"));
+    assert!(read("send.err").contains("this attend was started by a sensor command, so it does not act as the session"), "{}", read("send.err"));
+    let open = f.signals().join(attend_groups::BROADCAST_DIR);
+    assert!(signals(&open).is_empty(), "the refused send wrote a signal");
+}
+
+/// A session id no `to` tag can carry, or a directory that is not one, is
+/// refused before anything runs.
+#[test]
+fn a_session_id_no_signal_can_carry_or_a_missing_directory_is_refused() {
+    let f = quiet("host-bad-id");
+    let missing = f.home.join("no-such-dir").to_string_lossy().into_owned();
+    for (session, cwd) in [("two words", f.origin.as_str()), (f.sid.as_str(), missing.as_str())] {
+        let out = f.attend(&["sensor", "host", "--session", session, "--cwd", cwd]);
+        assert_eq!(out.status.code(), Some(2), "{session} {cwd}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(out.stdout.is_empty());
+    }
+}
+
+/// A host whose parent exits, as when Claude Code dies without ending the
+/// mod's loop, exits too rather than write to a session that is gone.
+#[test]
+fn a_host_whose_parent_is_gone_exits() {
+    let f = quiet("host-orphan");
+    beacon(&f, "beacon", "memory: store");
+    let err = f.home.join("orphan.err");
+    let out = f
+        .command_from(Path::new("sh"))
+        .args(["-c", "\"$0\" sensor host --session \"$1\" --cwd \"$2\" > /dev/null 2> \"$3\" & echo $!; sleep 1", env!("CARGO_BIN_EXE_attend"), &f.sid, &f.origin, &err.to_string_lossy()])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    /// Ends the host when the test does, should it fail to exit.
+    struct Reap(String);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            std::process::Command::new("kill").args(["-KILL", &self.0]).stderr(Stdio::null()).status().ok();
+        }
+    }
+    let _reap = Reap(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    let start = Instant::now();
+    let read = || std::fs::read_to_string(&err).unwrap_or_default();
+    while !read().contains("the process that started the sensor host is gone; it exits") {
+        assert!(start.elapsed() < Duration::from_secs(15), "the orphaned host kept running:\n{}", read());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(polls(&f, "beacon") >= 1 || read().contains("running 1 sensor(s): beacon"), "the host ran before its parent left:\n{}", read());
+}

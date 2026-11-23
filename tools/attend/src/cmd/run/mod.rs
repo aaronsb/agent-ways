@@ -12,11 +12,14 @@
 //!   iteration. Reachable from tests without standing up the full
 //!   `cmd_run_with_catchup` shell.
 //!
+//! - `host` — `attend sensor host`, the same loop writing system signals.
+//!
 //! This file owns the setup-then-loop skeleton: process-level locking,
 //! state restoration, sensor registration, the startup banner, and
 //! the outer loop that calls `tick::tick_iteration` once per beat.
 
 mod governor;
+pub(crate) mod host;
 mod rekey;
 mod stamps;
 mod tick;
