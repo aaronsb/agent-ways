@@ -13,6 +13,7 @@
 
 mod common;
 
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -21,7 +22,8 @@ use common::Fixture;
 use serde_json::Value;
 
 /// A running `attend sensor host`, or the wrapper that runs one, its
-/// stdout and stderr in files. Ended on drop.
+/// stdout and stderr in files. It leads its own process group, which drop
+/// ends.
 struct Host {
     child: Child,
     out: PathBuf,
@@ -36,6 +38,7 @@ impl Host {
             .command()
             .args(["sensor", "host", "--session", session, "--cwd", &f.origin])
             .args(extra)
+            .process_group(0)
             .stdout(Stdio::from(std::fs::File::create(&out).unwrap()))
             .stderr(Stdio::from(std::fs::File::create(&err).unwrap()))
             .spawn()
@@ -70,18 +73,18 @@ impl Host {
 }
 
 impl Drop for Host {
-    /// SIGTERM first, so a wrapper that holds the host as its child, as
-    /// `timeout` does, forwards it to the host and exits once the host has.
-    /// A SIGKILL would end the wrapper alone and leave the host running
-    /// until it noticed its parent gone. SIGKILL follows when the child
-    /// has not exited within five seconds.
+    /// SIGTERM to the child's process group, so a host under a wrapper
+    /// ends with it: `timeout` would forward a TERM, but a shell that waits
+    /// on the host does not. A SIGKILL to the wrapper alone would leave the
+    /// host running until it noticed its parent gone. SIGKILL follows when
+    /// the child has not exited within five seconds.
     fn drop(&mut self) {
         if !matches!(self.child.try_wait(), Ok(None)) {
             return;
         }
-        // SAFETY: kill(2) on the pid of a child not yet reaped, so the pid
-        // is still this child's.
-        unsafe { libc::kill(self.child.id() as libc::pid_t, libc::SIGTERM) };
+        // SAFETY: kill(2) on the process group the child leads. The child
+        // is not reaped yet, so its pid still names that group.
+        unsafe { libc::kill(-(self.child.id() as libc::pid_t), libc::SIGTERM) };
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(5) {
             if !matches!(self.child.try_wait(), Ok(None)) {
@@ -402,6 +405,14 @@ fn a_command_the_host_runs_does_not_act_as_the_session() {
     assert!(signals(&open).is_empty(), "the refused send wrote a signal");
 }
 
+/// The `timeout` program on PATH, as `timeout` or as coreutils' `gtimeout`,
+/// or none: stock macOS ships neither.
+fn timeout_program() -> Option<&'static str> {
+    ["timeout", "gtimeout"].into_iter().find(|t| {
+        std::process::Command::new("sh").args(["-c", "command -v \"$0\" > /dev/null", t]).status().is_ok_and(|s| s.success())
+    })
+}
+
 /// The last poll `attend sensor list --json` reports for `sensor`, once it
 /// has one.
 fn last_poll(f: &Fixture, sensor: &str) -> Option<Value> {
@@ -427,12 +438,14 @@ fn lasting_hosts(f: &Fixture) -> Vec<String> {
 }
 
 /// A host started through an argv wrapper that stays its parent, as
-/// `timeout` does, runs: the wrapper names a host without being one. A
-/// command that host runs is still refused as the session: a verb behind
-/// `env`, `timeout`, `nohup`, `setsid -w`, a shell's `exec`, `exec -a
-/// timeout`, or a shell whose own argv ends with the verb's; another host
-/// with the very same arguments under a wrapper of its own; and a sensor
-/// whose argv is exactly the host's, whose parent is the host itself.
+/// `timeout` does, runs: the wrapper names a host without being one. Where
+/// no `timeout` is on PATH, as on stock macOS, the wrapper is a shell that
+/// runs the host and waits for it. A command that host runs is still
+/// refused as the session: a verb behind `env`, `timeout`, `nohup`,
+/// `setsid -w`, a shell's `exec`, `exec -a timeout`, or a shell whose own
+/// argv ends with the verb's; another host with the very same arguments
+/// under a wrapper of its own; and a sensor whose argv is exactly the
+/// host's, whose parent is the host itself.
 #[test]
 fn a_host_under_a_wrapper_runs_and_its_commands_are_still_refused() {
     let f = quiet("host-wrapped");
@@ -440,16 +453,22 @@ fn a_host_under_a_wrapper_runs_and_its_commands_are_still_refused() {
     let probe = f.home.join("probe");
     std::fs::create_dir_all(&probe).unwrap();
     let bin = env!("CARGO_BIN_EXE_attend");
+    let timeout = timeout_program();
+    // A shell that runs the host and then exits, so it stays the parent and
+    // does not exec the host in its place.
+    let shell_wrap = "\"$0\" \"$@\"; exit $?";
     let script = format!(
-        "a='{bin}'; o='{out}'; env A=1 \"$a\" message send from-a-sensor 2> \"$o/send.err\"; echo $? > \"$o/send.code\"; \
-         timeout 5 \"$a\" message send x 2> \"$o/timeout.err\"; echo $? > \"$o/timeout.code\"; \
+        "a='{bin}'; o='{out}'; t='{t}'; env A=1 \"$a\" message send from-a-sensor 2> \"$o/send.err\"; echo $? > \"$o/send.code\"; \
+         if [ -n \"$t\" ]; then \"$t\" 5 \"$a\" message send x 2> \"$o/timeout.err\"; echo $? > \"$o/timeout.code\"; else echo skip > \"$o/timeout.code\"; fi; \
          sh -c 'exec \"$0\" message send x' \"$a\" 2> \"$o/exec.err\"; echo $? > \"$o/exec.code\"; \
          bash -c 'exec -a timeout \"$0\" message send x' \"$a\" 2> \"$o/exec-a.err\"; echo $? > \"$o/exec-a.code\"; \
          nohup \"$a\" message send x > /dev/null 2> \"$o/nohup.err\"; echo $? > \"$o/nohup.code\"; \
          if command -v setsid > /dev/null; then setsid -w \"$a\" message send x 2> \"$o/setsid.err\"; echo $? > \"$o/setsid.code\"; else echo skip > \"$o/setsid.code\"; fi; \
          sh -c '\"$0\" message send x' \"$a\" message send x 2> \"$o/crafted.err\"; echo $? > \"$o/crafted.code\"; \
-         mkdir \"$o/once\" 2> /dev/null || {{ echo '{{}}'; exit 0; }}; timeout 20 \"$a\" sensor host --session '{sid}' --cwd '{cwd}' > /dev/null 2> \"$o/host.err\"; echo $? > \"$o/host.code\"; echo '{{}}'",
+         mkdir \"$o/once\" 2> /dev/null || {{ echo '{{}}'; exit 0; }}; \
+         if [ -n \"$t\" ]; then \"$t\" 20 \"$a\" sensor host --session '{sid}' --cwd '{cwd}'; else sh -c '{shell_wrap}' \"$a\" sensor host --session '{sid}' --cwd '{cwd}'; fi > /dev/null 2> \"$o/host.err\"; echo $? > \"$o/host.code\"; echo '{{}}'",
         out = probe.display(),
+        t = timeout.unwrap_or_default(),
         sid = f.sid,
         cwd = f.origin,
     );
@@ -457,9 +476,22 @@ fn a_host_under_a_wrapper_runs_and_its_commands_are_still_refused() {
     let own = [bin, "sensor", "host", "--session", &f.sid, "--cwd", &f.origin];
     f.sensor("nested", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: {}\noutput: json\ntimeout: 5\n", serde_json::to_string(&own).unwrap()));
     let err = f.home.join("wrapped.err");
-    let child = f
-        .command_from(Path::new("timeout"))
-        .args(["120", bin, "sensor", "host", "--session", &f.sid, "--cwd", &f.origin])
+    let mut wrapped = match timeout {
+        Some(t) => {
+            let mut c = f.command_from(Path::new(t));
+            c.arg("120");
+            c
+        }
+        None => {
+            eprintln!("timeout: no timeout or gtimeout on PATH; the host runs under sh -c '{shell_wrap}'");
+            let mut c = f.command_from(Path::new("sh"));
+            c.args(["-c", shell_wrap]);
+            c
+        }
+    };
+    let child = wrapped
+        .args(own)
+        .process_group(0)
         .stdout(Stdio::null())
         .stderr(Stdio::from(std::fs::File::create(&err).unwrap()))
         .spawn()
@@ -470,8 +502,12 @@ fn a_host_under_a_wrapper_runs_and_its_commands_are_still_refused() {
     let read = |n: &str| std::fs::read_to_string(probe.join(n)).unwrap_or_default();
     let refusal = "this attend was started by a sensor command, so it does not act as the session";
     for form in ["send", "timeout", "exec", "exec-a", "nohup", "setsid", "crafted", "host"] {
-        if form == "setsid" && read("setsid.code").trim() == "skip" {
-            eprintln!("setsid: not on this host, skipped");
+        if read(&format!("{form}.code")).trim() == "skip" {
+            match form {
+                "setsid" => eprintln!("setsid: not on this host, skipped"),
+                "timeout" => eprintln!("timeout: no timeout or gtimeout on PATH, skipped"),
+                _ => panic!("{form} was skipped, and only setsid and timeout may be"),
+            }
             continue;
         }
         assert_eq!(read(&format!("{form}.code")).trim(), "3", "{form}: {}", read(&format!("{form}.err")));
