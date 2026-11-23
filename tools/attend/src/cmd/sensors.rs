@@ -2,18 +2,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! `attend sensor list`, `poll` and `fire` (ADR-403 §6).
+//! `attend sensor list`, `poll`, `probe` and `fire`.
 //!
-//! `list` reports every sensor the files declare as an item (ADR-516): its
-//! kind, origin and file, source and version, recorded state, and lane. `poll` runs one real poll
-//! and `fire` sends a synthetic result; both go through the sensor's real
-//! threshold and lane, and unless `--dry-run` write what it lets through
-//! to the session as system signals, through the writer the sensor host
-//! uses. The session is `--session`, else the one the shell runs in; with
-//! neither, they deliver nothing and say so. A command sensor's poll and
-//! fire run its triggers against the session's store and print each
-//! verdict. Neither writes the store, except a fire with `--commit`. A
-//! fire's lines are marked `[test]`.
+//! `list` reports every sensor the files declare as an item: its kind,
+//! origin and file, source and version, recorded state, and lane. `poll`
+//! runs one real poll and `fire` sends a synthetic result; both go through
+//! the sensor's real threshold and lane, and unless `--dry-run` write what
+//! it lets through to the session as system signals, through the writer
+//! the sensor host uses. The session is `--session`, else the one the
+//! shell runs in; with neither, they deliver nothing and say so. A command
+//! or mcp sensor's poll and fire run its triggers against the session's
+//! store and print each verdict. Neither writes the store, except a fire
+//! with `--commit`. A fire's lines are marked `[test]`.
+//!
+//! `probe` calls an mcp sensor's tool twice, compares the calls, takes the
+//! operator's confirmation and writes the record into the sensor's user
+//! file. It delivers nothing.
+//!
+//! References:
+//! - ADR-403 §4 and §6: the probe, and testing a sensor from the CLI.
+//! - ADR-516: a sensor listed as an item.
 
 use std::io::Read;
 
@@ -21,7 +29,7 @@ use agent_settings::item::{Entry, Item};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::cli::{FireArgs, PollArgs};
+use crate::cli::{FireArgs, PollArgs, ProbeArgs};
 use crate::config::Config;
 use crate::sensors::{self, writer::Writer, Ctx, Focus, Hosted, Sensor, State};
 use sensor_spec::{Block, Kind, Lane};
@@ -250,10 +258,11 @@ fn find(all: Vec<Hosted>, name: &str, json: bool) -> Hosted {
     })
 }
 
-/// Exit 3 when `h` is not a sensor attend can poll here.
+/// Exit 3 when `h` is not a sensor attend can poll here. A fire calls no
+/// server, so it takes an mcp sensor that has no probe record yet.
 fn require_hosted(h: &Hosted, verb: &str, json: bool) {
-    let runnable = h.state.runs() || h.state == State::Off;
-    let kind_runs = matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate | Kind::Command));
+    let runnable = h.state.runs() || h.state == State::Off || (verb == "fire" && matches!(h.state, State::Unprobed(_)));
+    let kind_runs = matches!(h.loaded.spec.as_ref().map(|s| s.kind), Some(Kind::Crate | Kind::Command | Kind::Mcp));
     if runnable && kind_runs {
         return;
     }
@@ -275,9 +284,14 @@ fn open(h: &Hosted, cfg: &Config, project: &str, session: Option<&str>, record: 
     })
 }
 
-/// Whether `h` is a sensor whose triggers read a JSON poll result.
+/// Whether `h` is a sensor whose triggers read a JSON poll result: a
+/// command sensor with `output: json`, or an mcp sensor.
 fn declares_triggers(h: &Hosted) -> bool {
-    matches!(h.loaded.spec.as_ref().map(|s| &s.block), Some(Block::Command(c)) if c.output == sensor_spec::Output::Json)
+    match h.loaded.spec.as_ref().map(|s| &s.block) {
+        Some(Block::Command(c)) => c.output == sensor_spec::Output::Json,
+        Some(Block::Mcp(_)) => true,
+        _ => false,
+    }
 }
 
 /// Each trigger's verdict as `--json` prints it.
@@ -441,6 +455,110 @@ pub(crate) fn fire(a: &FireArgs) {
     verdict(&h, &out, writer.as_ref(), ids.as_deref());
 }
 
+pub(crate) fn probe(a: &ProbeArgs) {
+    let (focus, cfg) = context_of(None, "probe", a.json);
+    let h = find(sensors::catalog_for(&cfg, &focus.working_dir, None), &a.name, a.json);
+    let refuse = |why: String| -> ! {
+        if a.json {
+            crate::cmd::print_json(&json!({ "sensor": a.name, "error": why }));
+        } else {
+            eprintln!("attend sensor probe: {why}");
+        }
+        std::process::exit(agent_settings::exit::REJECTED);
+    };
+    let Some(spec) = h.loaded.spec.as_ref().filter(|_| !matches!(h.state, State::Refused(_) | State::Invalid(_))) else {
+        refuse(format!("{} is {}{}", h.name(), h.state.label(), h.state.detail().map(|d| format!(": {d}")).unwrap_or_default()))
+    };
+    let Block::Mcp(m) = &spec.block else {
+        let why = format!("{} is a {} sensor; only an mcp sensor is probed", h.name(), spec.kind.as_str());
+        crate::cmd::refuse_usage(&format!("attend sensor probe: {why}"), &why, a.json)
+    };
+    let mut tool = sensors::mcp_source(&h, &cfg, &focus.working_dir).unwrap_or_else(|why| refuse(why));
+    let calls = tool.call().and_then(|first| Ok((first, tool.call()?)));
+    // The server ends with the last sensor holding it, before any exit.
+    drop(tool);
+    let (first, second) = calls.unwrap_or_else(|why| refuse(format!("the call failed, so no record was written: {why}")));
+    let compared = sensors::hosted::kept(spec, &first, &second);
+    let confirmed = compared.is_ok() && (a.confirm || (!a.json && ask(h.name(), &first)));
+    let at = agent_fmt::when::now_utc_iso();
+    let mut record = serde_yaml::Mapping::new();
+    record.insert("server".into(), m.server.label().into());
+    record.insert("tool".into(), m.tool.clone().into());
+    record.insert("args".into(), serde_yaml::Value::Mapping(m.args.clone()));
+    record.insert("calls_match".into(), compared.is_ok().into());
+    record.insert("confirmed".into(), confirmed.into());
+    record.insert("at".into(), at.clone().into());
+    let file = write_probe(h.name(), record).unwrap_or_else(|why| refuse(why));
+    let holds = compared.is_ok() && confirmed;
+    if a.json {
+        crate::cmd::print_json(&json!({
+            "sensor": h.name(),
+            "server": m.server.label(),
+            "tool": m.tool,
+            "calls_match": compared.is_ok(),
+            "difference": compared.as_ref().err(),
+            "confirmed": confirmed,
+            "at": at,
+            "holds": holds,
+            "file": file.display().to_string(),
+        }));
+    } else {
+        match &compared {
+            Ok(()) => println!("{}: the second call returned every item of the first", h.name()),
+            Err(why) => println!("{}: the calls differ: {why}", h.name()),
+        }
+        let then = match (compared.is_ok(), confirmed, spec.enabled) {
+            (false, _, _) => "the sensor stays disabled: reading the tool may change it".to_string(),
+            (true, false, _) => format!("the sensor stays disabled until you confirm; check in another client that the items are untouched, then run `attend sensor probe {} --confirm`", h.name()),
+            (true, true, true) => "the sensor runs from the host's next start".to_string(),
+            (true, true, false) => "the record holds; set enabled: true to run it".to_string(),
+        };
+        println!("{}: probe recorded in {}; {then}", h.name(), tilde(&file.display().to_string()));
+    }
+    if !holds {
+        std::process::exit(agent_settings::exit::REJECTED);
+    }
+}
+
+/// Ask on the terminal whether the items the first call returned are still
+/// unread or otherwise untouched; no terminal is no.
+fn ask(name: &str, first: &Value) -> bool {
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return false;
+    }
+    let shown: String = first.to_string().chars().take(400).collect();
+    eprintln!("{name}: the first call returned: {shown}");
+    eprint!("{name}: in another client, are those items still unread or otherwise untouched? [y/N] ");
+    std::io::stderr().flush().ok();
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line).ok();
+    matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// Write `record` as `probe` in the user file of the sensor `name`, which
+/// is created with that field alone when there is none. The rest of the
+/// file is left as written, and the edit is refused when it would make the
+/// sensor invalid.
+fn write_probe(name: &str, record: serde_yaml::Mapping) -> Result<std::path::PathBuf, String> {
+    let path = attend_config::sensors::user_dir().join(format!("{name}.yaml"));
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let mut doc = agent_settings::yaml_edit::Doc::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    doc.set(&["probe".to_string()], &serde_yaml::Value::Mapping(record)).map_err(|e| format!("{}: {e}", path.display()))?;
+    doc.verify().map_err(|e| format!("{}: {e}", path.display()))?;
+    let out = doc.text();
+    attend_config::sensors::check_edit(&path, &out)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    agent_settings::writer::write_atomic(&path, out).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    Ok(path)
+}
+
 /// Write what the slot let through through `writer`, one system signal a
 /// line; with no writer, a dry run, write nothing. Returns the lines that
 /// went out, or would have, and the id of each signal written. A line that
@@ -530,6 +648,8 @@ mod tests {
         let user = std::path::Path::new("/c/attend/sensors");
         layers.push(file_layer("weather", Origin::User, Some(&user.join("weather.yaml")), "kind: command\nargv: [curl, -s, x]\noutput: json\n"));
         layers.push(file_layer("chat", Origin::User, Some(&user.join("chat.yaml")), "kind: mcp\nserver: slack\ntool: list\n"));
+        let probed = "kind: mcp\nserver: slack\ntool: list\nallow_unannotated: true\nprobe: {server: slack, tool: list, args: {}, calls_match: true, confirmed: true}\n";
+        layers.push(file_layer("probed", Origin::User, Some(&user.join("probed.yaml")), probed));
         layers.push(file_layer("git", Origin::User, Some(&user.join("git.yaml")), "interval: 90\n"));
         let loaded = from_layers(&layers, std::path::Path::new("/nonexistent/p"), &[]);
         sensors::catalog_of(loaded, |_| None).iter().map(entry).collect()
@@ -547,14 +667,18 @@ mod tests {
         assert!(git["version"].as_str().is_some_and(|v| !v.contains('@')));
         assert_eq!(git["overrides"], json!([{ "origin": "user", "how": "extends", "path": "/c/attend/sensors/git.yaml" }]));
         assert_eq!(git["interval"], json!(90));
-        // A command sensor runs, and an mcp sensor attend does not run yet
+        // A command sensor runs, and an mcp sensor with no probe record
         // reads degraded, with the reason.
         let weather = find("weather");
         assert_eq!((weather["kind"].as_str(), weather["origin"].as_str(), weather["state"].as_str()), (Some("command"), Some("user"), Some("active")));
         assert_eq!((weather["path"].as_str(), weather["source"].as_str(), weather["detail"].as_str()), (Some("/c/attend/sensors/weather.yaml"), Some("curl"), None));
         let chat = find("chat");
         assert_eq!((chat["kind"].as_str(), chat["state"].as_str()), (Some("mcp"), Some("degraded")));
-        assert!(chat["detail"].as_str().is_some_and(|d| d.contains("not yet hosted")), "{chat}");
+        assert_eq!(chat["detail"].as_str(), Some("no probe record; run `attend sensor probe chat`"), "{chat}");
+        // One whose record holds runs, and its override is noted.
+        let probed = find("probed");
+        assert_eq!((probed["state"].as_str(), probed["detail"].as_str()), (Some("active"), None), "{probed}");
+        assert_eq!(probed["notes"], json!(["overridden: allow_unannotated: true calls list even though it declares no readOnlyHint"]));
     }
 
     #[test]

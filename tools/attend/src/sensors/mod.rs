@@ -8,8 +8,11 @@
 //! Every sensor is a file (`attend_config::sensors` finds and layers them).
 //! A `crate` file names a compiled sensor, which runs here under the
 //! file's name, cadence, threshold and lane. A `command` file runs its argv
-//! each poll, and its triggers and declared state evaluate the output. `mcp`
-//! files load, list and lint, and read `degraded` until attend runs them.
+//! each poll, and its triggers and declared state evaluate the output. An
+//! `mcp` file calls one read-only tool on a stdio MCP server each poll, and
+//! its triggers and declared state evaluate the result; it runs once
+//! `attend sensor probe` has recorded that the tool can be read twice
+//! without a change, and the operator confirmed it.
 //!
 //! `context`, `git` and `disclosure` are modules here and always compiled;
 //! the other compiled sensors are crates behind feature flags (default:
@@ -22,6 +25,7 @@ mod disclosure;
 pub mod eval;
 mod git;
 pub mod hosted;
+mod mcp;
 pub mod state;
 pub mod writer;
 
@@ -65,6 +69,8 @@ pub enum State {
     Refused(String),
     /// Its kind is one attend does not run yet, or not at all.
     NotHosted(String),
+    /// An mcp sensor with no probe record that holds for it, and why.
+    Unprobed(String),
     /// Its file names a compiled sensor this build leaves out.
     NotCompiled,
 }
@@ -80,7 +86,7 @@ impl State {
             State::Off => W::Off,
             State::Invalid(_) => W::Invalid,
             State::Refused(_) => W::Refused,
-            State::NotHosted(_) => W::Degraded,
+            State::NotHosted(_) | State::Unprobed(_) => W::Degraded,
             State::NotCompiled => W::NotCompiled,
         }
     }
@@ -92,7 +98,7 @@ impl State {
     /// Why the sensor is in this state.
     pub fn detail(&self) -> Option<&str> {
         match self {
-            State::Failed(d) | State::Invalid(d) | State::Refused(d) | State::NotHosted(d) => Some(d),
+            State::Failed(d) | State::Invalid(d) | State::Refused(d) | State::NotHosted(d) | State::Unprobed(d) => Some(d),
             _ => None,
         }
     }
@@ -181,6 +187,11 @@ fn host(loaded: Loaded, last: Option<Poll>) -> Hosted {
     if let (Some(r), false) = (&loaded.refused, loaded.is_refused()) {
         notes.push(format!("the project file is refused: {r}"));
     }
+    if let Some(Block::Mcp(m)) = loaded.spec.as_ref().map(|s| &s.block) {
+        if m.allow_unannotated {
+            notes.push(format!("overridden: allow_unannotated: true calls {} even though it declares no readOnlyHint", m.tool));
+        }
+    }
     let compiled = match loaded.spec.as_ref().map(|s| &s.block) {
         Some(Block::Crate(c)) => compiled(&c.id),
         _ => None,
@@ -203,14 +214,38 @@ fn state_of(l: &Loaded, compiled: bool, last: Option<&Poll>) -> State {
     if !spec.enabled {
         return State::Off;
     }
+    if let Block::Mcp(m) = &spec.block {
+        if let Some(why) = unprobed(&l.name, m) {
+            return State::Unprobed(why);
+        }
+    }
     match spec.kind {
-        Kind::Mcp => State::NotHosted("kind mcp not yet hosted; attend runs mcp sensors from ADR-403 slice 3".into()),
         Kind::Crate if !compiled => State::NotCompiled,
         _ => match last {
             Some(p) if !p.ok => State::Failed(p.detail.clone().unwrap_or_default()),
             _ => State::Active,
         },
     }
+}
+
+/// Why the mcp sensor `name` does not run for want of a probe, or none
+/// when its record holds: taken with its server, tool and args, with the
+/// calls matching and the operator's confirmation.
+///
+/// References:
+/// - ADR-403 §4: a sensor with no record, a failed comparison or no
+///   confirmation stays disabled.
+fn unprobed(name: &str, m: &sensor_spec::McpBlock) -> Option<String> {
+    let again = format!("run `attend sensor probe {name}`");
+    let Some(p) = &m.probe else { return Some(format!("no probe record; {again}")) };
+    if m.probe_holds() {
+        return None;
+    }
+    Some(match () {
+        _ if p.server != m.server.label() || p.tool != m.tool || p.args != m.args => format!("the probe record was taken with another server, tool or args; {again}"),
+        _ if !p.calls_match => format!("the probe's second call did not return what the first did, so reading may change the tool's result; {again} once that is fixed"),
+        _ => format!("the probe record has no confirmation that the items were left untouched; check in another client, then {again} --confirm"),
+    })
 }
 
 /// One running sensor per compiled sensor: when two enabled files name the
@@ -301,6 +336,7 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
             let run = command::Command::new(cmd.clone(), project, command::Inherit::of(h.loaded.command_from));
             return Ok(FileSensor::declared(spec, Box::new(run), project, ctx.session, record));
         }
+        Block::Mcp(_) => return Ok(FileSensor::declared(spec, Box::new(mcp_source(h, ctx.cfg, project)?), project, ctx.session, record)),
         _ => return Err(h.state.detail().unwrap_or("its kind is not hosted").to_string()),
     };
     let inner: Box<dyn Sensor> = match c.id.as_str() {
@@ -339,6 +375,20 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
         id => return Err(format!("crate {id} is not compiled into this attend")),
     };
     Ok(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, ctx.session, record))
+}
+
+/// The tool call the mcp sensor `h` polls through, for the project at
+/// `project`. Nothing starts until its first call.
+pub fn mcp_source(h: &Hosted, cfg: &Config, project: &str) -> Result<mcp::Mcp, String> {
+    let Some(Block::Mcp(m)) = h.loaded.spec.as_ref().map(|s| &s.block) else { return Err(format!("{} is not an mcp sensor", h.name())) };
+    let lookup = mcp::Lookup { user_json: mcp::Lookup::user_json(), trusted: attend_config::sensors::is_trusted(std::path::Path::new(project), &cfg.project_sensors) };
+    Ok(mcp::Mcp::new((**m).clone(), project, command::Inherit::of(h.loaded.command_from), lookup))
+}
+
+/// End every MCP server this process started, before a re-exec replaces
+/// it.
+pub fn end_mcp_servers() {
+    mcp::end_servers();
 }
 
 /// A slot for `sensor`, on the lane `lane`, running the compiled sensor

@@ -517,6 +517,44 @@ fn seen_by(t: &Trigger, result: &Value, fields: &state::Fields) -> (Seen, BTreeM
     (seen, items)
 }
 
+/// Whether `second`, a poll result taken right after `first`, kept what
+/// `first` returned, as `attend sensor probe` checks a tool that should
+/// change nothing by being read: every item an item trigger selects from
+/// `first`, by its key, is selected from `second`, and every field a state
+/// trigger watches holds the same value after each result's write. With no
+/// triggers the two results are compared whole. The error names the first
+/// trigger that saw a difference, and what it was.
+///
+/// References:
+/// - ADR-403 §4: the probe's call comparison.
+pub fn kept(spec: &SensorSpec, first: &Value, second: &Value) -> Result<(), String> {
+    if spec.triggers.is_empty() {
+        return match eval::same(first, second) {
+            true => Ok(()),
+            false => Err("the second call returned another result".into()),
+        };
+    }
+    let write = |r: &Value| state::write(&spec.state, &state::fresh(&spec.state), r, None);
+    for t in &spec.triggers {
+        match &t.test {
+            Test::State(changes) => {
+                let (a, b) = (write(first)?, write(second)?);
+                if let Some(f) = changes.keys().find(|f| a.get(*f) != b.get(*f)) {
+                    return Err(format!("trigger {}: the second call left {f} at another value", t.name));
+                }
+            }
+            Test::Items { .. } => {
+                let (_, a) = seen_by(t, first, &state::Fields::new());
+                let (_, b) = seen_by(t, second, &state::Fields::new());
+                if let Some(k) = a.keys().find(|k| !b.contains_key(*k)) {
+                    return Err(format!("trigger {}: the second call did not return the item {k}", t.name));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Whether a state trigger's fields changed as `changes` says between
 /// `prev` and `now`, combined by `how`. A number rises or falls by value.
 fn state_fired(changes: &BTreeMap<String, Change>, how: Match, prev: &Seen, now: &Seen) -> bool {

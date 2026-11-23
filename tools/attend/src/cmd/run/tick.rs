@@ -317,6 +317,8 @@ fn is_presence(line: &str) -> bool {
 /// can say why it started. Replaces the process on Unix; spawns and exits
 /// on Windows. Returns only on failure, which is logged.
 pub(super) fn reexec(var: &str, value: &str) {
+    // An exec runs no destructor, so the MCP servers end here.
+    crate::sensors::end_mcp_servers();
     let args: Vec<String> = std::env::args().collect();
     #[cfg(unix)]
     {

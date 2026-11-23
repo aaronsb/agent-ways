@@ -116,9 +116,10 @@ pub struct Loaded {
     pub findings: Vec<Finding>,
     /// Why a project file was refused.
     pub refused: Option<String>,
-    /// The layer of the highest merged file that sets what a command runs:
-    /// its `argv`, `env` or `cwd`. A project file there puts the command
-    /// under the project's environment rule, whatever lower files set.
+    /// The layer of the highest merged file that sets what a sensor runs:
+    /// a command's `argv`, `env` or `cwd`, or an mcp sensor's `server`. A
+    /// project file there puts the command or server under the project's
+    /// environment rule, whatever lower files set.
     pub command_from: Option<Origin>,
 }
 
@@ -326,7 +327,7 @@ fn check(name: String, files: Vec<SensorFile>, docs: &[(Origin, Option<PathBuf>,
         };
         findings.push(Finding { file, line, problem });
     }
-    let command_from = docs.iter().rev().find(|(_, _, v)| ["argv", "env", "cwd"].iter().any(|k| v.get(*k).is_some())).map(|(o, _, _)| *o);
+    let command_from = docs.iter().rev().find(|(_, _, v)| ["argv", "env", "cwd", "server"].iter().any(|k| v.get(*k).is_some())).map(|(o, _, _)| *o);
     Loaded { name, files, spec: if invalid { None } else { spec }, findings, refused: None, command_from }
 }
 
@@ -668,6 +669,10 @@ mod tests {
         assert_eq!(from("env: {A: b}\n", true), Some(Origin::Project));
         assert_eq!(from("cwd: sub\n", true), Some(Origin::Project));
         assert_eq!(from("interval: 90\n", true), Some(Origin::User));
+        let mcp = "kind: mcp\nserver: {command: /bin/true}\ntool: t\n";
+        let server = |over: &str| layer("srv".into(), vec![read(Origin::User, mcp), read(Origin::Project, over)], true, Path::new("/p")).command_from;
+        assert_eq!(server("server: {command: /bin/false}\n"), Some(Origin::Project), "an mcp sensor's server is what it runs");
+        assert_eq!(server("interval: 90\n"), Some(Origin::User));
         assert_eq!(from("argv: [/bin/false]\n", false), Some(Origin::User), "a refused project file is not merged");
         let shipped = layer("chk".into(), vec![read(Origin::Builtin, cmd)], false, Path::new("/p"));
         assert_eq!(shipped.command_from, Some(Origin::Builtin));
