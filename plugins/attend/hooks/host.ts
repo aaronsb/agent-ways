@@ -11,11 +11,40 @@
 // - ADR-416 item 2: one host per listening session, its respawn cap, and
 //   the stdout line that cues a poll.
 
+import type { HostRecord, MoveRecord } from '../types/index.d.ts'
 import { ATTEND, oneLine } from './lib.ts'
 
 /** Which host a session runs: its id, and the id a /clear ended, whose
  *  sensor stores the host moves to it. */
 export type HostSpec = { session: string; movedFrom: string | undefined }
+
+/** The spec as $.state keeps it. */
+export function hostRecord(h: HostSpec | undefined): HostRecord | null {
+  return h === undefined ? null : { session: h.session, movedFrom: h.movedFrom ?? null }
+}
+
+/** The spec a kept record holds; undefined where it holds none. */
+export function hostOfRecord(r: unknown): HostSpec | undefined {
+  if (typeof r !== 'object' || r === null) return undefined
+  const x = r as Record<string, unknown>
+  if (typeof x.session !== 'string' || x.session === '') return undefined
+  return { session: x.session, movedFrom: typeof x.movedFrom === 'string' ? x.movedFrom : undefined }
+}
+
+/** The host the session wants under `id`: the one the module already wants
+ *  for it, else the one $.state kept for it (a reload), else a new one. A
+ *  new one after a /clear from the id the last host ran for carries that id
+ *  as `movedFrom`, so the first host under the new id moves the stores:
+ *  attend keeps a store the new id already has, so a later move would not
+ *  replace what that host wrote. `move` is the /clear or /resume being
+ *  followed or settled. */
+export function hostSpecFor(id: string, current: HostSpec | undefined, kept: HostSpec | undefined, move: MoveRecord | undefined): HostSpec {
+  if (current?.session === id) return current
+  if (kept?.session === id) return kept
+  const from = current?.session ?? kept?.session
+  const isClearedFrom = move?.reason === 'clear' && from !== undefined && move.ended.includes(from) && !move.ended.includes(id)
+  return { session: id, movedFrom: isClearedFrom ? from : undefined }
+}
 
 /** A running host: what it was spawned for, and how to end it. `isEnding`
  *  is set once the module ends it, so its end is not taken for an exit. */

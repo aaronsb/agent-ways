@@ -26,6 +26,13 @@ export type KeepaliveRow = {
   isShown: boolean
 }
 
+/** The sensor host a session wants: its id, and the id a /clear ended,
+ *  whose sensor stores the host moves to it; null where none moves. */
+export type HostRecord = {
+  session: string
+  movedFrom: string | null
+}
+
 /** Why the session ended under a running process (session.end's reason). */
 export type MoveReason = 'clear' | 'resume'
 
@@ -76,6 +83,9 @@ export type AttendStatus = {
   /** The session's sensor host exited past its respawn cap, or attend
    *  refused it: the row says so, and messages still arrive. */
   hostStopped: boolean
+  /** The host the session wants, kept so a reloaded module spawns the
+   *  same one, --moved-from included; null before activation. */
+  hostFor: HostRecord | null
 }
 
 declare module 'claude-code' {

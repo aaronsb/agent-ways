@@ -63,7 +63,7 @@ import {
   UNREAD_ROOM,
 } from './attend-output.ts'
 import { MOVE_FIRST_MS } from '../hooks/move.ts'
-import { claudePid, cuesIn, hostArgv, hostEndText, isHostRefused, respawnAfterExit } from '../hooks/host.ts'
+import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit } from '../hooks/host.ts'
 
 const T0 = 1_800_000_000_000
 const BAND = {
@@ -160,9 +160,15 @@ type World = {
   steps?: (string | { answer: string; stop: string })[]
   /** Holds each `keepwarm wrapped` report until it settles. */
   holdWrapped?: Promise<void>
-  /** An attend whose `sensor host` exits 2 at once, as one without the
-   *  verb does. */
-  hostRefused?: boolean
+  /** A sensor host that runs until the mod or the test ends it. Without
+   *  it, `sensor host` exits 2 at once, as on an attend without the verb:
+   *  a stream left open makes the kit settle each step of the mock clock
+   *  slowly, so only the tests of the host run one. */
+  host?: boolean
+  /** Holds each drain in flight until it settles. */
+  holdDrain?: Promise<void>
+  /** Holds the next read of $.state until it settles, then is spent. */
+  holdRead?: Promise<void>
 }
 
 /** One `attend sensor host` the mod spawned, as the fake beneath runs it:
@@ -189,7 +195,12 @@ function host(on: On, world: World) {
   const origins: unknown[] = []
   const tools: string[] = []
   const state: { value: unknown; version: number } = world.status ? { value: world.status, version: 1 } : { value: undefined, version: 0 }
-  on('state.get', { plugin: 'attend', key: 'status' }, () => ({ value: { value: state.value, version: state.version } }) as never)
+  on('state.get', { plugin: 'attend', key: 'status' }, async () => {
+    const held = world.holdRead
+    world.holdRead = undefined
+    if (held) await held
+    return { value: { value: state.value, version: state.version } } as never
+  })
   on('state.set', { plugin: 'attend', key: 'status' }, ($, e) => {
     if (e.ifVersion !== undefined && e.ifVersion !== state.version) return { value: { isSet: false, version: state.version } } as never
     state.value = e.value
@@ -206,8 +217,11 @@ function host(on: On, world: World) {
     return { value: undefined } as never
   })
   const logs: string[] = []
+  // The sensor host's lines, the mod's and its stderr, kept apart from the
+  // rest of the transcript.
+  const hostLogs: string[] = []
   on('ui.log', ($, e) => {
-    logs.push(e.text)
+    ;(/^attend( sensor host:|: the sensor host )/.test(e.text) ? hostLogs : logs).push(e.text)
     return { value: undefined } as never
   })
   const toasts: string[] = []
@@ -266,7 +280,10 @@ function host(on: On, world: World) {
       const ev = e as unknown as { stdin?: string; init?: { stdin?: string } }
       writes.push({ path: e.argv[e.argv.indexOf('--path') + 1] ?? '', text: ev.stdin ?? ev.init?.stdin ?? '' })
     }
-    return { value: run([...e.argv]) }
+    const value = run([...e.argv])
+    // A drain held in flight is recorded as it starts.
+    if (e.argv.slice(1, 4).join(' ') === 'message inbox --drain' && world.holdDrain) await world.holdDrain
+    return { value }
   })
   // The model's steps: each answers in turn from `world.steps`, ending it.
   on('turn.step', async function* ($, e) {
@@ -274,8 +291,10 @@ function host(on: On, world: World) {
     const [answer, stopReason] = typeof step === 'string' ? [step, 'end_turn'] : [step.answer, step.stop]
     return { turnId: e.turnId, index: e.index, answer, toolUses: [], stopReason, usage: null } as never
   })
-  // Claude Code's command-hook environment, CLAUDE_PID among it.
-  on('process.hookEnv', () => ({ value: { CLAUDECODE: '1', CLAUDE_PID: '4242' } }) as never)
+  // No process.hookEnv: Claude Code 2.1.312, which CI runs, has no such
+  // event and refuses a test module that hooks it, and a later one answers
+  // nothing here. The mod then spawns the host without --parent; hostArgv
+  // and claudePid are tested on their own.
   // The sensor host: runs until the mod ends its stream (next.signal
   // aborts) or the test ends it, writing what the test has it say.
   const spawns: Spawned[] = []
@@ -297,7 +316,7 @@ function host(on: On, world: World) {
       },
     }
     spawns.push(sp)
-    if (world.hostRefused) {
+    if (!world.host) {
       sp.ended = true
       return { value: { code: 2, signal: null } } as never
     }
@@ -391,7 +410,7 @@ function host(on: On, world: World) {
   const status = () => state.value as Partial<AttendStatus> | undefined
   const reads = () => idReads
   const live = () => spawns.filter(sp => !sp.ended)
-  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts, commands, reads, spawns, live }
+  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts, commands, reads, spawns, live, hostLogs }
 }
 
 /** What `attend keepwarm check --policy --json` prints. */
@@ -961,9 +980,7 @@ describe('active', () => {
   // beat are what touch its heartbeat, and attend-chat reads a heartbeat
   // older than 90 s as a session that is gone (the mod-session liveness
   // defect of 2026-10-13).
-  // Hours of the mock clock with a sensor host's stream open: the kit
-  // settles each step more slowly then.
-  test('the heartbeat stays fresh through a turn longer than the grace and a slow poll longer than it', { timeoutMs: 30_000 }, async ($, on) => {
+  test('the heartbeat stays fresh through a turn longer than the grace and a slow poll longer than it', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', slow_poll_seconds: 300 } })
     await $.session.start(INTERACTIVE)
@@ -2380,9 +2397,7 @@ describe('keepalive policy', () => {
     expect(h.submitted).toEqual([])
   })
 
-  // Hours of the mock clock with a sensor host's stream open: the kit
-  // settles each step more slowly then.
-  test('a -p run gets no policy, whatever headless_poll says', { timeoutMs: 30_000 }, async ($, on) => {
+  test('a -p run gets no policy, whatever headless_poll says', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', headless_poll: true }, autocompact: false, policy: [keepalive(1)] })
     await $.session.start(HEADLESS)
@@ -2391,9 +2406,7 @@ describe('keepalive policy', () => {
     expect(h.submitted).toEqual([])
   })
 
-  // Hours of the mock clock with a sensor host's stream open: the kit
-  // settles each step more slowly then.
-  test('keepwarm off runs no policy check, listening or dormant', { timeoutMs: 30_000 }, async ($, on) => {
+  test('keepwarm off runs no policy check, listening or dormant', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, autocompact: false, policy: [keepalive(1)] })
     await $.session.start(INTERACTIVE)
@@ -2710,7 +2723,7 @@ describe('keepalive policy: the pure pieces', () => {
 
   test('the row: the segment alone while dormant and shown, beside the peers while active', () => {
     const k: KeepaliveRow = { state: 'running', count: 2, max: 8, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true }
-    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null, hostStopped: false }
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null, hostStopped: false, hostFor: null }
     expect(rowText({ ...base, keepalive: k }, 0)).toBe('⟳ 2/8 · next 41m · wrap ~21:40')
     expect(rowText({ ...base, keepalive: rowAfterPrompt(k) }, 0)).toBeUndefined()
     expect(rowText({ ...base, keepalive: null }, 0)).toBeUndefined()
@@ -2773,7 +2786,7 @@ describe('keepalive policy: the pure pieces', () => {
   })
 
   test('the row says why the policy is idle: under the 50k floor, the 5m tier, no request yet', () => {
-    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null, hostStopped: false }
+    const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null, hostStopped: false, hostFor: null }
     const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true })
     expect(rowText({ ...base, keepalive: idle({ idle: 'under 50k' }) }, 0)).toBe('⟳ 0/1 · idle: under 50k')
     expect(rowText({ ...base, keepalive: idle({ idle: '5m tier' }) }, 0)).toBe('⟳ 0/1 · idle: 5m tier')
@@ -2785,9 +2798,9 @@ describe('keepalive policy: the pure pieces', () => {
   })
 })
 
-/** The host the mod spawns for `session` in INTERACTIVE's directory, with
- *  the CLAUDE_PID the fake hook environment gives. */
-const HOST = (session: string, ...movedFrom: string[]) => ['attend', 'sensor', 'host', '--session', session, '--cwd', '/work/agent-ways', ...movedFrom, '--parent', '4242']
+/** The host the mod spawns for `session` in INTERACTIVE's directory. No
+ *  hook environment answers, so it carries no --parent. */
+const HOST = (session: string, ...movedFrom: string[]) => ['attend', 'sensor', 'host', '--session', session, '--cwd', '/work/agent-ways', ...movedFrom]
 
 describe('the sensor host (ADR-416 item 2)', () => {
   const shows = async ($: Engine, text: RegExp) => {
@@ -2796,10 +2809,11 @@ describe('the sensor host (ADR-416 item 2)', () => {
     await ui.unmount()
     return found !== undefined
   }
+  const STOPPED = 'attend: the sensor host stopped'
 
-  test('a dormant session spawns none; attend_listen spawns one for its id and directory, watching Claude Code\'s pid', async ($, on) => {
+  test('a dormant session spawns none; attend_listen spawns one for its id and directory, without --parent where Claude Code gives no pid', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, {})
+    const h = host(on, { host: true })
     await $.session.start(INTERACTIVE)
     await clock.advance(10 * 60_000)
     expect(h.spawns).toEqual([])
@@ -2817,7 +2831,7 @@ describe('the sensor host (ADR-416 item 2)', () => {
 
   test('a project that starts listening spawns its host at session start', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active' } })
+    const h = host(on, { config: { listening: 'active' }, host: true })
     await $.session.start(INTERACTIVE)
     await clock.advance(1_000)
     expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
@@ -2825,7 +2839,7 @@ describe('the sensor host (ADR-416 item 2)', () => {
 
   test('a -p run in a listening project, which never polls, spawns none', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active' } })
+    const h = host(on, { config: { listening: 'active' }, host: true })
     await $.session.start(HEADLESS)
     await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     await clock.advance(60_000)
@@ -2835,7 +2849,7 @@ describe('the sensor host (ADR-416 item 2)', () => {
   test('listening turned off elsewhere ends the host, with no respawn; listening again starts one', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains, host: true })
     await $.session.start(INTERACTIVE)
     await clock.advance(6_000)
     expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
@@ -2849,23 +2863,27 @@ describe('the sensor host (ADR-416 item 2)', () => {
     await clock.advance(10_000)
     expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1'), HOST('s1')])
     expect(h.live().length).toBe(1)
-    expect(h.logs.filter(l => l.includes('sensor host'))).toEqual([])
+    expect(h.hostLogs).toEqual([])
   })
 
   test('a /clear ends the old host once the new id shows and spawns one with --moved-from; a /resume spawns one without it', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, host: true })
     await $.session.start(INTERACTIVE)
     await clock.advance(1_000)
     expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
     await clear($, h, 's2', 'clear', { clock, ms: 12_000 })
-    // The old host keeps its id until the move settles.
+    // The old host keeps its id until the move settles, and $.state, which
+    // the /clear emptied, holds it again for a reload.
     await clock.advance(6_000)
     expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    expect(h.status()?.hostFor).toEqual({ session: 's1', movedFrom: null })
+    expect(h.status()?.move).toEqual({ ended: ['s1'], reason: 'clear', wasOn: true })
     await clock.advance(12_000)
     expect(h.spawns[0]?.killed).toBe(true)
     expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1'), HOST('s2', '--moved-from', 's1')])
     expect(h.live().map(sp => sp.argv)).toEqual([HOST('s2', '--moved-from', 's1')])
+    expect(h.status()?.hostFor).toEqual({ session: 's2', movedFrom: 's1' })
     // A /resume goes on with the stores of the session it resumed.
     await clear($, h, 's3', 'resume')
     await clock.advance(5_000)
@@ -2874,10 +2892,48 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(h.spawns.length).toBe(3)
   })
 
+  // A hot reload in the middle of a /clear: $.state holds what the hold
+  // wrote back (the test above shows it), and a fresh module reads it. The
+  // first host under the new id must move the stores, since attend keeps a
+  // store the new id already has.
+  test('a module reloaded during a /clear, once the new id shows, spawns its first host with --moved-from', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {
+      host: true,
+      config: { keepwarm: 'off' },
+      sessionId: 's2',
+      status: { mode: 'active', move: { ended: ['s1'], reason: 'clear', wasOn: true }, hostFor: { session: 's1', movedFrom: null } },
+    })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(10_000)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s2', '--moved-from', 's1')])
+    expect(h.live().length).toBe(1)
+    expect(h.status()?.move).toBeNull()
+  })
+
+  test('a module reloaded during a /clear, while the old id still shows, moves the stores when the new id settles', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {
+      host: true,
+      config: { keepwarm: 'off' },
+      status: { mode: 'active', move: { ended: ['s0'], reason: 'clear', wasOn: true }, hostFor: { session: 's0', movedFrom: null } },
+    })
+    // s1 is the id that ended last; s0's /clear is the move kept.
+    h.world.sessionId = 's0'
+    h.world.nextId = { id: 's1', atMs: T0 + 3_000 }
+    h.world.now = clock.now
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s0')])
+    await clock.advance(10_000)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s0'), HOST('s1', '--moved-from', 's0')])
+    expect(h.live().length).toBe(1)
+  })
+
   test('a host that exits on its own is spawned again after 5 s, three times; the fourth exit in ten minutes stops it, the row says so, and messages still arrive', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains, host: true })
     await $.session.start(INTERACTIVE)
     await clock.advance(1_000)
     for (let i = 0; i < 3; i++) {
@@ -2896,18 +2952,29 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(h.live()).toEqual([])
     expect(h.status()?.hostStopped).toBe(true)
     expect(await shows($, /● 2 peers ✉ 0 unread · sensors stopped/)).toBe(true)
-    expect(h.logs.filter(l => l.startsWith('attend: the sensor host stopped'))).toEqual([
-      'attend: the sensor host stopped (it ended 4 times in ten minutes, last SIGKILL); sensor reports stop until the mod reloads, and messages still arrive',
+    expect(h.hostLogs.filter(l => l.startsWith(STOPPED))).toEqual([
+      `${STOPPED} (it ended 4 times in ten minutes, last SIGKILL); sensor reports stop until attend_listen is called again or the mod reloads, and messages still arrive`,
     ])
     drains.push(one(5), DRAIN_EMPTY)
     await clock.advance(10_000)
     expect(h.submitted.length).toBe(1)
     expect(h.submitted[0]).toContain('m5')
+    // attend_listen starts it again; the window keeps its respawns, so the
+    // next exit inside it stops it at once.
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clock.advance(1_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    expect(h.status()?.hostStopped).toBe(false)
+    expect(await shows($, /sensors stopped/)).toBe(false)
+    h.live()[0]?.exit(1)
+    await clock.advance(60_000)
+    expect(h.spawns.length).toBe(5)
+    expect(h.status()?.hostStopped).toBe(true)
   })
 
   test('exits further apart than the window are each followed by a respawn', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, host: true })
     await $.session.start(INTERACTIVE)
     await clock.advance(1_000)
     for (let i = 0; i < 5; i++) {
@@ -2919,22 +2986,61 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(h.status()?.hostStopped).toBe(false)
   })
 
-  test('an attend that refuses sensor host stops it at once, with no respawn', async ($, on) => {
+  test('an attend that refuses sensor host stops it at once, with no respawn; attend_listen tries it again', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, hostRefused: true })
+    const world: World = { config: { listening: 'active', keepwarm: 'off' } }
+    const h = host(on, world)
     await $.session.start(INTERACTIVE)
     await clock.advance(60_000)
     expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1')])
     expect(h.status()?.hostStopped).toBe(true)
-    expect(h.logs.filter(l => l.startsWith('attend: the sensor host stopped'))).toEqual([
-      'attend: the sensor host stopped (exit 2); sensor reports stop until the mod reloads, and messages still arrive',
+    expect(h.hostLogs).toEqual([
+      `${STOPPED} (exit 2); sensor reports stop until attend_listen is called again or the mod reloads, and messages still arrive`,
     ])
+    // The attend on PATH is updated, and the agent calls attend_listen.
+    world.host = true
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clock.advance(1_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    expect(h.status()?.hostStopped).toBe(false)
   })
 
-  test('a line on the host\'s stdout polls at once; half a line waits for its end; stderr goes to the debug log', async ($, on) => {
+  test('a stopped host stays stopped through a /clear, with the row saying so, and $.state keeps the host to spawn', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    expect(h.status()?.hostStopped).toBe(true)
+    await clear($, h, 's2', 'clear', { clock, ms: 12_000 })
+    // While the move is followed, then once it settled.
+    await clock.advance(6_000)
+    expect(await shows($, /sensors stopped/)).toBe(true)
+    await clock.advance(12_000)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1')])
+    expect(await shows($, /sensors stopped/)).toBe(true)
+    expect(h.status()?.hostStopped).toBe(true)
+    expect(h.status()?.hostFor).toEqual({ session: 's2', movedFrom: 's1' })
+  })
+
+  test('a module reloaded after that spawns the kept host, --moved-from included', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {
+      host: true,
+      config: { keepwarm: 'off' },
+      sessionId: 's2',
+      status: { mode: 'active', hostStopped: true, hostFor: { session: 's2', movedFrom: 's1' } },
+    })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s2', '--moved-from', 's1')])
+    expect(h.status()?.hostStopped).toBe(false)
+    expect(await shows($, /sensors stopped/)).toBe(false)
+  })
+
+  test('a line on the host\'s stdout polls at once, with no peer list; half a line waits for its end; stderr goes to the debug log', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off', poll_seconds: 60 }, drains })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off', poll_seconds: 60 }, drains, host: true })
     await $.session.start(INTERACTIVE)
     await clock.advance(6_000)
     const polls = () => h.count('message inbox --drain --json --wake')
@@ -2943,6 +3049,7 @@ describe('the sensor host (ADR-416 item 2)', () => {
     // With no cue, nothing polls before the minute is up.
     await clock.advance(20_000)
     expect(polls()).toBe(before)
+    const peers = h.count('peer list')
     drains.push(one(9), DRAIN_EMPTY)
     h.live()[0]?.say('sig')
     await clock.settle()
@@ -2953,13 +3060,59 @@ describe('the sensor host (ADR-416 item 2)', () => {
     await clock.advance(2_500)
     expect(h.submitted.length).toBe(1)
     expect(h.submitted[0]).toContain('m9')
+    expect(h.count('peer list')).toBe(peers)
     h.live()[0]?.say('peers: wrote system-2\n', 'stderr')
     await clock.settle()
     expect(polls()).toBe(before + 1)
-    expect(h.logs).toContain('attend sensor host: peers: wrote system-2')
+    expect(h.hostLogs).toContain('attend sensor host: peers: wrote system-2')
   })
 
-  test('the pure pieces: argv, the respawn cap, cues, the pid, how it ended', () => {
+  test('a cue while a tick runs polls once that tick ends', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const world: World = { config: { listening: 'active', keepwarm: 'off', poll_seconds: 60 }, host: true }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    const polls = () => h.count('message inbox --drain --json --wake')
+    const before = polls()
+    let release = () => {}
+    world.holdDrain = new Promise<void>(r => (release = r))
+    h.live()[0]?.say('signal a\n')
+    await clock.settle()
+    expect(polls()).toBe(before + 1)
+    // The tick of the first cue waits on its drain; the second cue waits
+    // for that tick.
+    h.live()[0]?.say('signal b\n')
+    await clock.settle()
+    expect(polls()).toBe(before + 1)
+    world.holdDrain = undefined
+    release()
+    await clock.advance(1_000)
+    expect(polls()).toBe(before + 2)
+  })
+
+  test('a cue while a tick waits on its first read starts no second tick beside it', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const world: World = { config: { listening: 'active', keepwarm: 'off', poll_seconds: 60 }, host: true }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    const polls = () => h.count('message inbox --drain --json --wake')
+    const before = polls()
+    let release = () => {}
+    // The first cue's tick waits on its read of $.state.
+    world.holdRead = new Promise<void>(r => (release = r))
+    h.live()[0]?.say('signal a\n')
+    await clock.settle()
+    h.live()[0]?.say('signal b\n')
+    await clock.settle()
+    expect(polls()).toBe(before)
+    release()
+    await clock.advance(1_000)
+    expect(polls()).toBe(before + 2)
+  })
+
+  test('the pure pieces: argv, the respawn cap, cues, the pid, how it ended, the spec an id gets', () => {
     expect(hostArgv({ session: 's2', movedFrom: 's1' }, '/p', '42')).toEqual(['attend', 'sensor', 'host', '--session', 's2', '--cwd', '/p', '--moved-from', 's1', '--parent', '42'])
     expect(hostArgv({ session: 's1', movedFrom: 's1' }, '/p')).toEqual(['attend', 'sensor', 'host', '--session', 's1', '--cwd', '/p'])
     expect(hostArgv({ session: 's1', movedFrom: '' }, '/p')).toEqual(['attend', 'sensor', 'host', '--session', 's1', '--cwd', '/p'])
@@ -2983,6 +3136,20 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(hostEndText({ code: null, signal: 'SIGKILL' })).toBe('SIGKILL')
     expect(hostEndText({ deny: 'blocked' })).toBe('refused: blocked')
     expect(hostEndText(undefined, 'Error: spawn attend ENOENT')).toBe('could not start: Error: spawn attend ENOENT')
+    const clearOf = (...ended: string[]) => ({ ended, reason: 'clear' as const, wasOn: true })
+    const s1 = { session: 's1', movedFrom: undefined }
+    expect(hostSpecFor('s1', s1, undefined, undefined)).toBe(s1)
+    expect(hostSpecFor('s2', s1, undefined, clearOf('s1'))).toEqual({ session: 's2', movedFrom: 's1' })
+    expect(hostSpecFor('s2', undefined, s1, clearOf('s1'))).toEqual({ session: 's2', movedFrom: 's1' })
+    expect(hostSpecFor('s2', undefined, { session: 's2', movedFrom: 's1' }, undefined)).toEqual({ session: 's2', movedFrom: 's1' })
+    expect(hostSpecFor('s2', s1, undefined, { ...clearOf('s1'), reason: 'resume' })).toEqual({ session: 's2', movedFrom: undefined })
+    expect(hostSpecFor('s2', s1, undefined, undefined)).toEqual({ session: 's2', movedFrom: undefined })
+    expect(hostSpecFor('s1', undefined, undefined, clearOf('s1'))).toEqual({ session: 's1', movedFrom: undefined })
+    expect(hostOfRecord({ session: 's2', movedFrom: null })).toEqual({ session: 's2', movedFrom: undefined })
+    expect(hostOfRecord({ session: '' })).toBeUndefined()
+    expect(hostOfRecord(null)).toBeUndefined()
+    expect(hostRecord({ session: 's2', movedFrom: 's1' })).toEqual({ session: 's2', movedFrom: 's1' })
+    expect(hostRecord(undefined)).toBeNull()
   })
 })
 
