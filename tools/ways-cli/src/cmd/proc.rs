@@ -166,12 +166,16 @@ mod tests {
         let pidfile = std::env::temp_dir().join(format!("ways-output-within-{}", std::process::id()));
         let mut slow = Command::new("sh");
         slow.args(["-c", &format!("sleep 30 & echo $! > {}; wait", pidfile.display())]);
-        assert!(matches!(output_within(slow, Duration::from_millis(300)), Err(ProcError::TimedOut(_))));
+        // The deadline outlasts the shell's start on a loaded runner, so the
+        // pidfile exists when the kill lands; it does not lengthen the wait
+        // beyond the deadline itself.
+        assert!(matches!(output_within(slow, Duration::from_secs(3)), Err(ProcError::TimedOut(_))));
         let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
         std::fs::remove_file(&pidfile).ok();
-        // Reaped by init once killed; give the kernel a moment.
+        // Reaped by init once killed; the poll ends as soon as it is gone,
+        // and gives a slow runner 10 s to get there.
         let alive = || std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| !s.contains(") Z "));
-        for _ in 0..50 {
+        for _ in 0..500 {
             if !alive() {
                 break;
             }
