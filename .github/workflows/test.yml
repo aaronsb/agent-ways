@@ -75,9 +75,9 @@ jobs:
     # attend, `claude plugin validate`, and `claude plugin test`. The build is
     # pinned to the one the mod's early-access API was written against, the
     # oldest the mods support; plugins-current below checks a current one.
-    # Type checking
-    # needs the declarations Claude Code lays beside a mod it loads in a
-    # session, which a runner has none of, so the script reports it skipped.
+    # Type checking needs the declarations Claude Code lays beside a mod it
+    # loads in a session, which a runner has none of, so the script reports
+    # it skipped.
     name: plugins
     runs-on: ubuntu-latest
     steps:
@@ -100,4 +100,6 @@ jobs:
       - name: install Claude Code
         run: npm install -g @anthropic-ai/claude-code@2.1.330
       - name: validate and test
+        env:
+          HOOKENV_REQUIRED: "1"
         run: make test-plugins

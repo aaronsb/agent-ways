@@ -159,7 +159,11 @@ if out="$(claude plugin test "$hookenv/attend" 2>&1)"; then
   echo "hookenv: the attend mod passes CLAUDE_PID to its sensor host as --parent"
 elif grep -qF '"process.hookEnv" is not an event' <<<"$out"; then
   rm -rf "$hookenv"
-  echo "hookenv: skipped, Claude Code $(claude --version 2>/dev/null | awk '{print $1}') has no process.hookEnv"
+  version="$(claude --version 2>/dev/null | awk '{print $1}')"
+  # A run that exists to check this test, such as CI's plugins-current job,
+  # sets HOOKENV_REQUIRED so a build without the event fails it.
+  [[ -z "${HOOKENV_REQUIRED:-}" ]] || fail "Claude Code $version has no process.hookEnv, and HOOKENV_REQUIRED is set"
+  echo "hookenv: skipped, Claude Code $version has no process.hookEnv"
 else
   rm -rf "$hookenv"
   printf '%s\n' "$out"

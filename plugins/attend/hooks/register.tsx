@@ -402,9 +402,9 @@ async function settleMove($: $, mod: Mod, id: string, m: MoveRecord) {
     const goesOn = m.wasOn || mod.active || (m.reason === 'resume' && (await readListened($)).includes(id))
     if (!goesOn) return
     mod.isRelistening = true
-    // The host for the new id is known now, and $.state holds it from the
-    // same write that drops the move, so a reload before the host starts
-    // still passes --moved-from. An inactive session's activation picks it.
+    // The host for the new id is known now, and $.state holds it, written
+    // before the move is released, so a reload before the host starts still
+    // passes --moved-from. An inactive session's activation picks it.
     if (mod.active) mod.hostFor = hostSpecFor(id, mod.hostFor, undefined, m)
     await updateStatus($, s => ({
       ...s,

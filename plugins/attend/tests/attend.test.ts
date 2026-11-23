@@ -2868,8 +2868,8 @@ describe('the sensor host (ADR-416 item 2)', () => {
   })
 
   // A reload in the second between the settle and the host's start reads
-  // $.state: it holds the new id's host, --moved-from included, from the
-  // write that drops the move (the seeded reload below spawns it).
+  // $.state: it holds the new id's host, --moved-from included, written
+  // before the move is released (the seeded reload below spawns it).
   test('once a /clear settles, $.state holds the new host before it starts', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, host: true })
