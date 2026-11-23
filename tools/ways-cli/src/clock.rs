@@ -38,18 +38,26 @@ mod manual {
     /// A clock a test advances: `sleep` moves it forward by what was asked
     /// and returns at once. The closure given to `at_first_sleep` runs at
     /// the first sleep, so a test can act as the host between two polls.
+    /// With `really_sleeping_after_the_first`, every later sleep also waits
+    /// in real time, for a test whose retry budget has to span the time a
+    /// real process needs.
     pub(crate) struct ManualClock {
         base: Instant,
         offset: Cell<Duration>,
         on_sleep: RefCell<Option<Box<dyn FnOnce()>>>,
+        real_after_first: bool,
     }
 
     impl ManualClock {
         pub(crate) fn new() -> ManualClock {
-            ManualClock { base: Instant::now(), offset: Default::default(), on_sleep: Default::default() }
+            ManualClock { base: Instant::now(), offset: Default::default(), on_sleep: Default::default(), real_after_first: false }
         }
         pub(crate) fn at_first_sleep(self, f: impl FnOnce() + 'static) -> ManualClock {
             *self.on_sleep.borrow_mut() = Some(Box::new(f));
+            self
+        }
+        pub(crate) fn really_sleeping_after_the_first(mut self) -> ManualClock {
+            self.real_after_first = true;
             self
         }
         /// Time passed on this clock.
@@ -63,8 +71,11 @@ mod manual {
             self.base + self.offset.get()
         }
         fn sleep(&self, d: Duration) {
-            if let Some(f) = self.on_sleep.borrow_mut().take() {
-                f();
+            let first = self.on_sleep.borrow_mut().take();
+            match first {
+                Some(f) => f(),
+                None if self.real_after_first => std::thread::sleep(d),
+                None => {}
             }
             self.offset.set(self.offset.get() + d);
         }

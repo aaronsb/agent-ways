@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::cmd::show::{self, ContextBudget};
+use crate::clock::{Clock, SystemClock};
 use crate::session;
 
 /// A way's postcheck, by way id.
@@ -156,9 +157,28 @@ fn spawn(script: &Path, session_id: &str, root: &str) -> Option<Child> {
         .env("WAYS_SESSIONS_ROOT", root)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()
+        .stderr(Stdio::null());
+    spawn_unbusy(&SystemClock, &mut cmd).ok()
+}
+
+/// Spawns `cmd`, trying again while the kernel says its executable is busy.
+/// Linux refuses to exec a file some process still has open for writing, and
+/// a child forked by another thread between a writer's open and close holds
+/// that descriptor until its own exec. The busy state lasts microseconds, so
+/// a script written a moment ago, by an editor or by a test, runs on the
+/// next try and not as a failed check. Only Linux returns ETXTBSY (macOS
+/// execs the file), so elsewhere the first spawn is the only one.
+fn spawn_unbusy(clock: &dyn Clock, cmd: &mut Command) -> std::io::Result<Child> {
+    let mut tries = 0;
+    loop {
+        match cmd.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 => {
+                tries += 1;
+                clock.sleep(Duration::from_millis(2));
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Kill a postcheck past the deadline, its process group first on Unix, and
@@ -210,9 +230,38 @@ mod tests {
         let dir = root.join(way);
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("postcheck.sh");
-        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+        // Written beside its name and renamed into place, with its mode set
+        // before the rename, so the name never holds a half-written script.
+        let tmp = dir.join(".postcheck.sh.tmp");
+        std::fs::write(&tmp, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode)).unwrap();
+        std::fs::rename(&tmp, &p).unwrap();
         p
+    }
+
+    /// A script some thread still has open for writing cannot be exec'd
+    /// (ETXTBSY). Renaming a temp file into place does not change that, since
+    /// the inode is the same one a concurrent fork can hold open, so the
+    /// spawn waits the busy state out. The writer closes at the first wait,
+    /// on a clock the test advances; later waits really sleep, so the
+    /// retries span the real time production gives them.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_script_busy_for_a_moment_still_runs() {
+        use crate::clock::ManualClock;
+        let base = std::env::temp_dir().join(format!("ways-postcheck-busy-{}", std::process::id()));
+        let p = script(&base, "busy", "exit 0", 0o755);
+        let writer = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
+        let mut direct = Command::new(&p);
+        assert_eq!(direct.spawn().unwrap_err().kind(), std::io::ErrorKind::ExecutableFileBusy, "the script is busy while it is open for writing");
+        let clock = ManualClock::new().at_first_sleep(move || drop(writer)).really_sleeping_after_the_first();
+        let mut cmd = Command::new(&p);
+        let status = spawn_unbusy(&clock, &mut cmd).expect("spawned once the writer closed").wait().unwrap();
+        assert!(status.success());
+        // At least one wait; another test thread forking at the same moment can hold the
+        // descriptor a little longer, which is the race the retry is for.
+        assert!(clock.elapsed() >= Duration::from_millis(2), "waited for the writer: {:?}", clock.elapsed());
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
