@@ -294,9 +294,17 @@ pub fn same_dir(a: &str, b: &str) -> bool {
 /// session's own processes sit beside a host, not under one. Such a
 /// process does not act as the session. For this process the answer is
 /// read once and kept, as no new ancestor can appear.
+///
+/// A wrapper that runs `pid` with its arguments and stays its parent, as
+/// `timeout 75 attend sensor host …` does, names a host in its arguments
+/// without being one, and is not counted ([`launches_argv`]). `env`,
+/// `nice`, `nohup` and `stdbuf` exec in place and leave no such parent.
 pub fn started_by_sensor_command(pid: u32) -> bool {
     static OWN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let check = || host_above(pid, crate::process::parent_pid, is_sensor_host);
+    let check = || {
+        let own = crate::process::argv(pid);
+        host_above(pid, crate::process::parent_pid, |p| is_sensor_host(p) && !launches(p, own.as_deref()))
+    };
     match pid == std::process::id() {
         true => *OWN.get_or_init(check),
         false => check(),
@@ -309,6 +317,26 @@ pub fn started_by_sensor_command(pid: u32) -> bool {
 pub fn is_sensor_host(pid: u32) -> bool {
     let Some(args) = crate::process::argv(pid) else { return false };
     is_sensor_host_argv(&args) || (crate::process::exe_name(pid).is_some_and(|n| is_attend(&n)) && host_args(args.get(1..).unwrap_or_default()))
+}
+
+/// Whether `pid` launched the process whose argv is `own` through an argv
+/// wrapper: `pid` does not run attend itself, and its arguments end with
+/// `own`'s ([`launches_argv`]). A host runs attend, so a command a host
+/// runs never takes the host for its launcher.
+fn launches(pid: u32, own: Option<&[String]>) -> bool {
+    let (Some(own), Some(args)) = (own, crate::process::argv(pid)) else { return false };
+    !crate::process::exe_name(pid).is_some_and(|n| is_attend(&n)) && launches_argv(&args, own)
+}
+
+/// Whether the argv `args` runs the attend whose argv is `own`: it ends with
+/// `own`'s arguments after its program, and the argument just before them
+/// names a program `attend`, as `timeout 75 /bin/attend sensor host …`
+/// does.
+pub fn launches_argv(args: &[String], own: &[String]) -> bool {
+    let Some(tail) = own.get(1..).filter(|t| !t.is_empty()) else { return false };
+    args.len() > tail.len()
+        && args.ends_with(tail)
+        && is_attend(args[args.len() - tail.len() - 1].rsplit(['/', '\\']).next().unwrap_or_default())
 }
 
 /// Whether `args` start an attend sensor host: an argument naming a
@@ -506,6 +534,24 @@ mod tests {
         assert!(!is_sensor_host_argv(&args(&["sh", "-c", "attend run"])));
         assert!(is_sensor_host_argv(&args(&["sh", "/home/u/bin/attend", "run"])), "a host run through an interpreter");
         assert!(!is_sensor_host_argv(&args(&["grep", "attend", "run.log"])));
+    }
+
+    /// A wrapper that runs this attend with its arguments unchanged is its
+    /// launcher; a program that runs other arguments, or a non-attend
+    /// program in that place, is not.
+    #[test]
+    fn an_argv_wrapper_launches_the_attend_it_names() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let own = args(&["/bin/attend", "sensor", "host", "--session", "s", "--cwd", "/p"]);
+        for wrapper in [&["timeout", "75"][..], &["env", "A=1"], &["nice", "-n", "5"], &["nohup"], &["setsid"], &["stdbuf", "-oL"]] {
+            let mut w = args(wrapper);
+            w.extend(args(&["attend", "sensor", "host", "--session", "s", "--cwd", "/p"]));
+            assert!(launches_argv(&w, &own), "{w:?}");
+        }
+        assert!(!launches_argv(&args(&["timeout", "75", "attend", "sensor", "host", "--session", "other", "--cwd", "/p"]), &own), "other arguments");
+        assert!(!launches_argv(&args(&["timeout", "75", "fake", "sensor", "host", "--session", "s", "--cwd", "/p"]), &own), "not attend");
+        assert!(!launches_argv(&args(&["sensor", "host", "--session", "s", "--cwd", "/p"]), &own), "nothing before the arguments");
+        assert!(!launches_argv(&own, &args(&["/bin/attend"])), "no arguments of its own");
     }
 
     #[test]

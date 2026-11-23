@@ -384,6 +384,43 @@ fn a_command_the_host_runs_does_not_act_as_the_session() {
     assert!(signals(&open).is_empty(), "the refused send wrote a signal");
 }
 
+/// A host started through an argv wrapper that stays its parent, as
+/// `timeout` does, runs: the wrapper names a host without being one. A command
+/// that host runs is still refused as the session, whether it runs a verb
+/// or another host with the very same arguments, under a wrapper of its own.
+#[test]
+fn a_host_under_a_wrapper_runs_and_its_commands_are_still_refused() {
+    let f = quiet("host-wrapped");
+    beacon(&f, "beacon", "memory: session");
+    let probe = f.home.join("probe");
+    std::fs::create_dir_all(&probe).unwrap();
+    let bin = env!("CARGO_BIN_EXE_attend");
+    let script = format!(
+        "a='{bin}'; o='{out}'; env A=1 \"$a\" message send from-a-sensor 2> \"$o/send.err\"; echo $? > \"$o/send.code\"; \
+         mkdir \"$o/once\" 2> /dev/null || {{ echo '{{}}'; exit 0; }}; timeout 20 \"$a\" sensor host --session '{sid}' --cwd '{cwd}' > /dev/null 2> \"$o/host.err\"; echo $? > \"$o/host.code\"; echo '{{}}'",
+        out = probe.display(),
+        sid = f.sid,
+        cwd = f.origin,
+    );
+    f.sensor("probe", &format!("kind: command\ninterval: 1\nmin_interval: 1\nargv: [sh, -c, {}]\noutput: json\ntimeout: 30\n", serde_json::to_string(&script).unwrap()));
+    let err = f.home.join("wrapped.err");
+    let child = f
+        .command_from(Path::new("timeout"))
+        .args(["120", bin, "sensor", "host", "--session", &f.sid, "--cwd", &f.origin])
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(std::fs::File::create(&err).unwrap()))
+        .spawn()
+        .unwrap();
+    let host = Host { child, out: f.home.join("wrapped.out"), err };
+    host.wait_for("the beacon's signal", Duration::from_secs(20), || !from(&f, "beacon").is_empty());
+    host.wait_for("the probe", Duration::from_secs(30), || std::fs::read_to_string(probe.join("host.code")).is_ok_and(|c| !c.is_empty()));
+    let read = |n: &str| std::fs::read_to_string(probe.join(n)).unwrap_or_default();
+    for verb in ["send", "host"] {
+        assert_eq!(read(&format!("{verb}.code")).trim(), "3", "{verb}: {}", read(&format!("{verb}.err")));
+        assert!(read(&format!("{verb}.err")).contains("this attend was started by a sensor command, so it does not act as the session"), "{verb}: {}", read(&format!("{verb}.err")));
+    }
+}
+
 /// A session id no `to` tag can carry, or a directory that is not one, is
 /// refused before anything runs.
 #[test]
