@@ -300,6 +300,10 @@ const NPM_EXEC: &[&str] = &["exec", "x"];
 /// and every other form is `npm`, the build tool. Any other `comm` is kept
 /// as it is, so `ssh-agent` stays `ssh-agent` and is never counted as `ssh`.
 fn canonical_name(comm: &str) -> &str {
+    // macOS `ps` prints `comm` as the executable's path, and a login shell
+    // as `-zsh`; the name is the last path part without the dash.
+    let comm = if comm.contains(' ') { comm } else { comm.rsplit('/').next().unwrap_or(comm) };
+    let comm = comm.strip_prefix('-').unwrap_or(comm);
     if let Some((_, name)) = ALIASES.iter().find(|(alias, _)| *alias == comm) {
         return name;
     }
@@ -328,8 +332,10 @@ fn ps_rows(output: std::io::Result<Output>, columns: Columns) -> Option<Vec<Proc
 /// bounds the walk per process (ADR-137) and stops a pid cycle.
 const MAX_ANCESTRY: usize = 16;
 
-/// The shells the Bash tool and `run_in_background` start a command in.
-const SHELLS: &[&str] = &["bash", "zsh", "sh", "dash", "fish"];
+/// What the Bash tool and `run_in_background` start a command in, directly
+/// under Claude Code: a shell, or the sandbox that wraps one when Claude
+/// Code's sandbox is on (`bwrap` on Linux, `sandbox-exec` on macOS).
+const SHELLS: &[&str] = &["bash", "zsh", "sh", "dash", "fish", "bwrap", "sandbox-exec"];
 
 /// The process directly under `root` on `pid`'s chain, given `parent`,
 /// each pid's parent in one process table, within [`MAX_ANCESTRY`] hops:
@@ -1586,6 +1592,17 @@ mod tests {
         assert_eq!(canonical_name("g++"), "g++");
         assert_eq!(canonical_name("Web Content"), "Web Content");
         assert_eq!(canonical_name("slack-mcp-linux"), "slack-mcp-linux");
+    }
+
+    /// macOS prints `comm` as a path, and a login shell with a leading
+    /// dash; both read as the bare name.
+    #[test]
+    fn canonical_name_reads_a_path_and_a_login_shell() {
+        assert_eq!(canonical_name("/bin/zsh"), "zsh");
+        assert_eq!(canonical_name("-zsh"), "zsh");
+        assert_eq!(canonical_name("/Users/me/.cargo/bin/cargo"), "cargo");
+        assert_eq!(canonical_name("/usr/local/bin/claude"), "claude");
+        assert_eq!(canonical_name("npm exec /x/y"), "npx", "a title with spaces keeps its words");
     }
 
     /// A tool's companion binary keeps its own name: it is not the tool.
