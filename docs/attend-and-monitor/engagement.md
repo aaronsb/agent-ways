@@ -122,7 +122,7 @@ stateDiagram-v2
     class RelativeRefractory waiting
 ```
 
-**Absolute refractory** is a hard wall. For `absolute_refractory` seconds after any firing, the sensor cannot disclose at all — not even on a maximum-magnitude event. During this window the engine's `current_multiplier(tick)` returns `f64::INFINITY`, which `in_absolute_refractory(tick)` recognizes as "gate fully closed." Events still arrive and still accumulate, but none of them fire.
+**Absolute refractory** is a hard wall. For `absolute_refractory` seconds after any firing, the sensor cannot disclose at all — not even on a maximum-magnitude event. During this window the engine's `current_multiplier(tick)` returns `f64::INFINITY`, which `in_absolute_refractory(tick)` recognizes as "gate fully closed." Events that arrive in this window are dropped, except an event its sensor marks as skipping the refractory (below).
 
 **Relative refractory** is an exponentially-decaying multiplier on top of the base threshold. After the absolute window passes, the sensor's effective threshold is `base_threshold × current_multiplier(tick)`. The multiplier starts at `peak_multiplier` (2.25 at defaults) immediately after the burst and decays as `1 + (peak - 1) × 0.5^(delta / multiplier_half_life)`. Events that would normally fire at magnitude 2.0 now need ~4.5 magnitude to break through immediately after a burst, falling to ~3.2 at one half-life, back to baseline over 4–5 half-lives.
 
@@ -136,8 +136,7 @@ Attend's `SensorSlot` owns an `EngagementState` from `sensor-trait`. The runtime
 // During SensorSlot::poll()
 let tick = sensor_trait::epoch_secs();
 if slot.engagement.in_absolute_refractory(tick) {
-    // hard-blocked — don't even accumulate filtered events
-    return;
+    // hard-blocked: drop every event except one that skips the refractory
 }
 let multiplier = slot.engagement.current_multiplier(tick);
 // elevated gate during relative refractory, rest-gate (0.0) otherwise
@@ -184,6 +183,10 @@ engagement:
 Nothing is applied until you pass `--apply`, which writes only those two keys to your user-scope config through the settings writer, leaving comments and other keys as they were. Re-run it when your session rhythm changes.
 
 Tune's arithmetic is linear and the engine's decay is exponential. At load time `decay_per_minute: 0.0256` becomes `multiplier_half_life ≈ 1611` s (~27 min). The two shapes are close in the first minutes after a burst and diverge in the tail, where the exponential never quite returns to 1.0.
+
+## Events that skip the refractory
+
+A sensor can mark an event as skipping the refractory (`Sensor::skips_refractory`). The slot accumulates such an event during the absolute and the relative refractory alike, holds it only to the sensor's own emission threshold, and records no fire for a batch made only of such events. The processes sensor marks a build finishing this way: each build the session runs reports its result, so an agent that rebuilds within a minute of a failure still hears whether the rebuild passed. The governor below still paces such a batch; it can delay one but not drop it.
 
 ## Interaction with the disclosure governor
 

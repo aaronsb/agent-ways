@@ -79,23 +79,31 @@ fn build_marker_path() -> Option<PathBuf> {
     Some(base.join("attend").join("last-build-status"))
 }
 
+/// The magnitude of a build exit that did not fail. The sensor reports
+/// only the session's own builds, and one of them finishing is worth a
+/// line on its own: 3.0 meets the event lane's cut (attend's
+/// `EVENT_CUT`), which holds any batch under it unwritten.
+pub const BUILD_EXIT: f64 = 3.0;
+
+/// How close in time a build-status marker must be to an exit to describe
+/// it, in seconds.
+const MARKER_WINDOW_SECS: u64 = 60;
+
 /// Format a build-tool exit event, optionally enriched with success/
 /// failure context from a marker and with the hosted apps that exited
 /// with the tool. Pure function — the sensor's `poll()` delegates here so
 /// the enrichment arms get direct unit test coverage without needing a
 /// real filesystem.
 ///
-/// The success case sits at 2.5 rather than the issue spec's 2.0 on
-/// purpose: that's the same magnitude the sensor emits when no marker
-/// is present, so opting into the wrapper never *lowers* an exit's
-/// visibility. Failures stay at 3.5 to break through refractory gating.
+/// A success and an exit with no marker share [`BUILD_EXIT`], so opting
+/// into the wrapper never *lowers* an exit's visibility. A failure sits
+/// higher, at 3.5, so it is the louder of the two.
 fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64, hosted_exits: &[String]) -> (f64, String) {
-    const MARKER_WINDOW_SECS: u64 = 60;
     let matched = marker.filter(|m| marker_matches(m, app, now, MARKER_WINDOW_SECS));
     let (mag, status) = match matched {
-        Some(m) if m.code == 0 => (2.5, Some("success".to_string())),
+        Some(m) if m.code == 0 => (BUILD_EXIT, Some("success".to_string())),
         Some(m) => (3.5, Some(format!("failure, code {}", m.code))),
-        None => (2.5, None),
+        None => (BUILD_EXIT, None),
     };
     let exits = (!hosted_exits.is_empty()).then(|| format!("{} exited", hosted_exits.join(", ")));
     let notes: Vec<String> = status.into_iter().chain(exits).collect();
@@ -292,6 +300,10 @@ const NPM_EXEC: &[&str] = &["exec", "x"];
 /// and every other form is `npm`, the build tool. Any other `comm` is kept
 /// as it is, so `ssh-agent` stays `ssh-agent` and is never counted as `ssh`.
 fn canonical_name(comm: &str) -> &str {
+    // macOS `ps` prints `comm` as the executable's path, and a login shell
+    // as `-zsh`; the name is the last path part without the dash.
+    let comm = if comm.starts_with('/') { comm.rsplit('/').next().unwrap_or(comm) } else { comm };
+    let comm = comm.strip_prefix('-').unwrap_or(comm);
     if let Some((_, name)) = ALIASES.iter().find(|(alias, _)| *alias == comm) {
         return name;
     }
@@ -320,6 +332,38 @@ fn ps_rows(output: std::io::Result<Output>, columns: Columns) -> Option<Vec<Proc
 /// bounds the walk per process (ADR-137) and stops a pid cycle.
 const MAX_ANCESTRY: usize = 16;
 
+/// What the Bash tool and `run_in_background` start a command in, directly
+/// under Claude Code: a shell, or the sandbox that wraps one when Claude
+/// Code's sandbox is on (`bwrap` on Linux, `sandbox-exec` on macOS).
+const SHELLS: &[&str] = &["bash", "zsh", "sh", "dash", "fish", "bwrap", "sandbox-exec"];
+
+/// The process directly under `root` on `pid`'s chain, given `parent`,
+/// each pid's parent in one process table, within [`MAX_ANCESTRY`] hops:
+/// `pid` itself when `root` is its parent. `None` when `pid` does not run
+/// under `root`. A parent missing from the table ends the walk. So does
+/// another Claude Code session in `sessions`: a `claude -p` run from the
+/// session's shell is a session of its own, and its builds are its own.
+fn under_root(parent: &HashMap<u32, u32>, sessions: &HashSet<u32>, pid: u32, root: u32) -> Option<u32> {
+    let mut cur = pid;
+    for _ in 0..MAX_ANCESTRY {
+        let &ppid = parent.get(&cur)?;
+        if ppid == root {
+            return Some(cur);
+        }
+        if sessions.contains(&ppid) {
+            return None;
+        }
+        cur = ppid;
+    }
+    None
+}
+
+/// Whether `pid` runs under `root` (see [`under_root`]).
+#[cfg(test)]
+fn descends_from(parent: &HashMap<u32, u32>, sessions: &HashSet<u32>, pid: u32, root: u32) -> bool {
+    under_root(parent, sessions, pid, root).is_some()
+}
+
 /// A watched tool at the top of a build, such as one `npm test` run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Tool {
@@ -334,6 +378,7 @@ struct Tool {
     /// `node` under `npm run dev` or `docker` under `make up`.
     hosts: HashSet<String>,
 }
+
 
 /// One poll's view of the session's processes.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -352,6 +397,12 @@ struct HeldExit {
     hosts: Vec<u32>,
 }
 
+/// [`tally_under`] with no root, as the tests call it.
+#[cfg(test)]
+fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
+    tally_under(procs, None, is_relevant, is_watched)
+}
+
 /// Sort relevant processes into apps and tools. A watched tool is always
 /// relevant, whatever `is_relevant` says of it. A watched tool running
 /// under another watched tool is left out: `rustc` under `cargo` or `cc`
@@ -362,7 +413,17 @@ struct HeldExit {
 /// `make` is counted, and recorded as hosted by the tool above it. Every
 /// process is first given its [`canonical_name`]. `is_relevant` is given
 /// the `comm` as `ps` printed it and the canonical name, in that order.
-fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
+///
+/// The walk for a watched tool above a process stops at `root`, the
+/// session's Claude Code, when there is one: a `make` that started Claude
+/// Code does not make the session's own `cargo` a nested part of its
+/// build.
+fn tally_under(
+    procs: &[Proc],
+    root: Option<u32>,
+    is_relevant: impl Fn(&str, &str) -> bool,
+    is_watched: impl Fn(&str) -> bool,
+) -> Snapshot {
     let raw: Vec<&str> = procs.iter().map(|p| p.comm.as_str()).collect();
     let procs: Vec<Proc> = procs.iter().map(|p| Proc { comm: canonical_name(&p.comm).to_string(), ..p.clone() }).collect();
     let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
@@ -370,6 +431,9 @@ fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: i
         let mut tools = Vec::new();
         let mut ppid = p.ppid;
         for _ in 0..MAX_ANCESTRY {
+            if Some(ppid) == root {
+                break;
+            }
             let Some(parent) = by_pid.get(&ppid) else { break };
             if is_watched(&parent.comm) {
                 tools.push(parent.pid);
@@ -437,6 +501,14 @@ pub struct ProcessSensor {
     ps_has_lstart: bool,
     /// `ps` reads that have failed in a row.
     failed_reads: u32,
+    /// The session's root process, Claude Code. When set, a watched tool
+    /// is tracked only when it runs under this pid, so a build another
+    /// session or a terminal started is not reported to this session as
+    /// its own. Apps are presence, and stay machine-wide.
+    ///
+    /// References:
+    /// - ADR-113: the sensor tracks application presence.
+    root: Option<u32>,
 }
 
 /// Failed `ps` reads in a row after which the recovering poll establishes
@@ -464,7 +536,15 @@ impl ProcessSensor {
             watch,
             ps_has_lstart: true,
             failed_reads: 0,
+            root: None,
         }
+    }
+
+    /// Track only the watched tools that run under `root`, the session's
+    /// Claude Code. `None` tracks every watched tool the user runs.
+    pub fn with_root(mut self, root: Option<u32>) -> Self {
+        self.root = root;
+        self
     }
 
     /// Is `name` one of the processes we enrich on exit?
@@ -554,9 +634,30 @@ impl ProcessSensor {
         if failed > 0 {
             eprintln!("[attend] processes: ps reads again after {failed} failed poll(s)");
         }
-        let mut current = tally(&rows, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
+        let mut current = tally_under(&rows, self.root, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
         for (pid, tool) in current.tools.iter_mut() {
             tool.ticks = ticks(*pid);
+        }
+        if let Some(root) = self.root {
+            // A tool under the root is the session's. One the session
+            // started that is no longer under it, because its shell exited
+            // and it was adopted, is still the same run and stays tracked,
+            // so its finish is reported when it ends, not when it moves.
+            // The Bash tool runs each command in a shell under Claude Code;
+            // a tool under anything else Claude Code started, such as
+            // rust-analyzer's `cargo check` or an MCP server, is no build
+            // the session ran.
+            let parent: HashMap<u32, u32> = rows.iter().map(|p| (p.pid, p.ppid)).collect();
+            let name: HashMap<u32, &str> = rows.iter().map(|p| (p.pid, canonical_name(&p.comm))).collect();
+            let sessions: HashSet<u32> = name.iter().filter(|(_, n)| **n == "claude").map(|(pid, _)| *pid).collect();
+            let from_shell = |pid: u32| {
+                under_root(&parent, &sessions, pid, root).is_some_and(|top| name.get(&top).is_some_and(|n| SHELLS.contains(n)))
+            };
+            let prior = &self.prior_tools;
+            current.tools.retain(|pid, tool| {
+                from_shell(*pid)
+                    || prior.get(pid).is_some_and(|p| p.name == tool.name && same_start(p, tool))
+            });
         }
         if !self.baseline_established || failed >= REBASELINE_AFTER {
             eprintln!("[attend] processes: baseline established ({} apps: {})",
@@ -705,6 +806,13 @@ impl Sensor for ProcessSensor {
         2.0  // Need at least 2 process events before disclosing
     }
 
+    /// A build finishing in the session passes the refractory: each one is
+    /// a result the agent may be waiting on, such as a rebuild after a
+    /// failure.
+    fn skips_refractory(&self, description: &str) -> bool {
+        description.split_once(" finished").is_some_and(|(tool, _)| self.is_watched(tool))
+    }
+
     fn base_interval(&self) -> Duration {
         Duration::from_secs(30)  // Check every 30s at rest
     }
@@ -820,7 +928,7 @@ mod tests {
     #[test]
     fn format_build_exit_no_marker_falls_back_to_legacy_text() {
         let (mag, text) = format_build_exit("cargo", None, 1000, &[]);
-        assert_eq!(mag, 2.5);
+        assert_eq!(mag, BUILD_EXIT);
         assert!(text.starts_with("cargo finished. "));
         assert!(!text.contains("success"));
         assert!(!text.contains("failure"));
@@ -832,7 +940,7 @@ mod tests {
         // filter inside format_build_exit is the only gate.
         let m = BuildMarker { cmd: "cargo".into(), code: 0, ts: 100 };
         let (mag, text) = format_build_exit("cargo", Some(&m), 1000, &[]);
-        assert_eq!(mag, 2.5);
+        assert_eq!(mag, BUILD_EXIT);
         assert!(!text.contains("success"));
     }
 
@@ -841,7 +949,7 @@ mod tests {
         // Marker for a different command must not tag this exit.
         let m = BuildMarker { cmd: "rustc".into(), code: 0, ts: 1000 };
         let (mag, text) = format_build_exit("cargo", Some(&m), 1010, &[]);
-        assert_eq!(mag, 2.5);
+        assert_eq!(mag, BUILD_EXIT);
         assert!(!text.contains("success"));
     }
 
@@ -849,7 +957,7 @@ mod tests {
     fn format_build_exit_matching_success_marker() {
         let m = BuildMarker { cmd: "cargo".into(), code: 0, ts: 1000 };
         let (mag, text) = format_build_exit("cargo", Some(&m), 1010, &[]);
-        assert_eq!(mag, 2.5);
+        assert_eq!(mag, BUILD_EXIT);
         assert!(text.contains("(success)"));
     }
 
@@ -1486,6 +1594,18 @@ mod tests {
         assert_eq!(canonical_name("slack-mcp-linux"), "slack-mcp-linux");
     }
 
+    /// macOS prints `comm` as a path, and a login shell with a leading
+    /// dash; both read as the bare name.
+    #[test]
+    fn canonical_name_reads_a_path_and_a_login_shell() {
+        assert_eq!(canonical_name("/bin/zsh"), "zsh");
+        assert_eq!(canonical_name("-zsh"), "zsh");
+        assert_eq!(canonical_name("/Users/me/.cargo/bin/cargo"), "cargo");
+        assert_eq!(canonical_name("/usr/local/bin/claude"), "claude");
+        assert_eq!(canonical_name("/Users/Jane Doe/.cargo/bin/cargo"), "cargo", "a path with a space");
+        assert_eq!(canonical_name("npm exec /x/y"), "npx", "a title with spaces keeps its words");
+    }
+
     /// A tool's companion binary keeps its own name: it is not the tool.
     #[test]
     fn canonical_name_keeps_a_companion_binary_whole() {
@@ -1582,5 +1702,155 @@ mod tests {
         assert!(s.diff(snap(&["nvim", "docker"]), 0).is_empty());
         assert_eq!(texts(&s.diff(snap(&["docker"]), 0)), vec!["nvim exited"]);
         assert_eq!(texts(&s.diff(snap(&[]), 0)), vec!["docker exited"]);
+    }
+
+    /// With a root, a build that runs outside the session's process tree,
+    /// in another session or a terminal, is not reported; one under the
+    /// root still is, however deep its shell.
+    #[test]
+    fn a_rooted_sensor_reports_only_builds_under_its_root() {
+        const CLAUDE: (u32, u32, &str) = (100, 1, "claude");
+        const OTHER: (u32, u32, &str) = (200, 1, "claude");
+        let rows = |builds: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), CLAUDE, OTHER, (110, 100, "zsh"), (210, 200, "zsh")];
+            all.extend_from_slice(builds);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        assert!(s.observe(rows(&[]), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows(&[(211, 210, "cargo"), (111, 110, "timeout"), (112, 111, "make")]), no_ticks, &focus, 0).is_empty());
+        assert_eq!(s.prior_tools.keys().copied().collect::<Vec<_>>(), vec![112]);
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["make finished"]);
+
+        let mut unrooted = ProcessSensor::new();
+        unrooted.observe(rows(&[]), no_ticks, &focus, 0);
+        unrooted.observe(rows(&[(211, 210, "cargo")]), no_ticks, &focus, 0);
+        assert_eq!(texts(&unrooted.observe(rows(&[]), no_ticks, &focus, 0)), vec!["cargo finished"]);
+    }
+
+    /// A build the session started is still the session's after its shell
+    /// exits and init adopts it: moving is no finish, and its real exit is
+    /// reported once.
+    #[test]
+    fn a_rooted_build_adopted_by_init_reports_only_its_real_finish() {
+        const CLAUDE: (u32, u32, &str) = (100, 1, "claude");
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), CLAUDE, (110, 100, "zsh")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        assert!(s.observe(rows(&[]), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows(&[(120, 110, "cargo")]), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows(&[(120, 1, "cargo")]), no_ticks, &focus, 0).is_empty(), "adoption is no finish");
+        assert_eq!(s.prior_tools.keys().copied().collect::<Vec<_>>(), vec![120]);
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["cargo finished"]);
+    }
+
+    /// A watched tool above the session's Claude Code, such as a `make`
+    /// target that starts `claude`, does not make the session's builds a
+    /// nested part of its own.
+    #[test]
+    fn a_watched_tool_above_the_root_does_not_hide_the_session_s_builds() {
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), (90, 1, "make"), (100, 90, "claude"), (110, 100, "zsh")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        assert!(s.observe(rows(&[]), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows(&[(120, 110, "cargo")]), no_ticks, &focus, 0).is_empty());
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["cargo finished"]);
+    }
+
+    fn chain(len: u32) -> HashMap<u32, u32> {
+        // 1000 → 1001 → … : pid 1000 + i has parent 1000 + i + 1.
+        (0..len).map(|i| (1000 + i, 1000 + i + 1)).collect()
+    }
+
+    #[test]
+    fn descends_from_reaches_a_root_max_ancestry_hops_up_and_no_further() {
+        let parent = chain(MAX_ANCESTRY as u32 + 1);
+        assert!(descends_from(&parent, &HashSet::new(), 1000, 1000 + MAX_ANCESTRY as u32));
+        assert!(!descends_from(&parent, &HashSet::new(), 1000, 1000 + MAX_ANCESTRY as u32 + 1));
+    }
+
+    #[test]
+    fn descends_from_ends_on_a_pid_cycle_and_a_missing_parent() {
+        let cycle: HashMap<u32, u32> = [(5, 6), (6, 5)].into_iter().collect();
+        assert!(!descends_from(&cycle, &HashSet::new(), 5, 7));
+        assert!(!descends_from(&HashMap::new(), &HashSet::new(), 5, 7));
+    }
+
+    /// A build finishing skips the refractory; an app's start or exit, and
+    /// an unwatched name that happens to read "finished", do not.
+    #[test]
+    fn only_a_watched_build_finishing_skips_the_refractory() {
+        let s = ProcessSensor::new();
+        let (_, line) = format_build_exit("cargo", None, 0, &["node".to_string()]);
+        assert!(s.skips_refractory(&line));
+        assert!(s.skips_refractory(&format_build_exit("make", None, 0, &[]).1));
+        assert!(!s.skips_refractory("node exited"));
+        assert!(!s.skips_refractory("docker started"));
+        assert!(!s.skips_refractory("nvim finished"));
+    }
+
+    /// The rows of a session with a shell, plus `extra`, each `(pid, ppid,
+    /// name, seconds after T0 it started)`.
+    fn session_rows(extra: &[(u32, u32, &'static str, i64)]) -> Option<Vec<Proc>> {
+        let mut all = procs(&[(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "zsh")]);
+        all.extend(extra.iter().map(|&(pid, ppid, comm, after)| Proc { pid, ppid, start: Some(T0_SECS + after), comm: comm.into() }));
+        Some(all)
+    }
+
+    /// A lone short build that one poll caught early still reports its
+    /// finish: a 15 s `cargo test` seen once, 3 s after its start.
+    #[test]
+    fn a_lone_brief_build_reports_its_finish() {
+        let focus = no_focus();
+        let t0 = T0_SECS as u64;
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        s.observe(session_rows(&[]), no_ticks, &focus, t0);
+        s.observe(session_rows(&[(120, 110, "cargo", 0)]), no_ticks, &focus, t0 + 3);
+        assert_eq!(texts(&s.observe(session_rows(&[]), no_ticks, &focus, t0 + 33)), vec!["cargo finished"]);
+    }
+
+    /// A `claude -p` run from the session's shell is a session of its own:
+    /// its builds are not this session's.
+    #[test]
+    fn a_build_under_a_nested_claude_session_is_not_the_session_s() {
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "zsh"), (150, 110, "claude"), (160, 150, "bash")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        s.observe(rows(&[]), no_ticks, &focus, 0);
+        s.observe(rows(&[(170, 160, "cargo"), (180, 110, "make")]), no_ticks, &focus, 0);
+        assert_eq!(s.prior_tools.keys().copied().collect::<Vec<_>>(), vec![180]);
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["make finished"]);
+    }
+
+    /// A build counts only when it runs from a shell under the session's
+    /// Claude Code, as the Bash tool starts it. One under anything else
+    /// Claude Code started, such as rust-analyzer's `cargo check` on a
+    /// save, or a tool Claude Code started directly, is not the session's.
+    #[test]
+    fn only_a_build_from_a_shell_under_the_session_counts() {
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "bash"), (120, 100, "rust-analyzer")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        s.observe(rows(&[]), no_ticks, &focus, 0);
+        s.observe(rows(&[(121, 120, "cargo"), (130, 100, "make"), (111, 110, "cargo")]), no_ticks, &focus, 0);
+        assert_eq!(s.prior_tools.keys().copied().collect::<Vec<_>>(), vec![111]);
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["cargo finished"]);
     }
 }

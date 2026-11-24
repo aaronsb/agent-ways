@@ -722,6 +722,13 @@ impl Sensor for FileSensor {
         self.release(description);
     }
 
+    fn skips_refractory(&self, description: &str) -> bool {
+        match &self.poller {
+            Poller::Crate(inner) => inner.skips_refractory(description),
+            Poller::Spec(_) => false,
+        }
+    }
+
     fn take_spent(&mut self) -> bool {
         std::mem::take(&mut self.newly_spent)
     }

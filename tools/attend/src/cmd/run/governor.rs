@@ -103,6 +103,13 @@ impl DisclosureGovernor {
         true
     }
 
+    /// Forget the last disclosure, as if its cooldown had run out, so a
+    /// test need not wait it out.
+    #[cfg(test)]
+    pub(super) fn expire_cooldown(&mut self) {
+        self.last_disclosure = None;
+    }
+
     pub(super) fn record_disclosure(&mut self) {
         self.last_disclosure = Some(Instant::now());
         self.window_disclosures += 1;

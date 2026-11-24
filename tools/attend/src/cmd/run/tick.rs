@@ -364,7 +364,10 @@ fn try_disclose(
         if record_engagement {
             let tick = sensor_trait::epoch_secs();
             for &i in ready {
-                if slots[i].accumulator.magnitude >= 3.0 {
+                // A batch made only of events that skip the refractory
+                // starts none, so a build finishing does not silence the
+                // sensor's next build.
+                if slots[i].accumulator.magnitude >= 3.0 && !slots[i].accumulator.only_exempt() {
                     slots[i].engagement.record_fire(tick, 1.0);
                 }
             }
