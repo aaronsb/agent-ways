@@ -16,7 +16,9 @@
 # <cols>x<rows>/<scenario>.png and .txt. Nothing committed is written; read
 # each image, nothing here compares pixels. SIZES overrides the sizes, e.g.
 # SIZES="100x30". FONT overrides the font (default JetBrains Mono, which
-# has the Nerd Font fallback for the round lozenge caps).
+# has the Nerd Font fallback for the round lozenge caps). THEME sets the
+# chat's theme (default nord). RENDER=kitty paints each final frame in
+# kitty instead (tools/tui-harness/kitty-render.sh), as the docs' shots are.
 #
 # Each step waits on the screen, not on the clock, except pause:. After a key or a click
 # the script polls the pane's text until two captures agree, and wait:TEXT
@@ -258,6 +260,8 @@ header-long  | long  | wait:keeps_the_time
 header-human | own   | wait:watching_the
 header-pick  | base  | wait:signing_off click:signing_off
 header-chan  | base  | wait:Agents M-2 wait:rollout_is_green
+slash        | base  | wait:Agents text:/channels_ wait:list_create_describe
+fanout       | base  | wait:Agents text:@ Tab text:_@ Tab Tab text:_can_one_of_you_take_the_staging_check? wait:staging_check?
 quit-entry   | base  | wait:Agents text:half C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:Quit_and_discard
 too-long     | base  | wait:Agents bigpaste:65537 wait:xxxxxxxxxx Enter wait:over_attend's_limit
 focus-compose | base  | wait:Agents wait:Enter_send
@@ -469,7 +473,7 @@ YAML
     msg "$sig/@relic" r2 86000 "claude:$B" "$F/work/beta" "its folder stayed"
   fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
-  printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
+  printf 'theme:\n  active: %s\n  shape: %s\n' "${THEME:-nord}" "$shape" > "$F/config/agent-ways/config.yaml"
   [ "$1" = wait ] || [ "$1" = kept ] || printf 'chat:\n  send_delay: 0\n' > "$F/config/attend/config.yaml"
   if [ "$1" = kept ]; then
     # What an earlier chat kept: a message held for #retired, a channel
@@ -672,7 +676,12 @@ while IFS='|' read -r name kind steps; do
       continue
     fi
     $TH text "$s" >"$out/$name.txt"
-    HOME=$REALHOME $TH shot "$s" --out "$out/$name.png" >/dev/null
+    if [ "${RENDER:-}" = kitty ]; then
+      $TH text "$s" --ansi >"$out/$name.ansi"
+      "$REPO/tools/tui-harness/kitty-render.sh" "$out/$name.ansi" "$c" "$r" "$out/$name.png" "${THEME:-nord}" >/dev/null
+    else
+      HOME=$REALHOME $TH shot "$s" --out "$out/$name.png" >/dev/null
+    fi
     $TH down "$s" >/dev/null
     SESSION=
     echo "$out/$name.png"

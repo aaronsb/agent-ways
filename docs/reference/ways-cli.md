@@ -85,9 +85,34 @@ ways settings theme delete glacier
 
 ### Settings screens
 
-Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors`, `mod` (a node per shipped mod: its shipped version and state in a word, a row per enabled target, its settings, and the `ways manage mod` commands as actions) or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
+Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors`, `mod` or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
 
-![the matching tab with one change pending](../images/ways/settings-matching.png)
+| Tab | What you do there |
+|---|---|
+| 1 ways | Switch a domain or a single way off, for every project or for this one, and read each way's file, vocabulary and patterns. |
+| 2 matching | Set how close a prompt must come before a way fires: the semantic and keyword floors, the near-miss margin, the refire back-off. |
+| 3 gate | Choose the relevance judge's engine and mode, set each provider profile's model, threshold and timeouts, store keys, and see whether the judge is ready. |
+| 4 install | List the Claude Code config directories agent-ways is active in, add one, or preview its plan. |
+| 5 attend | Set attend's rate limits, how a sensor quiets after a burst, the cleanup sweep, the chat, and the projects whose own sensors may run. |
+| 6 sensors | See every sensor, shipped or your own, with its kind, source, state, interval and lane, and what to run when one is degraded. |
+| 7 mod | See each Claude Code mod agent-ways ships: its version and state, a row per target, its settings, and check, install, uninstall and repair as actions. |
+| 8 theme | Pick one of the thirteen bundled themes, or the terminal's own colours. The arrows preview a theme over the whole screen before Enter uses it. |
+
+Each screenshot below shows the tab in a different theme.
+
+![the ways tab in the terra theme: the shipped domains, documentation open with a switch per way, and the selected way's file, vocabulary and patterns on the right](../images/ways/settings-ways.png)
+
+![the matching tab in the nord theme, with one change pending](../images/ways/settings-matching.png)
+
+![the install tab in the paper theme, with its action menu open on the targets](../images/ways/settings-install.png)
+
+![the attend tab in the catppuccin-mocha theme, the governor's rate limits open](../images/ways/settings-attend.png)
+
+![the sensors tab in the dracula theme: the shipped sensors and two of the user's, the selected MCP sensor degraded until it is probed at a terminal](../images/ways/settings-sensors.png)
+
+![the mod tab in the maximum-claude theme: attend and ways-judge converged on ~/.claude, attend's settings, and its check, install, uninstall and repair actions](../images/ways/settings-mod.png)
+
+![the theme tab: agent-ways in use, the cursor on crystal-mountain, which the whole screen previews](../images/ways/settings-theme.png)
 
 Each tab is a tree of settings on the left and the selected key's detail on the right: what it does, its value, type, default, the layer it comes from and the file it writes. An edit is queued, not written. The tab badge and footer count what is pending, and nothing reaches a file until the review applies it.
 
@@ -126,7 +151,7 @@ A refused name keeps the prompt open with the reason in the bar. Theme files are
 
 **The model picker.** Enter on a choice key opens a picker. `gate.profiles.<profile>.model` offers the models the provider serves once [`ways agent models`](#ways-agent) has fetched and cached the list. Until then the key takes any model id as text.
 
-![the model picker on gate.profiles.anthropic.model](../images/ways/settings-model-picker.png)
+![the model picker on gate.profiles.anthropic.model, in the tokyonight-night theme](../images/ways/settings-model-picker.png)
 
 ## `ways agent`
 
@@ -303,7 +328,11 @@ Liveness comes from `stat` alone, never a read of the transcript. The list stats
 
 #### Timeline tab
 
-![the timeline at its last frame, matched view: six agents and every outcome](../images/ways/session-timeline.png)
+![the timeline at its last frame in the miami-nights theme, matched view: six agents and every outcome](../images/ways/session-timeline.png)
+
+`ways session live` opens the same tab on the session writing now. It follows the newest frame, and the header reads `● LIVE` with the age of the last event:
+
+![ways session live following a session, its newest frame seconds old](../images/ways/session-live.png)
 
 The header gives the session, the judge's calls and the tokens they used (`judge ×6 · 11.1K tokens`), the project, and for the frame shown its epoch, the context window, the ways in the table, the compaction window and the time. The scrubber under it spans the session's frames and compaction windows; a `⊝` on it marks a frame where the subagent switch held ways back.
 

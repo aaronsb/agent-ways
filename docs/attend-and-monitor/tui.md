@@ -2,7 +2,7 @@
 
 `attend chat` opens attend-chat, a terminal screen that puts a human on the same message bus the Claude sessions use. The human reads every channel the bus carries, addresses agents by name, and runs channel commands, all through the signal files `attend message send` and `attend message inbox` use. The decision is ADR-120. ADR-173 gave it the chat idiom (tabs, `@` and `#` addressing, slash commands), and ADR-504 moved it onto the shared `agent-tui` shell and theme.
 
-![attend-chat on the operator view at 80x25, the compose box focused](../images/attend/attend-chat-operator-view.png)
+![attend-chat on the operator view at 150x40 in the catppuccin-mocha theme, the compose box focused](../images/attend/attend-chat-operator-view.png)
 
 ## Starting it
 
@@ -43,11 +43,11 @@ What Enter does depends on how the line starts:
 
 The run of leading recipients can mix `@` and `#`. Every recipient is resolved before anything is written, and one bad address rejects the whole line so it can be fixed and sent again. A send to a channel with no live member other than the sender is rejected the same way.
 
-![a fan-out to two agents at 120x32; the destination flag shows both recipients](../images/attend/attend-chat-fanout.png)
+![a fan-out to two agents, completed with Tab; the destination flag shows both recipients](../images/attend/attend-chat-fanout.png)
 
 On a channel tab the destination flag shows the channel, so an unaddressed line is visibly scoped before Enter is pressed:
 
-![the #deploy tab with a draft; the flag reads #deploy](../images/attend/attend-chat-channel.png)
+![the #deploy tab in the gruvbox-dark theme; the flag reads #deploy](../images/attend/attend-chat-channel.png)
 
 `#123` inside a message body is plain text. The receiving agent resolves an issue reference against its own repository.
 
@@ -121,6 +121,8 @@ Where the terminal does not speak the kitty keyboard protocol, Ctrl-3 arrives as
 **Joining after an invitation.** An agent that joins a channel late is not handed the channel's history: messages older than two minutes are marked read, and the join says how many. A join that answers an invitation (`/invite`, or Invite agent) is the exception: the invitee's `attend channel join` keeps the channel's newest 50 messages to read, as a briefing, and says how many older ones it held back. The invitation is spent by that join. Add agent hands the agent the same newest 50 with no join, and spends any invitation it had there.
 
 **Settings.** `attend.chat.tabs.jump` (auto, ctrl, alt, both, none), `attend.chat.tabs.menu_on_repeat`, `attend.chat.tabs.focus_key` (both, f2, ctrl-t, none), `attend.chat.mouse`, `attend.chat.sidebar_key` (f3, ctrl-b, none; Ctrl+B is tmux's prefix, and none keeps the column shown) and `attend.chat.send_delay` (seconds a message waits before it is sent, 0 to 60, 5 by default, 0 sending at once) live in attend's user file. `auto` and `both` for the jump are Alt and a digit everywhere and Ctrl and a digit as well under the kitty protocol; `ctrl` is Ctrl and a digit under the protocol only. `/config` lists them with the layer each comes from, and `/config <key> <value>` sets one; `ways settings` reads and sets the same keys.
+
+![the Settings window from the common menu, in the terra theme: every chat setting with its value and layer](../images/attend/attend-chat-settings.png)
 
 To see whether a terminal speaks the kitty keyboard protocol, run `printf '\e[?u\e[c'; read -rsd c -t1 r; printf '%q\n' "$r"` in it: a reply holding `[?` followed by digits and `u` means it does; one holding only the `c` answer means it does not.
 
