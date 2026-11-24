@@ -319,6 +319,25 @@ fn a_dm_read_in_a_dm_view_shown_at_the_quit_stays_read() {
     assert!(marked(&mut next), "a later DM still marks the agent");
 }
 
+/// Showing an agent's DM view keeps its mark at once: a quit before any
+/// refresh or key still leaves the DM read after the restart.
+#[test]
+fn a_dm_view_shown_keeps_its_mark_before_any_refresh() {
+    let dir = state("dm-view-at-once");
+    Last { tab: channel("kept"), member: true }.save(&last_tab::path(&dir)).unwrap();
+    let mark = now() - 3600;
+    Hidden::hide_in(&last_tab::shown_path(&dir), &Tab::Merged, (mark, 0, 0)).unwrap();
+    let mut first = chat(&dir).heartbeat(false).dry_run(true);
+    first.push(dm("d-1", mark + 60));
+    assert!(marked(&mut first), "the DM came after the operator view's mark");
+    open_agent_dms(&mut first);
+    drop(first);
+    let mut next = chat(&dir).heartbeat(false).dry_run(true);
+    assert_eq!(*next.foreground(), channel("kept"));
+    next.push(dm("d-1", mark + 60));
+    assert!(!marked(&mut next), "still read after the restart");
+}
+
 /// The operator view's mark marks the agents' DM-view marks it covers
 /// as no longer needed, and the file drops them.
 #[test]

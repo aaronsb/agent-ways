@@ -614,6 +614,7 @@ impl ChatPane {
             let left = std::mem::replace(&mut self.foreground, t);
             self.note_shown(&left);
             self.record_tab();
+            self.keep_dm_view_shown();
             self.feed = FeedState::default();
             self.invalidate();
             if self.world.is_some() {

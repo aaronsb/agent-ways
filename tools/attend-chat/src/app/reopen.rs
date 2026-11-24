@@ -75,9 +75,10 @@ impl ChatPane {
 
     /// Keep the mark of the DM view shown, an agent's DM view or its own,
     /// while it is still shown: a chat that quits or is killed there never
-    /// leaves it, so no change of tab would keep it. Called on each read of
-    /// the world (every Enter, every refresh, a new sender), it writes only
-    /// when the view holds a DM past the mark in memory.
+    /// leaves it, so no change of tab would keep it. Called as the view is
+    /// shown and on each read of the world (every Enter, every refresh, a
+    /// new sender), it writes only when the view holds a DM past the mark
+    /// in memory.
     pub(super) fn keep_dm_view_shown(&mut self) {
         if self.state_dir.is_none() || !matches!(self.foreground, Tab::Dm(_) | Tab::Review(_)) {
             return;
