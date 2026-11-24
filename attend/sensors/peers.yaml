@@ -2,7 +2,9 @@
 # $XDG_CONFIG_HOME/attend/sensors/ or a project's .claude/attend/sensors/
 # overrides any field here.
 #
-# peers reports Claude Code sessions starting, leaving and changing state.
+# peers reports Claude Code sessions starting and leaving, and one in the
+# same project nearing compaction. It does not report a session turning
+# between working and waiting, which happens every turn.
 # Presence is no one's words, so it rides the event lane. It reads no
 # messages: the attend mod's drain carries them.
 spec: 1
