@@ -295,6 +295,30 @@ fn a_dm_read_in_its_dm_view_stays_read_after_a_restart() {
     assert!(marked(&mut next), "a later DM still marks the agent");
 }
 
+/// A chat that quits, or is killed, while an agent's DM view is shown has
+/// never left the view, so no change of tab kept its mark. The next read of
+/// the world keeps it: the DM read there stays read after the restart.
+#[test]
+fn a_dm_read_in_a_dm_view_shown_at_the_quit_stays_read() {
+    let dir = state("dm-view-quit");
+    Last { tab: channel("kept"), member: true }.save(&last_tab::path(&dir)).unwrap();
+    let mark = now() - 3600;
+    Hidden::hide_in(&last_tab::shown_path(&dir), &Tab::Merged, (mark, 0, 0)).unwrap();
+    let mut first = chat(&dir).heartbeat(false).dry_run(true);
+    first.push(dm("d-1", mark + 60));
+    assert!(marked(&mut first), "the DM came after the operator view's mark");
+    open_agent_dms(&mut first);
+    // The idle refresh, every few seconds while the chat runs.
+    first.refresh();
+    drop(first);
+    let mut next = chat(&dir).heartbeat(false).dry_run(true);
+    assert_eq!(*next.foreground(), channel("kept"));
+    next.push(dm("d-1", mark + 60));
+    assert!(!marked(&mut next), "still read after the restart");
+    next.push(dm("d-2", mark + 120));
+    assert!(marked(&mut next), "a later DM still marks the agent");
+}
+
 /// The operator view's mark marks the agents' DM-view marks it covers
 /// as no longer needed, and the file drops them.
 #[test]

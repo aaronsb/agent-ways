@@ -56,7 +56,12 @@ fn key(tab: &Tab) -> String {
 impl Hidden {
     /// Whether `tab` hides `sig`: it is at or before the tab's watermark.
     pub fn hides(&self, tab: &Tab, sig: &Signal) -> bool {
-        self.marks.get(&key(tab)).is_some_and(|mark| order(sig) <= *mark)
+        self.covers(tab, order(sig))
+    }
+
+    /// Whether `tab`'s watermark is at or past `at`.
+    pub fn covers(&self, tab: &Tab, at: Order) -> bool {
+        self.marks.get(&key(tab)).is_some_and(|mark| at <= *mark)
     }
 
     /// Hide in `tab` every message at or before `upto`. A watermark only

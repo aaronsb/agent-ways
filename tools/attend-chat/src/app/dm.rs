@@ -86,10 +86,22 @@ impl ChatPane {
     /// (Review DMs), the agent's. Both views of an agent keep one mark, its
     /// DM view's.
     pub(super) fn note_shown(&mut self, tab: &Tab) {
+        let Some((mark, newest)) = self.shows_up_to(tab) else { return };
+        if let Some(n) = newest {
+            self.shown.hide(&mark, n);
+        }
+        self.keep_shown(&mark, newest);
+    }
+
+    /// The mark `tab` keeps and the newest DM to the operator it holds: the
+    /// operator view's all of them, an agent's DM view's or its own the
+    /// agent's, under its DM view's mark. `None` for a channel, which shows
+    /// no DMs.
+    pub(super) fn shows_up_to(&self, tab: &Tab) -> Option<(Tab, Option<hidden::Order>)> {
         let (mark, from) = match tab {
             Tab::Merged => (Tab::Merged, None),
             Tab::Dm(m) | Tab::Review(m) => (Tab::Dm(m.clone()), Some(m.as_str())),
-            Tab::Channel(_) => return,
+            Tab::Channel(_) => return None,
         };
         let newest = self
             .signals
@@ -97,10 +109,7 @@ impl ChatPane {
             .filter(|s| s.channel == Channel::Person && from.is_none_or(|m| s.sender_member().as_deref() == Some(m)))
             .map(hidden::order)
             .max();
-        if let Some(n) = newest {
-            self.shown.hide(&mark, n);
-        }
-        self.keep_shown(&mark, newest);
+        Some((mark, newest))
     }
 
     /// The agents, by membership id, with a DM to the operator newer than

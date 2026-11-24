@@ -580,8 +580,10 @@ impl ChatPane {
             self.remember_dm_names();
             self.refocus();
             // A join since the last read, the chat's own or another's,
-            // marks the operator a member of the channel shown.
+            // marks the operator a member of the channel shown; a DM view
+            // shown keeps the mark of the DMs it holds.
             self.record_tab();
+            self.keep_dm_view_shown();
         }
         self.world.as_ref().expect("just built")
     }
