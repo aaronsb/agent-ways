@@ -317,7 +317,9 @@ struct LiveSession {
 }
 
 /// The live sessions other than this one, each named as `attend peer list`
-/// shows it, a session with no row by its nickname and short id.
+/// shows it, a session with no row by its nickname and short id. The short
+/// ids are told apart across the same set the peer list uses: the peers
+/// and, when it has no row, this session.
 fn live_sessions() -> Vec<LiveSession> {
     let registry = attend_instances::Registry::new();
     let listed: Vec<(String, String, Option<String>)> = list_peers()
@@ -327,8 +329,13 @@ fn live_sessions() -> Vec<LiveSession> {
             (id, cwd, instance)
         })
         .collect();
+    let me = current_session();
+    let me_rowless = (me.session_resolved && registry.lookup(&me.origin_path, &me.session_id).is_none())
+        .then(|| (me.session_id.clone(), me.origin_path.clone()));
     let rowless = |dir: &str| -> Vec<&str> {
-        listed.iter().filter(|(_, c, inst)| inst.is_none() && attend_presence::session::same_dir(c, dir)).map(|(id, ..)| id.as_str()).collect()
+        let peers = listed.iter().filter(|(_, _, inst)| inst.is_none()).map(|(id, c, _)| (id.as_str(), c.as_str()));
+        let mine = me_rowless.iter().map(|(id, c)| (id.as_str(), c.as_str()));
+        peers.chain(mine).filter(|(_, c)| attend_presence::session::same_dir(c, dir)).map(|(id, _)| id).collect()
     };
     listed
         .iter()
@@ -337,6 +344,14 @@ fn live_sessions() -> Vec<LiveSession> {
             LiveSession { id: id.clone(), cwd: cwd.clone(), nickname, name }
         })
         .collect()
+}
+
+/// Whether `to` names a session shown as `name`, ignoring ASCII case. A `.`
+/// stands for the id mark of a session with no row, which most shells
+/// cannot type: `Urban.3fa2` is `Urban·3fa2`. A hyphen does not, since it
+/// marks an instance suffix.
+fn names_match(name: &str, to: &str) -> bool {
+    name.eq_ignore_ascii_case(to) || name.eq_ignore_ascii_case(&to.replacen('.', &attend_instances::ID_MARK.to_string(), 1))
 }
 
 /// The people attend knows by member id (ADR-170): the person at this
@@ -372,7 +387,7 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     //
     // References:
     // - ADR-129, amendment of 2026-11-24: addressing.
-    if let Some(name) = crate::util::you_are(me).filter(|name| name.eq_ignore_ascii_case(to) || me.session_id == to) {
+    if let Some(name) = crate::util::you_are(me).filter(|name| names_match(name, to) || me.session_id == to) {
         return Err(SendError::ToSelf { name });
     }
     let sessions = live_sessions();
@@ -388,7 +403,7 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     //
     // References:
     // - ADR-129, amendment of 2026-11-24: addressing.
-    let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| s.name.eq_ignore_ascii_case(to)).collect();
+    let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| names_match(&s.name, to)).collect();
     let matched = if by_name.is_empty() {
         sessions.iter().filter(|s| s.nickname.eq_ignore_ascii_case(to)).collect()
     } else {

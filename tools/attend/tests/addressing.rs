@@ -274,6 +274,40 @@ fn a_rowless_session_is_reached_by_its_display_name() {
     assert_eq!(read(&held.tray(&f), &sent.id).0.as_deref(), Some("peer-held"));
 }
 
+/// The sender and a peer, neither with a registry row, share the first
+/// four characters of their ids. The peer list tells them apart with a
+/// longer id, counting the sender, and `--to` takes the name it shows.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_rowless_peer_whose_id_collides_with_the_senders_is_reached_by_its_listed_name() {
+    let f = Fixture::new("addr-collide");
+    f.set_session_id("3fa2aaaa-0000-4000-8000-000000000001");
+    let _env = enter(&f);
+    let peer = Peer::start(&f, "3fa2bbbb-0000-4000-8000-000000000002", "proj");
+    assert_eq!(peer.cwd, f.origin);
+    let name = agent_identity::Identity::for_cwd(&f.origin, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let listed = attend::verbs::peers::peers();
+    let shown: Vec<&str> = listed.peers.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(shown, [format!("{name}·3fa2b")], "the peer list counts the sender");
+    let sent = send(Some(&format!("{name}·3fa2b")), None, "the listed name").unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(read(&peer.tray(&f), &sent.id).0.as_deref(), Some("3fa2bbbb-0000-4000-8000-000000000002"));
+}
+
+/// `·` is hard to type in a shell, so a `.` in its place names the same
+/// session: `--to Nick.3fa2` is `--to Nick·3fa2`.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_dot_stands_for_the_id_mark_in_a_rowless_name() {
+    let f = Fixture::new("addr-dot");
+    let _env = enter(&f);
+    let rowless = Peer::start(&f, "3fa2c0de-0000-4000-8000-000000000001", "twin");
+    let name = agent_identity::Identity::for_cwd(&rowless.cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let sent = send(Some(&format!("{name}.3fa2")), None, "typed with a dot").unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(read(&rowless.tray(&f), &sent.id).0.as_deref(), Some("3fa2c0de-0000-4000-8000-000000000001"));
+}
+
 /// A name that is no live session and no known person is refused.
 #[test]
 fn an_unknown_name_is_refused() {
