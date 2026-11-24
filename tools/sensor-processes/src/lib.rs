@@ -85,6 +85,10 @@ fn build_marker_path() -> Option<PathBuf> {
 /// `EVENT_CUT`), which holds any batch under it unwritten.
 pub const BUILD_EXIT: f64 = 3.0;
 
+/// How close in time a build-status marker must be to an exit to describe
+/// it, in seconds.
+const MARKER_WINDOW_SECS: u64 = 60;
+
 /// Format a build-tool exit event, optionally enriched with success/
 /// failure context from a marker and with the hosted apps that exited
 /// with the tool. Pure function — the sensor's `poll()` delegates here so
@@ -95,7 +99,6 @@ pub const BUILD_EXIT: f64 = 3.0;
 /// into the wrapper never *lowers* an exit's visibility. A failure sits
 /// higher, at 3.5, so it is the louder of the two.
 fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64, hosted_exits: &[String]) -> (f64, String) {
-    const MARKER_WINDOW_SECS: u64 = 60;
     let matched = marker.filter(|m| marker_matches(m, app, now, MARKER_WINDOW_SECS));
     let (mag, status) = match matched {
         Some(m) if m.code == 0 => (BUILD_EXIT, Some("success".to_string())),
@@ -366,7 +369,8 @@ struct Tool {
 /// poll sees it to count as a build. A compiler that a script runs many
 /// times, such as `cc` under `./configure`, lives well under a second,
 /// and a poll that happens to catch one would report a finish for each.
-/// Such a run reports nothing.
+/// Such a run reports nothing, unless the build-status marker records
+/// that it failed.
 const MIN_BUILD_SECS: i64 = 5;
 
 /// Whether `tool` was seen too soon after its start to count as a build.
@@ -543,6 +547,13 @@ impl ProcessSensor {
         self
     }
 
+    /// Whether the build-status marker records a failure of `name` within
+    /// its correlation window: the one way the sensor learns that a brief
+    /// run failed, so a build that fails fast still reports.
+    fn marked_failed(&self, name: &str, now: u64) -> bool {
+        self.last_marker.as_ref().is_some_and(|m| m.code != 0 && marker_matches(m, name, now, MARKER_WINDOW_SECS))
+    }
+
     /// Is `name` one of the processes we enrich on exit?
     fn is_watched(&self, name: &str) -> bool {
         self.watch.iter().any(|w| w == name)
@@ -706,7 +717,7 @@ impl ProcessSensor {
         // hosted it, the one with the lowest pid.
         let mut named = vec![false; exits.len()];
         for (pid, tool) in finished {
-            if brief(tool) {
+            if brief(tool) && !self.marked_failed(&tool.name, now) {
                 continue;
             }
             let mut with: Vec<String> = Vec::new();
@@ -1815,5 +1826,29 @@ mod tests {
         s.observe(rows(&[(170, 160, "cargo"), (180, 110, "make")]), no_ticks, &focus, 0);
         assert_eq!(s.prior_tools.keys().copied().collect::<Vec<_>>(), vec![180]);
         assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["make finished"]);
+    }
+
+    /// A brief run reports its finish when the build-status marker says it
+    /// failed: a build that fails fast in the background is still heard.
+    #[test]
+    fn a_brief_run_the_marker_records_as_failed_still_reports() {
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "zsh")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let t0 = T0_SECS as u64;
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        s.observe(rows(&[]), no_ticks, &focus, t0);
+        s.observe(rows(&[(120, 110, "cargo")]), no_ticks, &focus, t0 + 1);
+        s.last_marker = Some(BuildMarker { cmd: "cargo".into(), code: 101, ts: t0 + 2 });
+        let obs = s.observe(rows(&[]), no_ticks, &focus, t0 + 6);
+        assert_eq!(texts(&obs), vec!["cargo finished (failure, code 101)"]);
+        let mut later = rows(&[(130, 110, "cargo")]).unwrap();
+        later.last_mut().unwrap().start = Some(T0_SECS + 30);
+        s.observe(Some(later), no_ticks, &focus, t0 + 31);
+        s.last_marker = Some(BuildMarker { cmd: "cargo".into(), code: 0, ts: t0 + 32 });
+        assert!(s.observe(rows(&[]), no_ticks, &focus, t0 + 36).is_empty(), "a brief success still reports nothing");
     }
 }
