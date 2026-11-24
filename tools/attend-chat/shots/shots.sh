@@ -115,7 +115,8 @@ sweep
 #   signal:SIG     kill -SIG to the chat (Linux: found by its fixture HOME)
 #   down:          the session killed, as a closed tmux pane: tmux sends
 #                  SIGHUP and closes the pty; nothing is captured after
-#   chat:          the chat started from the shell an hup-* scenario opens
+#   chat:          the chat started from the shell an hup-bash or restart-*
+#                  scenario opens
 #   sent:TEXT      until a post in #open's room holds TEXT
 #   kept:TEXT      until a file in the unsent directory holds TEXT
 #   chmod:MODE     the unsent directory's mode set to MODE, made first if absent
@@ -137,6 +138,12 @@ sweep
 # draft. wait-kept opens on what an earlier
 # chat kept (the kept fixture): the draft in alpha's DM view, and the
 # message held for a channel since gone as an entry, not sent.
+# A restart-* scenario runs the chat from a shell, as hup-bash does, quits
+# it with Ctrl-C and starts it again: restart-chan reopens #deploy, the
+# channel shown when it quit; restart-gone dissolves #deploy from the shell
+# between the two runs, and restart-left has the operator leave #deploy
+# (the own fixture) before the quit, so each opens #open instead. F2 then
+# marks the tab shown with ▸.
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
@@ -336,6 +343,9 @@ strip-cut    | full  | wait:Agents M-4 wait:every_agent
 strip-16     | full16 | wait:Agents M-4 wait:every_agent
 strip-narrow | full  | wait:Agents M-7 wait:long_names resize:40 gone:Agents wait:invited
 strip-narrow16 | full16 | wait:Agents M-7 wait:long_names resize:40 gone:Agents wait:invited
+restart-chan | base  | wait:$ chat: wait:Agents M-2 wait:rollout_coordination C-c gone:Agents chat: wait:Agents F2 wait:▸#deploy
+restart-gone | base  | wait:$ chat: wait:Agents M-2 wait:rollout_coordination C-c gone:Agents text:attend_channel_dissolve_deploy Enter chat: wait:Agents F2 wait:▸#open
+restart-left | own   | wait:$ chat: wait:Agents_3/4 M-2 wait:rollout_coordination text:/leave Enter wait:left_#deploy C-c gone:Agents chat: wait:Agents F2 wait:▸#open
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
@@ -663,7 +673,7 @@ while IFS='|' read -r name kind steps; do
     s=ac-$$-$name
     SESSION=$s DOWNED= CHAT_PID=
     LAUNCH=("$BIN/attend-chat" ${DEPTH[@]+"${DEPTH[@]}"})
-    [ "$name" != hup-bash ] || LAUNCH=(bash --norc --noprofile -i)
+    case $name in hup-bash | restart-*) LAUNCH=(bash --norc --noprofile -i) ;; esac
     launch "$s" "$c" "$r"
     for k in $steps; do
       step "$s" "$k"

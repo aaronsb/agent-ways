@@ -162,9 +162,13 @@ pub struct ChatPane {
     status_set_at: Option<Instant>,
     status_is_error: bool,
     tab_cycle: Option<TabCycle>,
-    /// The foreground tab (#393). Merged at launch: the full stream is
-    /// the opening posture; per-channel focus is an explicit gesture.
+    /// The foreground tab (#393). Merged at launch, the full stream,
+    /// unless the chat reopens the tab the last chat showed
+    /// ([`Chat::reopen_last_tab`]).
     foreground: Tab,
+    /// The file the shown tab is recorded in each time it changes, for the
+    /// next chat to reopen ([`crate::last_tab`]); none records nothing.
+    last_tab_path: Option<std::path::PathBuf>,
     feed: FeedState,
     /// The feed's height in the last frame, for paging.
     feed_rows: u16,
@@ -275,7 +279,8 @@ pub struct ChatPane {
     /// view, held when it was last shown, kept as watermarks of the kind
     /// Hide messages here keeps: an agent's row marks the DMs past both
     /// ([`dm`]). In memory only: the chat opens on the operator view, which
-    /// shows every DM.
+    /// shows every DM, or counts it shown when it reopens another tab
+    /// ([`Chat::reopen_last_tab`]).
     shown: crate::hidden::Hidden,
     /// The attend CLI the cleanup items run ([`cleanup`]), and the last
     /// delete made, for Undo delete.
@@ -324,6 +329,7 @@ impl ChatPane {
             status_is_error: false,
             tab_cycle: None,
             foreground: Tab::default(),
+            last_tab_path: None,
             feed: FeedState::default(),
             feed_rows: 0,
             rx,
@@ -597,12 +603,29 @@ impl ChatPane {
             }
             let left = std::mem::replace(&mut self.foreground, t);
             self.note_shown(&left);
+            self.record_tab();
             self.feed = FeedState::default();
             self.invalidate();
             if self.world.is_some() {
                 self.refocus();
             }
             self.draft_back();
+        }
+    }
+
+    /// Record the tab shown, for the next chat to reopen, when the chat
+    /// keeps a record ([`crate::last_tab`]). A record that cannot be
+    /// written is passed over: the next chat opens where it would without.
+    fn record_tab(&self) {
+        let Some(path) = &self.last_tab_path else { return };
+        let member = match &self.foreground {
+            Tab::Channel(c) => attend_groups::load_groups(&crate::signal::signals_base())
+                .get(c)
+                .is_some_and(|g| g.members.contains(&crate::signal::human_member_id())),
+            _ => false,
+        };
+        if let Some(last) = crate::last_tab::Last::of(&self.foreground, member) {
+            let _ = last.save(path);
         }
     }
 
@@ -1385,6 +1408,31 @@ impl Chat {
     /// attend-chat's state directory ([`ChatPane::keep_unsent`]).
     pub fn unsent_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Chat {
         self.pane_mut().unsent_dir = dir.into();
+        self
+    }
+
+    /// Open on the tab the last chat showed, as recorded in `path`, and
+    /// record there each tab shown from now on ([`crate::last_tab`]). A
+    /// channel gone since, or left, opens `#open`; with no record, or one
+    /// that does not parse, the chat opens where it opens without one.
+    ///
+    /// The operator view counts as shown up to now, as it would had the
+    /// chat opened on it, so the direct messages that came before do not
+    /// mark their agents' rows as new.
+    pub fn reopen_last_tab(mut self, path: impl Into<std::path::PathBuf>) -> Chat {
+        let path = path.into();
+        let last = crate::last_tab::Last::load(&path);
+        let known = crate::groups::channels(agent_theme::ColorDepth::NoColor);
+        let pane = self.pane_mut();
+        if let Some(tab) = crate::last_tab::reopen(last.as_ref(), &known, &crate::signal::human_member_id()) {
+            if tab != Tab::Merged {
+                let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+                pane.shown.hide(&Tab::Merged, (now, 0, 0));
+            }
+            pane.foreground = tab;
+            pane.invalidate();
+        }
+        pane.last_tab_path = Some(path);
         self
     }
 
