@@ -207,7 +207,7 @@ fn a_build_finishing_the_governor_holds_is_written_once_it_opens() {
     let mut slots = vec![sensors::slot(Box::new(Builds(polls)), sensor_spec::Lane::Event, None)];
     slots[0].engagement = sensor_trait::EngagementState::new(build_engagement(&config::Config::default()));
     let focus = Focus { description: String::new(), working_dir: "/p".into(), keywords: Vec::new() };
-    let mut governor = DisclosureGovernor::new(Duration::from_millis(200), 3, Duration::from_secs(120));
+    let mut governor = DisclosureGovernor::new(Duration::from_secs(60), 3, Duration::from_secs(120));
     let mut sink = Written::default();
     slots[0].poll(&focus);
     try_disclose(&mut slots, &[0], &mut governor, true, &mut sink);
@@ -217,7 +217,7 @@ fn a_build_finishing_the_governor_holds_is_written_once_it_opens() {
     try_disclose(&mut slots, &[0], &mut governor, true, &mut sink);
     assert_eq!(sink.0.len(), 1, "the governor holds the second batch");
     assert_eq!(slots[0].accumulator.events, ["cargo finished (failure, code 101)"], "held, not dropped");
-    std::thread::sleep(Duration::from_millis(250));
+    governor.expire_cooldown();
     assert!(slots[0].ready_to_disclose());
     try_disclose(&mut slots, &[0], &mut governor, true, &mut sink);
     assert_eq!(sink.0, ["cargo finished (success)", "cargo finished (failure, code 101)"]);

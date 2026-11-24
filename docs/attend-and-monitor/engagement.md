@@ -186,7 +186,7 @@ Tune's arithmetic is linear and the engine's decay is exponential. At load time 
 
 ## Events that skip the refractory
 
-A sensor can mark an event as skipping the refractory (`Sensor::skips_refractory`). The slot accumulates such an event during the absolute and the relative refractory alike, holds it only to the sensor's own emission threshold, and records no fire for a batch made only of such events. The processes sensor marks a build finishing this way: each build the session runs, of five seconds or more, reports its result, so an agent that rebuilds within a minute of a failure still hears whether the rebuild passed. The governor below still paces such a batch; it can delay one but not drop it.
+A sensor can mark an event as skipping the refractory (`Sensor::skips_refractory`). The slot accumulates such an event during the absolute and the relative refractory alike, holds it only to the sensor's own emission threshold, and records no fire for a batch made only of such events. The processes sensor marks a build finishing this way: each build the session runs reports its result, so an agent that rebuilds within a minute of a failure still hears whether the rebuild passed. The governor below still paces such a batch; it can delay one but not drop it.
 
 ## Interaction with the disclosure governor
 

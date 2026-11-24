@@ -365,13 +365,16 @@ struct Tool {
     seen: u64,
 }
 
-/// How long after its start a watched tool must still be running when a
-/// poll sees it to count as a build. A compiler that a script runs many
-/// times, such as `cc` under `./configure`, lives well under a second,
-/// and a poll that happens to catch one would report a finish for each.
-/// Such a run reports nothing, unless the build-status marker records
-/// that it failed.
+/// How long after its start a watched tool must have been seen running
+/// for its finish to stand on its own. A run seen only sooner is brief:
+/// it may be one of the many compiler runs of a script such as
+/// `./configure`, or a short build a poll happened to catch early. See
+/// [`ProcessSensor::churn`] for which brief runs report.
 const MIN_BUILD_SECS: i64 = 5;
+
+/// How long a brief run of a tool marks the next brief runs of the same
+/// tool as churn, in seconds.
+const CHURN_WINDOW_SECS: u64 = 120;
 
 /// Whether `tool` was seen too soon after its start to count as a build.
 /// A tool whose start is unknown, or a clock that reads before the start,
@@ -501,6 +504,8 @@ pub struct ProcessSensor {
     ps_has_lstart: bool,
     /// `ps` reads that have failed in a row.
     failed_reads: u32,
+    /// When a brief run of each tool last finished, in Unix seconds.
+    brief_runs: HashMap<String, u64>,
     /// The session's root process, Claude Code. When set, a watched tool
     /// is tracked only when it runs under this pid, so a build another
     /// session or a terminal started is not reported to this session as
@@ -536,6 +541,7 @@ impl ProcessSensor {
             watch,
             ps_has_lstart: true,
             failed_reads: 0,
+            brief_runs: HashMap::new(),
             root: None,
         }
     }
@@ -547,11 +553,20 @@ impl ProcessSensor {
         self
     }
 
-    /// Whether the build-status marker records a failure of `name` within
-    /// its correlation window: the one way the sensor learns that a brief
-    /// run failed, so a build that fails fast still reports.
-    fn marked_failed(&self, name: &str, now: u64) -> bool {
-        self.last_marker.as_ref().is_some_and(|m| m.code != 0 && marker_matches(m, name, now, MARKER_WINDOW_SECS))
+    /// Whether the finished run `tool` at `pid` is churn, reported by no
+    /// finish. Only a brief run can be. One the build-status marker names
+    /// within its window is a build the user wrapped, and reports. Another
+    /// brief run is churn when another run of the same tool shows in this
+    /// poll or the last, or a brief run of it finished within
+    /// [`CHURN_WINDOW_SECS`]: a script running it in a loop. A lone short
+    /// build reports.
+    fn churn(&self, pid: u32, tool: &Tool, current: &HashMap<u32, Tool>, now: u64) -> bool {
+        if !brief(tool) || self.last_marker.as_ref().is_some_and(|m| marker_matches(m, &tool.name, now, MARKER_WINDOW_SECS)) {
+            return false;
+        }
+        let sibling = |tools: &HashMap<u32, Tool>| tools.iter().any(|(p, t)| *p != pid && t.name == tool.name);
+        let recent = self.brief_runs.get(&tool.name).is_some_and(|at| now.saturating_sub(*at) < CHURN_WINDOW_SECS);
+        sibling(&self.prior_tools) || sibling(current) || recent
     }
 
     /// Is `name` one of the processes we enrich on exit?
@@ -716,8 +731,13 @@ impl ProcessSensor {
         // Each exit is named by one tool only: of the finished tools that
         // hosted it, the one with the lowest pid.
         let mut named = vec![false; exits.len()];
+        let mut briefs: Vec<String> = Vec::new();
         for (pid, tool) in finished {
-            if brief(tool) && !self.marked_failed(&tool.name, now) {
+            let churn = self.churn(*pid, tool, &tools, now);
+            if brief(tool) {
+                briefs.push(tool.name.clone());
+            }
+            if churn {
                 continue;
             }
             let mut with: Vec<String> = Vec::new();
@@ -730,6 +750,9 @@ impl ProcessSensor {
                 }
             }
             observations.push(format_build_exit(&tool.name, self.last_marker.as_ref(), now, &with));
+        }
+        for name in briefs {
+            self.brief_runs.insert(name, now);
         }
         for (i, exit) in exits.into_iter().enumerate() {
             if named[i] {
@@ -811,9 +834,8 @@ impl Sensor for ProcessSensor {
 
     /// A build finishing in the session passes the refractory: each one is
     /// a result the agent may be waiting on, such as a rebuild after a
-    /// failure. Only a tool still running [`MIN_BUILD_SECS`] after its
-    /// start reports a finish, so a script that runs a compiler many times
-    /// does not report each run.
+    /// failure. A script that runs a compiler many times reports none of
+    /// those runs (see [`ProcessSensor::churn`]).
     fn skips_refractory(&self, description: &str) -> bool {
         description.split_once(" finished").is_some_and(|(tool, _)| self.is_watched(tool))
     }
@@ -1791,24 +1813,48 @@ mod tests {
         assert!(!s.skips_refractory("nvim finished"));
     }
 
-    /// A watched tool that a poll caught moments after its start, such as
-    /// one `cc` of a `./configure` run, reports no finish; one still
-    /// running [`MIN_BUILD_SECS`] after its start does.
+    /// The rows of a session with a shell, plus `extra`, each `(pid, ppid,
+    /// name, seconds after T0 it started)`.
+    fn session_rows(extra: &[(u32, u32, &'static str, i64)]) -> Option<Vec<Proc>> {
+        let mut all = procs(&[(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "zsh")]);
+        all.extend(extra.iter().map(|&(pid, ppid, comm, after)| Proc { pid, ppid, start: Some(T0_SECS + after), comm: comm.into() }));
+        Some(all)
+    }
+
+    /// A lone short build that one poll caught early still reports its
+    /// finish: a 15 s `cargo test` seen once, 3 s after its start.
     #[test]
-    fn a_tool_seen_only_just_after_its_start_reports_no_finish() {
-        let rows = |extra: &[(u32, u32, &'static str)]| {
-            let mut all = vec![(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "zsh")];
-            all.extend_from_slice(extra);
-            Some(procs(&all))
-        };
+    fn a_lone_brief_build_reports_its_finish() {
         let focus = no_focus();
         let t0 = T0_SECS as u64;
         let mut s = ProcessSensor::new().with_root(Some(100));
-        s.observe(rows(&[]), no_ticks, &focus, t0);
-        s.observe(rows(&[(120, 110, "cc")]), no_ticks, &focus, t0 + 1);
-        assert!(s.observe(rows(&[]), no_ticks, &focus, t0 + 6).is_empty(), "a brief cc reports nothing");
-        s.observe(rows(&[(130, 110, "cargo")]), no_ticks, &focus, t0 + MIN_BUILD_SECS as u64);
-        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, t0 + 40)), vec!["cargo finished"]);
+        s.observe(session_rows(&[]), no_ticks, &focus, t0);
+        s.observe(session_rows(&[(120, 110, "cargo", 0)]), no_ticks, &focus, t0 + 3);
+        assert_eq!(texts(&s.observe(session_rows(&[]), no_ticks, &focus, t0 + 33)), vec!["cargo finished"]);
+    }
+
+    /// A script running a compiler in a loop, such as `./configure`'s many
+    /// `cc` runs, reports none of them, whether the next run shows in the
+    /// same poll or a later one. A lone brief run of the same tool after
+    /// the churn window reports again.
+    #[test]
+    fn a_compiler_a_script_runs_in_a_loop_reports_nothing() {
+        let focus = no_focus();
+        let t0 = T0_SECS as u64;
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        let mut reported = Vec::new();
+        s.observe(session_rows(&[]), no_ticks, &focus, t0);
+        // Polls 30 s apart; some catch a cc a second after its start, some
+        // catch none.
+        let polls: [&[(u32, u32, &str, i64)]; 6] =
+            [&[(120, 110, "cc", 4)], &[(121, 110, "cc", 34)], &[], &[(122, 110, "cc", 94)], &[], &[]];
+        for (i, extra) in polls.iter().enumerate() {
+            reported.extend(texts(&s.observe(session_rows(extra), no_ticks, &focus, t0 + 5 + 30 * i as u64)));
+        }
+        assert!(reported.is_empty(), "{reported:?}");
+        let later = t0 + 5 + 30 * 5 + CHURN_WINDOW_SECS;
+        s.observe(session_rows(&[(130, 110, "cc", later as i64 - T0_SECS - 1)]), no_ticks, &focus, later);
+        assert_eq!(texts(&s.observe(session_rows(&[]), no_ticks, &focus, later + 30)), vec!["cc finished"]);
     }
 
     /// A `claude -p` run from the session's shell is a session of its own:
@@ -1828,10 +1874,11 @@ mod tests {
         assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["make finished"]);
     }
 
-    /// A brief run reports its finish when the build-status marker says it
-    /// failed: a build that fails fast in the background is still heard.
+    /// A brief run the build-status marker names reports its finish, even
+    /// right after another brief run of the same tool: a wrapped build that
+    /// fails or passes fast is still heard.
     #[test]
-    fn a_brief_run_the_marker_records_as_failed_still_reports() {
+    fn a_brief_run_the_marker_names_reports() {
         let rows = |extra: &[(u32, u32, &'static str)]| {
             let mut all = vec![(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "zsh")];
             all.extend_from_slice(extra);
@@ -1849,6 +1896,6 @@ mod tests {
         later.last_mut().unwrap().start = Some(T0_SECS + 30);
         s.observe(Some(later), no_ticks, &focus, t0 + 31);
         s.last_marker = Some(BuildMarker { cmd: "cargo".into(), code: 0, ts: t0 + 32 });
-        assert!(s.observe(rows(&[]), no_ticks, &focus, t0 + 36).is_empty(), "a brief success still reports nothing");
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, t0 + 36)), vec!["cargo finished (success)"], "a wrapped build is a build, however brief");
     }
 }
