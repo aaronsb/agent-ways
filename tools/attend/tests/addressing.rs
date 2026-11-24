@@ -209,6 +209,10 @@ fn a_send_to_your_own_name_is_refused() {
     let _env = enter(&f);
     let sibling = Peer::start(&f, "peer-sib", "proj");
     assert_eq!(sibling.cwd, f.origin);
+    // The fixture's record dates its session a day before this process
+    // started, so the record alone does not make it live; its heartbeat
+    // does, as a listening session's would.
+    attend_presence::heartbeat::touch(&f.sid).unwrap();
     let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
     assert_eq!(registry.register(&f.origin, &f.sid).unwrap(), attend_instances::BARE);
     assert_eq!(registry.register(&f.origin, "peer-sib").unwrap(), "alpha");
