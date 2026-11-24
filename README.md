@@ -126,7 +126,7 @@ The judge is the only part that sends conversation text off your machine, and on
 
 Attend reaches a Claude Code session only through the attend mod. The mod wakes an idle session for a message addressed to it, and the Stop hook hands over what is pending at the end of a busy turn, sensor reports included ([delivery](docs/attend-and-monitor/delivery.md)). While keepwarm is armed, the mod also wakes an idle session before its prompt cache lapses ([keepwarm](docs/attend-and-monitor/keepwarm.md)). A session without the mod, such as a `claude -p` run that loads no plugins, gets none of this. In `attend chat` you address agents by name or channel on the same bus:
 
-<img src="docs/images/attend/attend-chat-fanout.png" alt="attend-chat on the merged tab: messages from the agents Elio and Lachlan and from the operator, each with its project and channel mark, and a draft addressed to @Elio @Lachlan with both recipients flagged under the input" width="720" />
+<img src="docs/images/attend/attend-chat-fanout.png" alt="attend-chat in the agent-ways theme: the agents and channels in the left column, messages from three agents in the feed, and a draft addressed to two agents, @Nora @Finnian, with both recipients flagged under the input" width="800" />
 
 ## Prerequisites
 
@@ -190,17 +190,42 @@ Matching has two channels: regex patterns for known keywords/commands/files, and
 
 `ways session` opens the session screen. Its timeline tab lists each way once per agent that fired it, with the epoch, the distance back, the trigger and the re-disclosure forecast, and marks what happened to each way: injected, re-disclosed, or kept out by the judge. `ways session ways` prints the current session's list as text.
 
-<img src="docs/images/ways/session-timeline.png" alt="The ways session timeline at epoch 9 of a 200K-token session, matched view: an Agent column naming main, code-reviewer, a workflow member, two general-purpose subagents and one by id; ways marked as injected, re-disclosed, shadow-flagged, judge-blocked with P(yes) 0.050, held by the context cap and held in the refire window; a check line showing five fires and decay 0.17; and the context gauge at 29% with a forecast of re-disclosures between 58K and 104K tokens" width="800" />
+<img src="docs/images/ways/session-timeline.png" alt="The ways session timeline in the Miami Nights theme, a violet ground with neon pink, cyan and mint text, at main's epoch 8 of a 200K-token session, matched view: an Agent column naming main, code-reviewer, a workflow member, two general-purpose subagents and one by id; ways marked as injected, re-disclosed, judge-blocked with P(yes) 0.050, held by the context cap and held in the refire window; and the context gauge at about 30% with a forecast of re-disclosures" width="800" />
 
-The [CLI reference](docs/reference/ways-cli.md#timeline-tab) explains each column and mark.
+<sub>Shown in Miami Nights. If you want it less neon, twelve other themes ship, from paper to nord; see [Configuration](#configuration).</sub>
+
+The [CLI reference](docs/reference/ways-cli.md#timeline-tab) explains each column and mark. `ways session live` opens the same screen on the session you are in and follows it as ways fire:
+
+<img src="docs/images/ways/session-live.png" alt="ways session live in the agent-ways theme: the timeline following the current session, its header reading LIVE, 8 seconds since the last event" width="800" />
 
 For the complete system guide — trigger flow, state machines, the pipeline from principle to implementation — see **[docs/hooks-and-ways/README.md](docs/hooks-and-ways/README.md)**.
 
 ## Configuration
 
-`ways settings` on a terminal opens the settings screens: ways, matching, gate, install, attend, sensors and theme. An edit is queued, and nothing reaches a file until you review and apply it. On the gate tab, Enter on a profile's model opens a picker of the models the provider serves, once `ways agent models` has fetched them:
+`ways settings` on a terminal opens the settings screens. Every setting sits in a tree on the left, and the right pane says what the selected one does, its default, where its value comes from and which file it writes. An edit is queued, and nothing reaches a file until you review and apply it. The tabs:
 
-<img src="docs/images/ways/settings-model-picker.png" alt="The gate tab of ways settings: the anthropic profile's keys in a tree on the left, a picker over it listing claude-haiku-4-5 (current), claude-3-5-haiku-latest, claude-opus-4-5 and claude-sonnet-4-5, and the detail pane on the right giving the key's default and the file it writes, agent.yaml" width="720" />
+| Tab | What you do there |
+|---|---|
+| ways | Switch a domain or a single way off, everywhere or in this project, and read what each way is and what triggers it. |
+| matching | Set how close a prompt must come before a way fires. |
+| gate | Choose the relevance judge's engine, model and threshold, store a provider key, and see whether the judge is ready. |
+| install | Choose which Claude Code config directories agent-ways is active in. |
+| attend | Tune attend's rate limits, its cleanup and the chat. |
+| sensors | See every awareness sensor, shipped or your own, its state and what to do when one needs attention. |
+| mod | Install, check and repair the Claude Code mods agent-ways ships. |
+| theme | Pick a theme; the arrows preview it over the whole screen first. |
+
+<img src="docs/images/ways/settings-ways.png" alt="The ways tab of ways settings in the Terra theme: the shipped domains in a tree, documentation open with a switch per way, and on the right the selected adr way's switch, the file it writes, and the way's description, file, vocabulary and patterns" width="800" />
+
+On the gate tab, Enter on a profile's model opens a picker of the models the provider serves, once `ways agent models` has fetched them:
+
+<img src="docs/images/ways/settings-model-picker.png" alt="The gate tab of ways settings in the Tokyo Night theme: the anthropic profile's keys in a tree on the left, a picker over it listing claude-haiku-4-5 (current), claude-3-5-haiku-latest, claude-opus-4-5 and claude-sonnet-4-5, and the detail pane on the right giving the key's default and the file it writes, agent.yaml" width="800" />
+
+Every screen, attend-chat included, draws in the theme you pick. Thirteen ship, light and dark, and the theme tab copies one into a theme of your own. The same session timeline in paper, nord, tampa and miami-nights:
+
+<img src="docs/images/ways/themes.png" alt="The same ways session timeline four times: paper, cream with dark text; nord, slate blue-grey; tampa, a light ground running from bay blue to sunset peach; miami-nights, violet with neon text" width="800" />
+
+The [CLI reference](docs/reference/ways-cli.md#settings-screens) shows every tab.
 
 The same keys work from the command line:
 
