@@ -10,7 +10,7 @@ aliases: []
 
 # Attend messaging and awareness — the model
 
-This is the **explanation** companion to [[ADR-136]] (the decision). The ADR argues *why* attend should split into two lanes; these pages show *how the system behaves* once it does — across one, two, and many Claudes, with sub-agents, across dimensions, and with a human on the wire.
+This is the **explanation** companion to the decision that split attend's messages from its observations (listed under References). That record argues *why* attend should split into two lanes; these pages show *how the system behaves* once it does — across one, two, and many Claudes, with sub-agents, across dimensions, and with a human on the wire.
 
 If you read nothing else, read this page, then [[04.002.E]] (the cast). The numbered scenarios are independent — pick the shape that matches your situation.
 
@@ -89,3 +89,7 @@ Both conduits mark what they delivered in one seen-set, and both serve only a se
 | [[04.006.E]] | The crowd | 3–5 Claudes — convene on `#open`, split to channels, batched delivery |
 | [[04.007.E]] | The human on the surface | attend-chat — the human as a co-equal peer |
 | [[04.008.E]] | The lane gate | The mechanism under the scenarios — one fork, two state machines |
+
+## References
+
+- ADR-136: attend splits addressed messages from the sensor observation bus, the two lanes these pages explain.
