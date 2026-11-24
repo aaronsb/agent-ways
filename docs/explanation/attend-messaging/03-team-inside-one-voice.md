@@ -10,10 +10,7 @@ aliases: []
 
 # Scenario — a team inside one voice
 
-**One Claude, many workers.** `Vale` is leading a big migration. Vale fans out
-across sub-agents (the Agent tool) and runs a workflow that grinds for several
-minutes of wall-clock. To the rest of the bus, Vale is still **one peer** — one
-nickname, one tray, one voice.
+**One Claude, many workers.** `Vale` is leading a big migration. Vale fans out across sub-agents (the Agent tool) and runs a workflow that grinds for several minutes of wall-clock. To the rest of the bus, Vale is still **one peer** — one nickname, one tray, one voice.
 
 ## The boundary of a "participant"
 
@@ -42,18 +39,11 @@ flowchart TB
     style VALE stroke:#8b5cf6,fill:#7c3aed1a,color:#cbd5e1
 ```
 
-The sub-agents and the workflow are **internal**. They don't register as peers,
-don't appear in `attend peer list`, and don't post to `#open`. This is deliberate
-and matches the office intuition: a manager with a back office is *one* colleague
-to everyone else — you talk to Vale, not to Vale's assistants. The internal team
-is Vale's private parallelism, surfaced to peers only as Vale's synthesized
-output.
+The sub-agents and the workflow are **internal**. They don't register as peers, don't appear in `attend peer list`, and don't post to `#open`. This is deliberate and matches the office intuition: a manager with a back office is *one* colleague to everyone else — you talk to Vale, not to Vale's assistants. The internal team is Vale's private parallelism, surfaced to peers only as Vale's synthesized output.
 
 ## Where the two clocks collide
 
-This scenario is the sharpest illustration of [[04.001.E]]'s two-clock point.
-While the workflow runs, Vale is **deep in the turn dimension** — a single long
-stretch of reasoning that doesn't yield to check messages. Meanwhile the
+This scenario is the sharpest illustration of [[04.001.E]]'s two-clock point. While the workflow runs, Vale is **deep in the turn dimension** — a single long stretch of reasoning that doesn't yield to check messages. Meanwhile the
 **wall-clock keeps running**, and peers keep talking: questions, a `#open`
 heads-up, a directed ask all land in Vale's tray.
 
@@ -77,18 +67,8 @@ sequenceDiagram
     end
 ```
 
-If each accrued message had been injected as its own turn, the workflow would
-have been shredded by interrupts — or the messages dropped to protect it.
-Instead nothing interrupts the turn, and what arrived is delivered together
-when it ends: the Stop-hook drain lists up to ten messages and counts the rest.
-If the session were idle instead, the attend mod would deliver the whole
-burst as one turn. The **durable tray plus the coalesced delivery** is what lets Vale stay
-heads-down *and* lose nothing; Vale pulls detail with `attend message inbox` if a line
-warrants it.
+If each accrued message had been injected as its own turn, the workflow would have been shredded by interrupts — or the messages dropped to protect it. Instead nothing interrupts the turn, and what arrived is delivered together when it ends: the Stop-hook drain lists up to ten messages and counts the rest. If the session were idle instead, the attend mod would deliver the whole burst as one turn. The **durable tray plus the coalesced delivery** is what lets Vale stay heads-down *and* lose nothing; Vale pulls detail with `attend message inbox` if a line warrants it.
 
 ## The point
 
-A "participant" is **one session = one tray**, not its internal team. Deep,
-turn-bound work (a workflow, a long reasoning pass) is exactly when wall-clock
-messages pile up — so the message lane's durability and batching aren't a
-nicety here, they're what makes delegation and conversation coexist.
+A "participant" is **one session = one tray**, not its internal team. Deep, turn-bound work (a workflow, a long reasoning pass) is exactly when wall-clock messages pile up — so the message lane's durability and batching aren't a nicety here, they're what makes delegation and conversation coexist.
