@@ -1299,7 +1299,10 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_listen' }, async $ => {
-    const was = isActive(await readStatus($))
+    // attend's last answer, which the poll keeps, says whether listening
+    // went off since; the reply says what this call changed.
+    const s = await readStatus($)
+    const was = !isActive(s) ? 'dormant' : mod.isListeningOff || s.listening === false ? 'off' : 'listening'
     await registerActiveTools($)
     return listenResult(await activate($, mod, await $.session.id(), true), was, mod.canPoll)
   })

@@ -333,8 +333,19 @@ export const DORMANT_REFUSAL = {
   isError: true as const,
 }
 
+/** How the session stood before an attend_listen call: dormant, listening,
+ *  or active with attend's last answer saying it was not listening (`attend
+ *  listen off` from a shell, a private scene). */
+export type ListenBefore = 'dormant' | 'listening' | 'off'
+
+const LISTEN_LEAD: Record<ListenBefore, string> = {
+  dormant: 'attend is listening for the rest of this session.',
+  listening: 'attend was already listening in this session.',
+  off: 'Listening had been turned off for this session; attend is listening again.',
+}
+
 /** attend_listen's answer, from attend's answer to `listen on`. */
-export function listenResult(r: { exitCode: number; stderr: string }, was: boolean, canPoll: boolean) {
+export function listenResult(r: { exitCode: number; stderr: string }, was: ListenBefore, canPoll: boolean) {
   const tools = ' attend_send, attend_reply, attend_join and attend_peers are available.'
   if (r.exitCode !== 0) {
     return {
@@ -342,7 +353,7 @@ export function listenResult(r: { exitCode: number; stderr: string }, was: boole
       isError: true as const,
     }
   }
-  const lead = was ? 'attend was already listening in this session.' : 'attend is listening for the rest of this session.'
+  const lead = LISTEN_LEAD[was]
   const poll = canPoll
     ? ' Messages addressed to this session and posts in its channels arrive as peer-data turns; other #open posts arrive with your next turn.'
     : ' This session does not poll (a -p or SDK run); messages arrive at the end of a turn.'

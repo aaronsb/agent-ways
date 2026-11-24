@@ -917,6 +917,23 @@ describe('the drain\'s status on the row', () => {
     expect(await shows(/attend not listening/)).toBe(true)
   })
 
+  test('attend_listen after listening was turned off elsewhere says listening is on again, not that it already was', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    const listen = async () => String(((await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)) as { result?: unknown }).result)
+    expect(await listen()).toContain('attend was already listening in this session.')
+    // `attend listen off` from a shell: the poll's drain says so.
+    drains.push(DRAIN_NOT_LISTENING, DRAIN_NOT_LISTENING)
+    await clock.advance(6_000)
+    const again = await listen()
+    expect(again).toContain('Listening had been turned off for this session; attend is listening again.')
+    expect(again).not.toContain('already')
+    await clock.advance(12_000)
+    expect(await listen()).toContain('attend was already listening in this session.')
+  })
 })
 
 describe('active', () => {
