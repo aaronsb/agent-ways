@@ -102,6 +102,7 @@ fn slow_answered() -> bool {
 }
 
 fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel, ts: u64) -> Signal {
+    support::hold_name(from, cwd);
     Signal { id: id.into(), from: from.into(), project: cwd.rsplit('/').next().unwrap().into(), cwd: cwd.into(), reply_to: None, message: message.into(), ts, channel, tray: String::new(), beside_post: false }
 }
 

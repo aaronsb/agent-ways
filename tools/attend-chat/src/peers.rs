@@ -58,7 +58,7 @@ pub fn roster_with<F: Fn(&str) -> bool>(
     instances: &SnapshotCache,
 ) -> Vec<Peer> {
     let mut seen = std::collections::HashSet::new();
-    seeds
+    let live: Vec<(&DiscoveredSession, String, Option<String>)> = seeds
         .iter()
         .filter(|s| is_live(&s.session_id))
         // Session id is the unit of existence: a second record (or a
@@ -66,22 +66,25 @@ pub fn roster_with<F: Fn(&str) -> bool>(
         // a sibling row (#394).
         .filter(|s| seen.insert(s.session_id.clone()))
         .map(|s| {
-            let root = attend_presence::session::normalize_origin(&s.cwd);
             // Identity anchors on the root so the name matches what
             // peers see on this session's signals even mid-hop. The
             // instance suffix may be registered under either the
-            // record's live cwd or the root — try both before
-            // falling back to the bare nickname.
-            let nickname = Identity::for_cwd(&root, caps).nickname;
-            let display = instances
-                .lookup(&s.cwd, &s.session_id)
-                .or_else(|| instances.lookup(&root, &s.session_id))
-                .map(|inst| format!("{nickname}-{inst}"))
-                .unwrap_or_else(|| nickname.to_string());
+            // record's live cwd or the root, so both are tried.
+            let root = attend_presence::session::normalize_origin(&s.cwd);
+            let instance = instances.lookup(&s.cwd, &s.session_id).or_else(|| instances.lookup(&root, &s.session_id));
+            (s, root, instance)
+        })
+        .collect();
+    live.iter()
+        .map(|(s, root, instance)| {
+            // The sessions with no row at this root, so their short ids differ.
+            let rowless: Vec<&str> =
+                live.iter().filter(|(_, r, inst)| inst.is_none() && r == root).map(|(o, ..)| o.session_id.as_str()).collect();
+            let nickname = Identity::for_cwd(root, caps).nickname;
             Peer {
                 session_id: s.session_id.clone(),
-                root,
-                display,
+                root: root.clone(),
+                display: attend_instances::session_name(nickname, &s.session_id, instance.as_deref(), &rowless),
             }
         })
         .collect()
@@ -152,8 +155,24 @@ mod tests {
         assert_eq!(r[0].root, "/home/me/proj");
         assert_eq!(
             r[0].display,
-            Identity::for_cwd("/home/me/proj", ColorDepth::TrueColor).nickname
+            format!("{}·sess", Identity::for_cwd("/home/me/proj", ColorDepth::TrueColor).nickname)
         );
+    }
+
+    /// Two sessions with no registry row in one directory hold no name and
+    /// show as the nickname and a short session id. Where the first four
+    /// characters collide, the ids grow until they differ.
+    #[test]
+    fn two_rowless_sessions_render_distinctly() {
+        let seeds = vec![
+            seed("3fa2aaaa-0000-4000-8000-000000000001", "/home/x"),
+            seed("3fa2bbbb-0000-4000-8000-000000000002", "/home/x"),
+            seed("9c01cccc-0000-4000-8000-000000000003", "/home/x"),
+        ];
+        let r = roster_with(&seeds, |_| true, ColorDepth::TrueColor, &empty_cache());
+        let nick = Identity::for_cwd("/home/x", ColorDepth::TrueColor).nickname;
+        let shown: Vec<&str> = r.iter().map(|p| p.display.as_str()).collect();
+        assert_eq!(shown, [format!("{nick}·3fa2a"), format!("{nick}·3fa2b"), format!("{nick}·9c01")]);
     }
 
     #[test]

@@ -162,19 +162,21 @@ mod tests {
             ColorDepth::TrueColor,
             &empty_cache(),
         );
+        // No registry row: the nickname and a short session id.
         let expected = Identity::for_cwd("/home/aaron/.claude", ColorDepth::TrueColor);
-        assert_eq!(chip.primary, expected.nickname);
+        assert_eq!(chip.primary, format!("{}·e74a", expected.nickname));
         assert_eq!(chip.secondary, ".claude");
     }
 
     #[test]
     fn claude_nickname_stable_across_session_ids() {
-        // Two sequential claudes in the same cwd should show the same
-        // name — the session UUID changes but identity is keyed on
-        // cwd, not session.
+        // Two sequential claudes in the same cwd share the nickname, which
+        // is keyed on cwd, not session. Holding no registry row, each shows
+        // its own short session id after it.
         let a = chip_for("claude:aaaa-1", "p", "/home/x", ColorDepth::TrueColor, &empty_cache());
         let b = chip_for("claude:bbbb-2", "p", "/home/x", ColorDepth::TrueColor, &empty_cache());
-        assert_eq!(a.primary, b.primary);
+        let nickname = Identity::for_cwd("/home/x", ColorDepth::TrueColor).nickname;
+        assert_eq!((a.primary.as_str(), b.primary.as_str()), (format!("{nickname}·aaaa").as_str(), format!("{nickname}·bbbb").as_str()));
     }
 
     #[test]

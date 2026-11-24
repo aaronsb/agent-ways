@@ -34,6 +34,7 @@ fn chat(dry: bool) -> Chat {
         std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
         for (i, (sid, name)) in [(ALPHA_SID, "alpha"), (BETA_SID, "beta"), (GAMMA_SID, "gamma")].into_iter().enumerate() {
             support::pin_alive(sid);
+            support::hold_name(&format!("claude:{sid}"), &cwd(name));
             let record = format!("{{\"pid\":1,\"sessionId\":\"{sid}\",\"cwd\":\"{}\"}}\n", cwd(name));
             std::fs::write(home.join(format!(".claude/sessions/{i}.json")), record).unwrap();
         }

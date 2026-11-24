@@ -212,22 +212,20 @@ pub(crate) fn you_are(me: &Session) -> Option<String> {
     me.resolved().then(|| display_name(me))
 }
 
-/// The rendered display name: the origin path's nickname, plus the
-/// instance suffix when several sessions share that origin. The name peers
-/// see this session by; enrollment, the startup banner and the first drain
-/// print it, and `attend peer status` names each run's owner by it.
+/// The rendered display name: the origin path's nickname, bare for the
+/// first live session at that origin, with the instance suffix for one
+/// that joined it, and with a short session id for one with no registry
+/// row. The name peers see this session by; enrollment, the startup banner
+/// and the first drain print it, and `attend peer status` names each run's
+/// owner by it.
+///
+/// References:
+/// - ADR-129, amendment of 2026-11-24: the first live session is bare.
 pub(crate) fn display_name(ident: &Session) -> String {
     let nickname = agent_identity::Identity::for_cwd(&ident.origin_path, agent_theme::ColorDepth::detect()).nickname;
     let instance = attend_instances::Registry::new()
         .lookup(&ident.origin_path, &ident.session_id);
-    join_display(nickname, instance.as_deref())
-}
-
-pub(crate) fn join_display(nickname: &str, instance: Option<&str>) -> String {
-    match instance {
-        Some(suffix) => format!("{nickname}-{suffix}"),
-        None => nickname.to_string(),
-    }
+    attend_instances::session_name(nickname, &ident.session_id, instance.as_deref(), &[])
 }
 
 /// After this session's channels changed: a session in no channel any more

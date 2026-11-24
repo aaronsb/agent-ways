@@ -222,7 +222,9 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
             eprintln!("  (reply is for responding to a peer message your sensor surfaced.)");
             eprintln!("  if you are starting a new topic, use `attend message send` instead.");
         }
-        SendError::NoRecipient { .. } | SendError::AmbiguousRecipient { .. } | SendError::NotInChannel { .. } => eprintln!("error: {e}"),
+        SendError::NoRecipient { .. } | SendError::AmbiguousRecipient { .. } | SendError::ToSelf { .. } | SendError::NotInChannel { .. } => {
+            eprintln!("error: {e}")
+        }
         SendError::SenderExited { .. }
         | SendError::UnknownHandle { .. }
         | SendError::ParentChannelLeft { .. }

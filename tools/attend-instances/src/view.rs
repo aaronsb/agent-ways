@@ -7,7 +7,8 @@
 //! A message reaches a session through the drain, which the attend mod
 //! polls and the Stop hook runs, and a person reads it in
 //! attend-chat. Each renders the sender through this module, so one
-//! message wears one name everywhere — `Nickname-instance (project)` —
+//! message wears one name everywhere — `Nickname-instance (project)`,
+//! or `Nickname (project)` for the session that holds the bare name —
 //! instead of a path in one place and a persona in another (issue #534). The canonical id stays the
 //! wire `from` field (`claude:<session-id>`, ADR-171); this module is
 //! presentation over that key, never a substitute for it.
@@ -60,9 +61,12 @@ pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: 
     let depth = painter.depth();
     if let Some(sid) = from.strip_prefix("claude:") {
         let id = Identity::for_cwd(cwd, depth);
-        // Instance suffix (ADR-129). Always rendered when present so
-        // pattern matching on the display name is consistent — solo
-        // and multi-session cwds both look the same.
+        // The instance suffix: none for the session that holds the bare
+        // name, the first live one in its directory, and a short session
+        // id for a session with no row.
+        //
+        // References:
+        // - ADR-129, amendment of 2026-11-24: the first live session is bare.
         let primary = with_instance(id.nickname, cwd, sid, instances);
         compose(&primary, &id.cwd_basename, &id, painter)
     } else if let Some(rest) = from.strip_prefix("external:") {
@@ -81,21 +85,25 @@ pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: 
     }
 }
 
-/// Compose `<nickname>-<instance>` for a claude session (ADR-129).
-/// Falls back to the bare nickname when the registry has no entry —
-/// only happens transiently before the session has registered, or
-/// when the registry file is unreadable.
+/// Compose a claude session's name: `<nickname>-<instance>`, the bare
+/// nickname for the session that holds the bare name, or
+/// `<nickname>·<short id>` when the registry has no entry — a session that
+/// runs no sensor host, a headless run, one before it has registered, or
+/// an unreadable registry file. [`crate::session_name`] joins them; a
+/// single label does not know the other rowless sessions, so the short id
+/// is never grown here.
 ///
 /// This is the one derivation of the persona's first line; the
 /// sensor, the drain, and the attend-chat chip all call it, so a
 /// session cannot wear one suffix on one surface and another
 /// elsewhere. Reads through `instances`, which caches per-cwd
 /// snapshots for one pass.
+///
+/// References:
+/// - ADR-129: the instance suffix, and the bare name (amendment of
+///   2026-11-24).
 pub fn with_instance(nickname: &str, cwd: &str, session_id: &str, instances: &SnapshotCache) -> String {
-    match instances.lookup(cwd, session_id) {
-        Some(inst) => format!("{nickname}-{inst}"),
-        None => nickname.to_string(),
-    }
+    crate::session_name(nickname, session_id, instances.lookup(cwd, session_id).as_deref(), &[])
 }
 
 fn compose(primary: &str, secondary: &str, id: &Identity, painter: &Painter) -> String {
@@ -162,15 +170,34 @@ mod tests {
         assert!(!label.contains("38;2;"), "mono leaked color: {label:?}");
     }
 
+    /// The first live session is bare, the second wears its suffix, and a
+    /// session with no row shows its short session id.
     #[test]
-    fn with_instance_appends_registered_suffix_and_falls_back_bare() {
+    fn with_instance_is_bare_for_the_first_and_suffixed_for_the_second() {
         let dir = std::env::temp_dir().join(format!("attend-identity-view-reg-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let registry = Registry::with_base(dir.clone());
-        let inst = registry.register("/home/me/repo", "sess-1").unwrap();
+        let registry = Registry::with_liveness(dir.clone(), |_| true);
+        registry.register("/home/me/repo", "sess-1").unwrap();
+        registry.register("/home/me/repo", "sess-2").unwrap();
         let cache = SnapshotCache::with_registry(Registry::with_base(dir.clone()));
-        assert_eq!(with_instance("Nick", "/home/me/repo", "sess-1", &cache), format!("Nick-{inst}"));
-        assert_eq!(with_instance("Nick", "/home/me/repo", "unregistered", &cache), "Nick");
+        assert_eq!(with_instance("Nick", "/home/me/repo", "sess-1", &cache), "Nick");
+        assert_eq!(with_instance("Nick", "/home/me/repo", "sess-2", &cache), "Nick-alpha");
+        assert_eq!(with_instance("Nick", "/home/me/repo", "unregistered", &cache), "Nick·unre", "no row: the nickname and a short id");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A session with no registry row (one that runs no sensor host, a
+    /// headless run) holds no name: beside the bare holder it shows as its
+    /// nickname and the first four characters of its session id.
+    #[test]
+    fn a_rowless_session_beside_the_bare_holder_renders_distinctly() {
+        let dir = std::env::temp_dir().join(format!("attend-identity-view-rowless-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let registry = Registry::with_liveness(dir.clone(), |_| true);
+        registry.register("/home/me/repo", "sess-bare").unwrap();
+        let cache = SnapshotCache::with_registry(Registry::with_base(dir.clone()));
+        assert_eq!(with_instance("Nick", "/home/me/repo", "sess-bare", &cache), "Nick");
+        assert_eq!(with_instance("Nick", "/home/me/repo", "3fa2c0de-0000-4000-8000-000000000001", &cache), "Nick·3fa2");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -180,6 +207,6 @@ mod tests {
         let plain = render_sender_label("claude:abc", "/home/me/repo", &Painter::plain(), &cache);
         assert!(!plain.contains('\x1b'), "plain leaked ANSI: {plain:?}");
         let expected = Identity::for_cwd("/home/me/repo", ColorDepth::NoColor);
-        assert_eq!(plain, format!("{} (repo)", expected.nickname));
+        assert_eq!(plain, format!("{}·abc (repo)", expected.nickname));
     }
 }

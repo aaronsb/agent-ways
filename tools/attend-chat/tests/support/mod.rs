@@ -65,6 +65,23 @@ pub fn pin_alive(session: &str) {
     file.set_modified(SystemTime::now() + Duration::from_secs(3600)).unwrap();
 }
 
+/// Give the session behind `from` a name at `cwd`, as a listening
+/// session's sensor host does: a registry row in the fixture's cache, the
+/// bare name for the first session there and a suffix for the next. A
+/// session with no row shows as its nickname and a short session id, so a
+/// test whose agents chat by name gives them rows. A sender that is no
+/// Claude session is left alone.
+///
+/// References:
+/// - ADR-129, amendment of 2026-11-24: only a session with a row has a name.
+#[allow(dead_code)]
+pub fn hold_name(from: &str, cwd: &str) {
+    if let Some(sid) = from.strip_prefix("claude:") {
+        let registry = attend_instances::Registry::with_liveness(attend_presence::cache::dir().join("instances"), |_| true);
+        registry.register(cwd, sid).expect("the fixture's registry takes the row");
+    }
+}
+
 #[cfg(unix)]
 fn remove_at_exit() {
     extern "C" fn remove() {

@@ -23,8 +23,9 @@
 //! over, so a trigger kept for the session that fired under the old id
 //! stays spent.
 //!
-//! The host holds the session's instance slot, the suffix of the name
-//! peers see it by, and refreshes it every minute. With `--moved-from` the
+//! The host holds the session's instance slot, which sets the name peers
+//! see it by (bare, or with a suffix when it joined another live session
+//! in its directory), and refreshes it every minute. With `--moved-from` the
 //! old id's slot moves to the new id before the host registers, so the
 //! name stays the same across `/clear`.
 //!
@@ -162,7 +163,7 @@ pub(crate) fn cmd_host(a: &HostArgs) {
         emit::log(&format!("moved {moved} sensor store(s) from {old}"));
     }
     let registry = attend_instances::Registry::new();
-    register(&registry, &focus.working_dir, &session, moved_from);
+    let mut instance_held = register(&registry, &focus.working_dir, &session, moved_from);
 
     let swept = sensors::sweep_mcp_servers(&focus.working_dir);
     if swept > 0 {
@@ -253,6 +254,7 @@ pub(crate) fn cmd_host(a: &HostArgs) {
             last_cleanup: &mut last_cleanup,
             state_store: &state_store,
             instance_registry: &registry,
+            instance_held: &mut instance_held,
             focus: &focus,
             heartbeat_id: &session,
             cfg: &cfg,
@@ -281,22 +283,29 @@ fn is_gone(parent: Option<u32>) -> bool {
     parent.is_some_and(|pid| !attend_presence::process::is_running(pid))
 }
 
-/// Take or keep session `session`'s instance slot in `cwd`, the suffix of
-/// its name (`Chaucer-alpha`). After `/clear` the slot of the id the
-/// session had before moves to the new id first, so the name does not
-/// change; registering first would allocate the new id a slot of its own.
-/// The tick loop refreshes it every minute ([`attend_instances::Registry::keep`]),
-/// which takes a new slot should it have been collected and leaves an
-/// alias row alone.
-fn register(registry: &attend_instances::Registry, cwd: &str, session: &str, moved_from: Option<&str>) {
+/// Take or keep session `session`'s instance slot in `cwd`: the bare name
+/// (`Chaucer`) for the first live session there, a suffix (`Chaucer-alpha`)
+/// for one that joins it. After `/clear` the slot of the id the session had
+/// before moves to the new id first, so the name does not change;
+/// registering first would allocate the new id a slot of its own.
+/// The tick loop refreshes it every minute ([`attend_instances::Registry::keep`])
+/// with the name returned here, so a row another writer dropped comes back
+/// under that name, and an alias row is left alone. Returns the name held.
+fn register(registry: &attend_instances::Registry, cwd: &str, session: &str, moved_from: Option<&str>) -> Option<String> {
     if let Some(old) = moved_from {
         if let Err(e) = registry.rename(cwd, old, session) {
             emit::log(&format!("instance slot of {old} not moved ({e})"));
         }
     }
     match registry.register(cwd, session) {
-        Ok(instance) => emit::log(&format!("instance: {instance}")),
-        Err(e) => emit::log(&format!("instance registry unavailable ({e}); the session's name has no suffix")),
+        Ok(instance) => {
+            emit::log(if instance == attend_instances::BARE { "instance: bare".to_string() } else { format!("instance: {instance}") }.as_str());
+            Some(instance)
+        }
+        Err(e) => {
+            emit::log(&format!("instance registry unavailable ({e}); the session's name has no suffix"));
+            None
+        }
     }
 }
 

@@ -46,6 +46,7 @@ fn fixture() {
         std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
         for i in 0..18 {
             support::pin_alive(&sid(i));
+            support::hold_name(&format!("claude:{}", sid(i)), &cwd(i));
             let record = format!("{{\"pid\":1,\"sessionId\":\"{}\",\"cwd\":\"{}\"}}\n", sid(i), cwd(i));
             std::fs::write(home.join(format!(".claude/sessions/{i}.json")), record).unwrap();
         }
@@ -74,6 +75,7 @@ fn chat() -> Chat {
 }
 
 fn sig(id: &str, from: &str, message: &str, channel: Channel) -> Signal {
+    support::hold_name(from, &cwd(0));
     Signal {
         id: id.into(),
         from: from.into(),

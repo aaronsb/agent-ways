@@ -15,6 +15,9 @@
 //! `AGENT_TUI_BLESS=1` records the frames for review; `AGENT_TUI_DUMP=<dir>`
 //! writes every frame checked.
 
+#[allow(dead_code)]
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, UNIX_EPOCH};
@@ -113,6 +116,7 @@ fn remove_at_exit(root: &Path) {
 fn remove_at_exit(_root: &Path) {}
 
 fn sig(from: &str, cwd: &str, ago: u64, channel: Channel, message: &str) -> Signal {
+    support::hold_name(from, cwd);
     Signal {
         id: format!("t-{ago}"),
         from: from.into(),

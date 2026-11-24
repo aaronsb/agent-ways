@@ -326,7 +326,7 @@ mod tests {
         // Buffer order is oldest→newest; registry should surface the
         // most-recent cwd first so active peers lead the legend.
         let y_id = Identity::for_cwd("/home/y", ColorDepth::TrueColor);
-        assert_eq!(reg[0].nickname, y_id.nickname);
+        assert_eq!(reg[0].nickname, format!("{}·b", y_id.nickname), "no registry row: the nickname and a short id");
     }
 
     #[test]
@@ -340,20 +340,33 @@ mod tests {
         assert_eq!(fresh.len(), 2);
     }
 
+    /// A registry where `ended` held the bare name at `cwd` and ended, and
+    /// `live` took it: the retired row and the live one share the name.
+    fn one_name(tag: &str, cwd: &str, ended: &'static str, live: &str) -> (SnapshotCache, std::path::PathBuf) {
+        let base = std::env::temp_dir().join(format!("attend-chat-one-name-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let registry = attend_instances::Registry::with_liveness(base.clone(), move |id| id != ended);
+        registry.register(cwd, ended).unwrap();
+        registry.register(cwd, live).unwrap();
+        (SnapshotCache::with_registry(attend_instances::Registry::with_base(base.clone())), base)
+    }
+
     #[test]
     fn one_name_seen_under_two_sessions_keeps_the_id_a_channel_lists() {
-        // `old` is the same cwd's earlier session, now dead; `new` is live.
-        // The buffer is newest last, and the walk goes in reverse, so `new`
-        // is met first.
+        // `old` is the same cwd's earlier session, now dead; `new` is live
+        // and took its bare name. The buffer is newest last, and the walk
+        // goes in reverse, so `new` is met first.
         let buf = vec![sig("claude:old", "/home/x"), sig("claude:new", "/home/x")];
+        let (cache, base) = one_name("channel", "/home/x", "old", "new");
         let rows = |in_channel: &dyn Fn(&str) -> bool| {
-            seen_identities(&buf, &[], ColorDepth::TrueColor, |sid| sid == "new", |_| false, in_channel, &empty_cache())
+            seen_identities(&buf, &[], ColorDepth::TrueColor, |sid| sid == "new", |_| false, in_channel, &cache)
                 .into_iter()
                 .map(|s| (s.member, s.live))
                 .collect::<Vec<_>>()
         };
         assert_eq!(rows(&|id| id == "old"), [("new".to_string(), true), ("old".to_string(), false)], "the id the channel holds stays listed");
         assert_eq!(rows(&|_| false), [("new".to_string(), true)], "in no channel, the dead sighting gives way");
+        std::fs::remove_dir_all(&base).ok();
     }
 
     /// Review of #974, D2: a dead session's sighting and a live seed at one
@@ -365,7 +378,9 @@ mod tests {
         let live = "bbbbbbbb-0000-4000-8000-000000000002";
         let buf = vec![sig(&format!("claude:{dead}"), "/home/x")];
         let seeds = vec![DiscoveredSession { cwd: "/home/x".into(), session_id: live.into() }];
-        let seen = seen_identities(&buf, &seeds, ColorDepth::TrueColor, |sid| sid == live, |_| false, |_| false, &empty_cache());
+        let (cache, base) = one_name("seed", "/home/x", dead, live);
+        let seen = seen_identities(&buf, &seeds, ColorDepth::TrueColor, |sid| sid == live, |_| false, |_| false, &cache);
+        std::fs::remove_dir_all(&base).ok();
         let rows: Vec<(&str, bool)> = seen.iter().map(|s| (s.member.as_str(), s.live)).collect();
         assert_eq!(rows, [(live, true)]);
     }
@@ -376,7 +391,9 @@ mod tests {
     fn a_sighting_from_the_id_before_a_clear_is_the_live_sessions_row() {
         let base = std::env::temp_dir().join(format!("attend-chat-alias-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        let registry = attend_instances::Registry::with_base(base.clone());
+        // Every session is live: `other` holds the bare name, so `old`
+        // takes `-alpha` and `new` keeps it across the `/clear`.
+        let registry = attend_instances::Registry::with_liveness(base.clone(), |_| true);
         registry.register("/home/x", "other").unwrap();
         registry.register("/home/x", "old").unwrap();
         registry.rename("/home/x", "old", "new").unwrap();
@@ -387,7 +404,7 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
         let nickname = Identity::for_cwd("/home/x", ColorDepth::TrueColor).nickname;
         let rows: Vec<(&str, &str, bool)> = seen.iter().map(|s| (s.identity.nickname.as_str(), s.member.as_str(), s.live)).collect();
-        assert_eq!(rows, [(format!("{nickname}-beta").as_str(), "new", true)]);
+        assert_eq!(rows, [(format!("{nickname}-alpha").as_str(), "new", true)]);
     }
 
     /// Two live sessions at one cwd with one name are two entries.
@@ -490,11 +507,12 @@ mod tests {
     }
 
     /// Two sessions of one cwd, each holding its own slot, so their names
-    /// differ: `old` dead and seen in the buffer, `new` live.
+    /// differ: `old` dead and seen in the buffer, `new` live. Both were
+    /// live when `new` registered, so `old` is bare and `new` is `-alpha`.
     fn two_names() -> (Vec<Seen>, std::path::PathBuf) {
         let base = std::env::temp_dir().join(format!("attend-chat-lineage-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&base);
-        let registry = attend_instances::Registry::with_base(base.clone());
+        let registry = attend_instances::Registry::with_liveness(base.clone(), |_| true);
         registry.register("/home/x", "old").unwrap();
         registry.register("/home/x", "new").unwrap();
         let cache = SnapshotCache::with_registry(attend_instances::Registry::with_base(base.clone()));

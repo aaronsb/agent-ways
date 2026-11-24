@@ -122,7 +122,17 @@ fn the_mod_fixtures_are_the_real_attend_output() {
     put("DRAIN_COLD_EMPTY", norm(drain_json(&f)));
     put("DRAIN_EMPTY", norm(drain_json(&f)));
 
+    // The other session the fixtures hear from listens, so its sensor host
+    // gave it a name: a session with no registry row would show as its
+    // nickname and a short session id.
+    //
+    // References:
+    // - ADR-129, amendment of 2026-11-24: only a session with a row has a name.
+    let listens = |f: &Fixture| {
+        attend_instances::Registry::with_liveness(f.cache().join("instances"), |_| true).register("/tmp/elsewhere", "other-session").unwrap();
+    };
     let f = Fixture::new("fixtures-backlog");
+    listens(&f);
     f.put(&f.project_tray(), "other-1-1-addressed", "addressed while dormant", 60 * MINUTE);
     f.put("_broadcast", "other-1-2-old", "old open backlog", 10 * MINUTE);
     f.put("_broadcast", "other-1-3-fresh", "fresh open", Duration::ZERO);
@@ -138,6 +148,7 @@ fn the_mod_fixtures_are_the_real_attend_output() {
     put("DRAIN_CACHE_LAPSED", norm(serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json", "--wake"])).unwrap()));
 
     let f = Fixture::new("fixtures-channel");
+    listens(&f);
     f.ok(&["channel", "join", "room"]);
     drain_json(&f);
     f.put("@room", "other-1-4-room", "said in the room", Duration::ZERO);

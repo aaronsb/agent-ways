@@ -47,6 +47,7 @@ fn base() -> &'static Path {
             let sessions = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".claude").join("sessions");
             std::fs::create_dir_all(&sessions).unwrap();
             for (pid, sid, cwd) in [(4241, ALPHA_SID, ALPHA_CWD), (4242, BETA_SID, BETA_CWD)] {
+                support::hold_name(&format!("claude:{sid}"), cwd);
                 std::fs::write(sessions.join(format!("{pid}.json")), format!(r#"{{"pid":{pid},"sessionId":"{sid}","cwd":"{cwd}"}}"#)).unwrap();
             }
             attend_groups::Groups::new(base, ALPHA_SID).join("deploy", true).unwrap();

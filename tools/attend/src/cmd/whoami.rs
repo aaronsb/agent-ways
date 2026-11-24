@@ -103,7 +103,8 @@ mod tests {
 
     #[test]
     fn display_name_carries_the_instance_suffix_when_present() {
-        assert_eq!(crate::util::join_display("Chaucer", None), "Chaucer");
-        assert_eq!(crate::util::join_display("Chaucer", Some("2")), "Chaucer-2");
+        assert_eq!(attend_instances::session_name("Chaucer", "3fa2c0de", None, &[]), "Chaucer·3fa2");
+        assert_eq!(attend_instances::session_name("Chaucer", "3fa2c0de", Some(attend_instances::BARE), &[]), "Chaucer");
+        assert_eq!(attend_instances::session_name("Chaucer", "3fa2c0de", Some("2"), &[]), "Chaucer-2");
     }
 }

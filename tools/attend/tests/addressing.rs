@@ -175,6 +175,139 @@ fn an_ambiguous_name_is_refused() {
     assert!(files(&a.tray(&f)).is_empty());
 }
 
+/// Two live sessions in one project: the first holds the bare name, the
+/// second `-alpha`. The bare name reaches the first alone, not every
+/// session with that nickname, and the suffixed name the second.
+///
+/// References:
+/// - ADR-129, amendment of 2026-11-24: addressing.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_bare_name_reaches_the_bare_session_only() {
+    let f = Fixture::new("addr-bare");
+    let _env = enter(&f);
+    let a = Peer::start(&f, "peer-a", "twin");
+    let _b = Peer::start(&f, "peer-b", "twin");
+    let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+    assert_eq!(registry.register(&a.cwd, "peer-a").unwrap(), attend_instances::BARE);
+    assert_eq!(registry.register(&a.cwd, "peer-b").unwrap(), "alpha", "peer-a is live, so peer-b joins it");
+    let name = agent_identity::Identity::for_cwd(&a.cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    for (to, id) in [(name.clone(), "peer-a"), (format!("{name}-alpha"), "peer-b"), (name.to_uppercase(), "peer-a")] {
+        let sent = send(Some(&to), None, "just you").unwrap_or_else(|e| panic!("--to {to}: {e:?}"));
+        assert_eq!(read(&a.tray(&f), &sent.id).0.as_deref(), Some(id), "--to {to}");
+    }
+}
+
+/// A bare session that names its own nickname is refused: that is itself,
+/// and its `-alpha` sibling, which shares the nickname, is not meant.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_send_to_your_own_name_is_refused() {
+    let f = Fixture::new("addr-self");
+    let _env = enter(&f);
+    let sibling = Peer::start(&f, "peer-sib", "proj");
+    assert_eq!(sibling.cwd, f.origin);
+    // The fixture's record dates its session a day before this process
+    // started, so the record alone does not make it live; its heartbeat
+    // does, as a listening session's would.
+    attend_presence::heartbeat::touch(&f.sid).unwrap();
+    let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+    assert_eq!(registry.register(&f.origin, &f.sid).unwrap(), attend_instances::BARE);
+    assert_eq!(registry.register(&f.origin, "peer-sib").unwrap(), "alpha");
+    let name = agent_identity::Identity::for_cwd(&f.origin, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    match send(Some(&name), None, "note to self") {
+        Err(e) => {
+            assert_eq!(serde_json::to_value(&e).unwrap()["kind"], "to_self", "{e:?}");
+            assert!(e.to_string().contains("that is you"), "{e}");
+        }
+        Ok(sent) => panic!("delivered to {:?}", read(&sibling.tray(&f), &sent.id).0),
+    }
+    assert!(files(&sibling.tray(&f)).is_empty());
+}
+
+/// With no live session holding the bare name, the bare name is no full
+/// name: a session with no registry row answers only through its nickname,
+/// with every other session that carries it, and two are refused.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_bare_name_no_session_holds_is_ambiguous() {
+    let f = Fixture::new("addr-rowless");
+    let _env = enter(&f);
+    let first = Peer::start(&f, "peer-first", "twin");
+    let a = Peer::start(&f, "peer-a", "twin");
+    let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+    assert_eq!(registry.register(&a.cwd, "peer-first").unwrap(), attend_instances::BARE);
+    assert_eq!(registry.register(&a.cwd, "peer-a").unwrap(), "alpha");
+    drop(first);
+    // peer-b runs no sensor host, so it has no row.
+    let _b = Peer::start(&f, "peer-b", "twin");
+    let name = agent_identity::Identity::for_cwd(&a.cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    match send(Some(&name), None, "which one?") {
+        Err(e @ attend::verbs::SendError::AmbiguousRecipient { .. }) => {
+            let why = e.to_string();
+            assert!(why.contains("peer-a") && why.contains("peer-b"), "{why}");
+        }
+        other => panic!("expected ambiguous_recipient: {other:?}"),
+    }
+    assert!(files(&a.tray(&f)).is_empty());
+}
+
+/// A session with no registry row shows as its nickname and a short
+/// session id, and that display form reaches it, beside the bare holder.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_rowless_session_is_reached_by_its_display_name() {
+    let f = Fixture::new("addr-rowless-name");
+    let _env = enter(&f);
+    let held = Peer::start(&f, "peer-held", "twin");
+    let rowless = Peer::start(&f, "3fa2c0de-0000-4000-8000-000000000001", "twin");
+    let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+    assert_eq!(registry.register(&held.cwd, "peer-held").unwrap(), attend_instances::BARE);
+    let name = agent_identity::Identity::for_cwd(&held.cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let sent = send(Some(&format!("{name}·3fa2")), None, "just you").expect("sent");
+    assert_eq!(read(&rowless.tray(&f), &sent.id).0.as_deref(), Some("3fa2c0de-0000-4000-8000-000000000001"));
+    let sent = send(Some(&name), None, "the bare holder").expect("sent");
+    assert_eq!(read(&held.tray(&f), &sent.id).0.as_deref(), Some("peer-held"));
+}
+
+/// The sender and a peer, neither with a registry row, share the first
+/// four characters of their ids. The peer list tells them apart with a
+/// longer id, counting the sender, and `--to` takes the name it shows.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_rowless_peer_whose_id_collides_with_the_senders_is_reached_by_its_listed_name() {
+    let f = Fixture::new("addr-collide");
+    f.set_session_id("3fa2aaaa-0000-4000-8000-000000000001");
+    let _env = enter(&f);
+    let peer = Peer::start(&f, "3fa2bbbb-0000-4000-8000-000000000002", "proj");
+    assert_eq!(peer.cwd, f.origin);
+    let name = agent_identity::Identity::for_cwd(&f.origin, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let listed = attend::verbs::peers::peers();
+    let shown: Vec<&str> = listed.peers.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(shown, [format!("{name}·3fa2b")], "the peer list counts the sender");
+    let sent = send(Some(&format!("{name}·3fa2b")), None, "the listed name").unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(read(&peer.tray(&f), &sent.id).0.as_deref(), Some("3fa2bbbb-0000-4000-8000-000000000002"));
+}
+
+/// `·` is hard to type in a shell, so a `.` in its place names the same
+/// session: `--to Nick.3fa2` is `--to Nick·3fa2`.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_dot_stands_for_the_id_mark_in_a_rowless_name() {
+    let f = Fixture::new("addr-dot");
+    let _env = enter(&f);
+    let rowless = Peer::start(&f, "3fa2c0de-0000-4000-8000-000000000001", "twin");
+    let name = agent_identity::Identity::for_cwd(&rowless.cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let sent = send(Some(&format!("{name}.3fa2")), None, "typed with a dot").unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(read(&rowless.tray(&f), &sent.id).0.as_deref(), Some("3fa2c0de-0000-4000-8000-000000000001"));
+}
+
 /// A name that is no live session and no known person is refused.
 #[test]
 fn an_unknown_name_is_refused() {
@@ -251,7 +384,7 @@ mod reply {
             Err(e @ attend::verbs::SendError::SenderExited { .. }) => {
                 let name = agent_identity::Identity::for_cwd(&cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
                 let why = e.to_string();
-                assert!(why.contains(&format!("{name}-alpha")), "names the session: {why}");
+                assert!(why.contains(&format!("from {name} (session peer-old)")), "names the session by its bare name: {why}");
             }
             other => panic!("expected sender_exited: {other:?}"),
         }

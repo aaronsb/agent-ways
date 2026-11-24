@@ -82,6 +82,10 @@ pub enum SendError {
     /// The `to` name matches more than one session, or a session and a
     /// person.
     AmbiguousRecipient { name: String, candidates: Vec<String> },
+    /// The `to` name is this session's own name or id. A bare session's
+    /// name is also its `-alpha` sibling's nickname, which must not catch
+    /// it.
+    ToSelf { name: String },
     /// A channel post addressed to someone who is not a member of the
     /// channel: they would never read it.
     NotInChannel { name: String, channel: String },
@@ -140,6 +144,7 @@ impl std::fmt::Display for SendError {
                 write!(f, "'{name}' names more than one recipient: {}; name one of them", candidates.join(", "))
             }
             Self::NotInChannel { name, channel } => write!(f, "@{name} is not in #{channel}; nothing sent"),
+            Self::ToSelf { name } => write!(f, "'{name}' is this session's own name: that is you; nothing sent"),
             Self::SenderExited { session, name } => write!(
                 f,
                 "the message you are replying to came from {name} (session {session}), which has exited; nothing was sent"
@@ -311,15 +316,42 @@ struct LiveSession {
     name: String,
 }
 
+/// The live sessions other than this one, each named as `attend peer list`
+/// shows it, a session with no row by its nickname and short id. The short
+/// ids are told apart across the same set the peer list uses: the peers
+/// and, when it has no row, this session.
 fn live_sessions() -> Vec<LiveSession> {
     let registry = attend_instances::Registry::new();
-    list_peers()
+    let listed: Vec<(String, String, Option<String>)> = list_peers()
         .into_iter()
         .map(|(id, cwd, _, _, _)| {
-            let (nickname, name) = crate::verbs::peers::names(&cwd, registry.lookup(&cwd, &id).as_deref());
-            LiveSession { id, cwd, nickname, name }
+            let instance = registry.lookup(&cwd, &id);
+            (id, cwd, instance)
+        })
+        .collect();
+    let me = current_session();
+    let me_rowless = (me.session_resolved && registry.lookup(&me.origin_path, &me.session_id).is_none())
+        .then(|| (me.session_id.clone(), me.origin_path.clone()));
+    let rowless = |dir: &str| -> Vec<&str> {
+        let peers = listed.iter().filter(|(_, _, inst)| inst.is_none()).map(|(id, c, _)| (id.as_str(), c.as_str()));
+        let mine = me_rowless.iter().map(|(id, c)| (id.as_str(), c.as_str()));
+        peers.chain(mine).filter(|(_, c)| attend_presence::session::same_dir(c, dir)).map(|(id, _)| id).collect()
+    };
+    listed
+        .iter()
+        .map(|(id, cwd, instance)| {
+            let (nickname, name) = crate::verbs::peers::names(cwd, id, instance.as_deref(), &rowless(cwd));
+            LiveSession { id: id.clone(), cwd: cwd.clone(), nickname, name }
         })
         .collect()
+}
+
+/// Whether `to` names a session shown as `name`, ignoring ASCII case. A `.`
+/// stands for the id mark of a session with no row, which most shells
+/// cannot type: `Urban.3fa2` is `Urban·3fa2`. A hyphen does not, since it
+/// marks an instance suffix.
+fn names_match(name: &str, to: &str) -> bool {
+    name.eq_ignore_ascii_case(to) || name.eq_ignore_ascii_case(&to.replacen('.', &attend_instances::ID_MARK.to_string(), 1))
 }
 
 /// The people attend knows by member id (ADR-170): the person at this
@@ -350,16 +382,33 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     if is_project_path(to) {
         return resolve_project(me, to);
     }
+    // This session's own id or name names nobody else: the bare session's
+    // name is also its `-alpha` sibling's nickname.
+    //
+    // References:
+    // - ADR-129, amendment of 2026-11-24: addressing.
+    if let Some(name) = crate::util::you_are(me).filter(|name| names_match(name, to) || me.session_id == to) {
+        return Err(SendError::ToSelf { name });
+    }
     let sessions = live_sessions();
     // A session id is canonical: it names that session, whatever else
     // answers to the same text.
     if let Some(s) = sessions.iter().find(|s| s.id == to) {
         return Ok(Dest::Sessions { cwd: s.cwd.clone(), ids: vec![s.id.clone()] });
     }
-    let matched: Vec<&LiveSession> = sessions
-        .iter()
-        .filter(|s| s.id == to || s.name.eq_ignore_ascii_case(to) || s.nickname.eq_ignore_ascii_case(to))
-        .collect();
+    // A session's full name before its nickname: `Urban` is the session
+    // that holds the bare name, not every `Urban-*` beside it, and a
+    // session with no row answers to `Urban·3fa2`. With no session named
+    // so, the nickname answers for every session that carries it.
+    //
+    // References:
+    // - ADR-129, amendment of 2026-11-24: addressing.
+    let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| names_match(&s.name, to)).collect();
+    let matched = if by_name.is_empty() {
+        sessions.iter().filter(|s| s.nickname.eq_ignore_ascii_case(to)).collect()
+    } else {
+        by_name
+    };
     let person = known_people().into_iter().find(|p| p.eq_ignore_ascii_case(to));
     match (matched.as_slice(), person) {
         ([one], None) => Ok(Dest::Sessions { cwd: one.cwd.clone(), ids: vec![one.id.clone()] }),
@@ -715,7 +764,7 @@ fn sender_dest(sender: Sender) -> Result<Dest, SendError> {
                 return Ok(Dest::Sessions { cwd: live.cwd.clone(), ids: vec![live.id.clone()] });
             }
             let name = match &sender.cwd {
-                Some(cwd) => crate::verbs::peers::names(cwd, registry.lookup(cwd, &sender.id).as_deref()).1,
+                Some(cwd) => crate::verbs::peers::names(cwd, &sender.id, registry.lookup(cwd, &sender.id).as_deref(), &[]).1,
                 None => format!("session {}", sender.id.chars().take(8).collect::<String>()),
             };
             Err(SendError::SenderExited { session: sender.id, name })
