@@ -15,8 +15,8 @@ use std::os::unix::process::CommandExt;
 
 use attend_presence::session::{marker_value, sensor_start, SensorStart, SENSOR_HOST_VAR};
 
-/// A shell whose command line reads `sh -c 'sleep 30; :' <dir>/attend run`
-/// stands in for the attend that set the marker: its argv starts a sensor
+/// A shell whose command line reads `sh -c 'sleep 30; :' <dir>/attend sensor
+/// host` stands in for the attend that set the marker: its argv starts a sensor
 /// host, which is how attend tells an attend it cannot name by its
 /// executable. The trailing `:` keeps the shell from exec'ing `sleep` in
 /// its place. Its marker refuses this process; once the shell's group has
@@ -25,7 +25,7 @@ use attend_presence::session::{marker_value, sensor_start, SensorStart, SENSOR_H
 #[test]
 fn a_marker_lapses_when_its_attend_exits() {
     let stand_in = std::env::temp_dir().join("attend-marker-lapses").join("attend");
-    let mut attend = std::process::Command::new("sh").args(["-c", "sleep 30; :", stand_in.to_str().unwrap(), "run"]).process_group(0).spawn().unwrap();
+    let mut attend = std::process::Command::new("sh").args(["-c", "sleep 30; :", stand_in.to_str().unwrap(), "sensor", "host"]).process_group(0).spawn().unwrap();
     let pid = attend.id();
     let marker = marker_value(pid);
     std::env::set_var(SENSOR_HOST_VAR, &marker);

@@ -13,7 +13,7 @@ pub const SEND: &str = "Send a message: a direct message with --to, a channel po
 pub const REPLY: &str = "Reply to the most recent peer message: a direct message to its sender, or in its named channel";
 pub const INBOX: &str = "Read pending messages from peers";
 pub const PEERS: &str = "List active Claude Code sessions and their channels";
-pub const STATUS: &str = "Show every running `attend run` with the session it serves, signals, and channel state";
+pub const STATUS: &str = "Show every running sensor host with the session it serves, signals, and channel state";
 pub const JOIN: &str = "Join a channel (creates it if absent)";
 pub const LEAVE: &str = "Leave a channel";
 /// What `channel list` does, which is all a tool offers. The CLI's other
