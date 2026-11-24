@@ -61,8 +61,11 @@ pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: 
     let depth = painter.depth();
     if let Some(sid) = from.strip_prefix("claude:") {
         let id = Identity::for_cwd(cwd, depth);
-        // Instance suffix (ADR-129): none for the session that holds the
-        // bare name, the first live one in its directory.
+        // The instance suffix: none for the session that holds the bare
+        // name, the first live one in its directory.
+        //
+        // References:
+        // - ADR-129, amendment of 2026-11-24: the first live session is bare.
         let primary = with_instance(id.nickname, cwd, sid, instances);
         compose(&primary, &id.cwd_basename, &id, painter)
     } else if let Some(rest) = from.strip_prefix("external:") {
@@ -81,17 +84,21 @@ pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: 
     }
 }
 
-/// Compose a claude session's name (ADR-129): `<nickname>-<instance>`,
-/// or the bare nickname for the session that holds the bare name. Also
-/// the bare nickname when the registry has no entry — a session that
-/// runs no sensor host, one before it has registered, or an unreadable
-/// registry file. [`crate::display_name`] joins the two.
+/// Compose a claude session's name: `<nickname>-<instance>`, or the
+/// bare nickname for the session that holds the bare name. Also the bare
+/// nickname when the registry has no entry — a session that runs no
+/// sensor host, one before it has registered, or an unreadable registry
+/// file. [`crate::display_name`] joins the two.
 ///
 /// This is the one derivation of the persona's first line; the
 /// sensor, the drain, and the attend-chat chip all call it, so a
 /// session cannot wear one suffix on one surface and another
 /// elsewhere. Reads through `instances`, which caches per-cwd
 /// snapshots for one pass.
+///
+/// References:
+/// - ADR-129: the instance suffix, and the bare name (amendment of
+///   2026-11-24).
 pub fn with_instance(nickname: &str, cwd: &str, session_id: &str, instances: &SnapshotCache) -> String {
     crate::display_name(nickname, instances.lookup(cwd, session_id).as_deref())
 }

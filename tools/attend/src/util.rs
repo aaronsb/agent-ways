@@ -214,9 +214,12 @@ pub(crate) fn you_are(me: &Session) -> Option<String> {
 
 /// The rendered display name: the origin path's nickname, bare for the
 /// first live session at that origin and with the instance suffix for one
-/// that joined it (ADR-129). The name peers see this session by;
-/// enrollment, the startup banner and the first drain print it, and
-/// `attend peer status` names each run's owner by it.
+/// that joined it. The name peers see this session by; enrollment, the
+/// startup banner and the first drain print it, and `attend peer status`
+/// names each run's owner by it.
+///
+/// References:
+/// - ADR-129, amendment of 2026-11-24: the first live session is bare.
 pub(crate) fn display_name(ident: &Session) -> String {
     let nickname = agent_identity::Identity::for_cwd(&ident.origin_path, agent_theme::ColorDepth::detect()).nickname;
     let instance = attend_instances::Registry::new()

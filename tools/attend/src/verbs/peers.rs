@@ -15,8 +15,11 @@ pub struct Agent {
     pub session_id: Option<String>,
     /// The working directory its identity derives from.
     pub cwd: String,
-    /// The persona name with its instance suffix (ADR-129), as peers see it:
-    /// the bare nickname for the first live session in its directory.
+    /// The persona name with its instance suffix, as peers see it: the
+    /// bare nickname for the first live session in its directory.
+    ///
+    /// References:
+    /// - ADR-129, amendment of 2026-11-24: the first live session is bare.
     pub name: String,
     pub nickname: String,
     /// The suffix; `None` for a session that holds the bare name or has no
@@ -169,8 +172,10 @@ fn agent(session_id: Option<String>, cwd: &str, instance: Option<String>, status
 }
 
 /// A session's `(nickname, name)` at `cwd`: the persona, and the name peers
-/// see it by, with its instance suffix unless it holds the bare name
-/// (ADR-129).
+/// see it by, with its instance suffix unless it holds the bare name.
+///
+/// References:
+/// - ADR-129, amendment of 2026-11-24: the first live session is bare.
 pub(crate) fn names(cwd: &str, instance: Option<&str>) -> (String, String) {
     let nickname = agent_identity::Identity::for_cwd(cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
     let name = attend_instances::display_name(&nickname, instance);

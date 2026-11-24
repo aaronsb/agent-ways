@@ -176,8 +176,11 @@ fn an_ambiguous_name_is_refused() {
 }
 
 /// Two live sessions in one project: the first holds the bare name, the
-/// second `-alpha` (ADR-129). The bare name reaches the first alone, not
-/// every session with that nickname, and the suffixed name the second.
+/// second `-alpha`. The bare name reaches the first alone, not every
+/// session with that nickname, and the suffixed name the second.
+///
+/// References:
+/// - ADR-129, amendment of 2026-11-24: addressing.
 // Live sessions are found by the peers sensor's process scan.
 #[cfg(feature = "sensor-peers")]
 #[test]

@@ -367,7 +367,10 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
         return resolve_project(me, to);
     }
     // This session's own id or name names nobody else: the bare session's
-    // name is also its `-alpha` sibling's nickname (ADR-129).
+    // name is also its `-alpha` sibling's nickname.
+    //
+    // References:
+    // - ADR-129, amendment of 2026-11-24: addressing.
     if let Some(name) = own_name(me).filter(|name| name.eq_ignore_ascii_case(to) || (me.resolved() && me.session_id == to)) {
         return Err(SendError::ToSelf { name });
     }
@@ -378,10 +381,13 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
         return Ok(Dest::Sessions { cwd: s.cwd.clone(), ids: vec![s.id.clone()] });
     }
     // A registered session's full name before its nickname: `Urban` is the
-    // session that holds the bare name, not every `Urban-*` beside it
-    // (ADR-129). A session with no row shows as its bare nickname without
-    // holding it, so it answers only through the nickname, with every
-    // session that carries it.
+    // session that holds the bare name, not every `Urban-*` beside it. A
+    // session with no row shows as its bare nickname without holding it,
+    // so it answers only through the nickname, with every session that
+    // carries it.
+    //
+    // References:
+    // - ADR-129, amendment of 2026-11-24: addressing.
     let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| s.registered && s.name.eq_ignore_ascii_case(to)).collect();
     let matched = if by_name.is_empty() {
         sessions.iter().filter(|s| s.nickname.eq_ignore_ascii_case(to)).collect()
