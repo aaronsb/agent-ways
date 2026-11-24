@@ -772,6 +772,13 @@ impl Sensor for ProcessSensor {
         2.0  // Need at least 2 process events before disclosing
     }
 
+    /// A build finishing in the session passes the refractory: each one is
+    /// a result the agent may be waiting on, such as a rebuild after a
+    /// failure, and they come one per finished build, so they cannot flood.
+    fn skips_refractory(&self, description: &str) -> bool {
+        description.split_once(" finished").is_some_and(|(tool, _)| self.is_watched(tool))
+    }
+
     fn base_interval(&self) -> Duration {
         Duration::from_secs(30)  // Check every 30s at rest
     }
@@ -1730,5 +1737,18 @@ mod tests {
         let cycle: HashMap<u32, u32> = [(5, 6), (6, 5)].into_iter().collect();
         assert!(!descends_from(&cycle, 5, 7));
         assert!(!descends_from(&HashMap::new(), 5, 7));
+    }
+
+    /// A build finishing skips the refractory; an app's start or exit, and
+    /// an unwatched name that happens to read "finished", do not.
+    #[test]
+    fn only_a_watched_build_finishing_skips_the_refractory() {
+        let s = ProcessSensor::new();
+        let (_, line) = format_build_exit("cargo", None, 0, &["node".to_string()]);
+        assert!(s.skips_refractory(&line));
+        assert!(s.skips_refractory(&format_build_exit("make", None, 0, &[]).1));
+        assert!(!s.skips_refractory("node exited"));
+        assert!(!s.skips_refractory("docker started"));
+        assert!(!s.skips_refractory("nvim finished"));
     }
 }

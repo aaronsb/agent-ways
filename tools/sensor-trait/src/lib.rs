@@ -137,6 +137,15 @@ pub trait Sensor: Send {
     /// trigger offers nothing more. Default: nothing.
     fn delivered(&mut self, _description: &str) {}
 
+    /// Whether the observation `description` passes the slot's refractory
+    /// untouched: it is never dropped or held by a recent disclosure, and
+    /// a batch made only of such observations starts no refractory of its
+    /// own. For a sensor whose observations are already few and each worth
+    /// a line, such as a build finishing in the session. Default: none.
+    fn skips_refractory(&self, _description: &str) -> bool {
+        false
+    }
+
     /// The line `description` of an earlier poll was dropped on its way: by
     /// the refractory or a failed write. A trigger the sensor
     /// keeps for the session that offered it fires again on the next poll
@@ -200,6 +209,9 @@ pub struct DeltaAccumulator {
     /// lapse for has no entry. Kept here because a later poll replaces what
     /// the sensor itself remembers.
     pub lapses: Vec<(String, Lapse)>,
+    /// How many of the accumulated events skip the refractory
+    /// ([`Sensor::skips_refractory`]).
+    pub exempt_events: u32,
 }
 
 impl DeltaAccumulator {
@@ -210,6 +222,7 @@ impl DeltaAccumulator {
             window_start: Instant::now(),
             events: Vec::new(),
             lapses: Vec::new(),
+            exempt_events: 0,
         }
     }
 
@@ -225,6 +238,13 @@ impl DeltaAccumulator {
         self.window_start = Instant::now();
         self.events.clear();
         self.lapses.clear();
+        self.exempt_events = 0;
+    }
+
+    /// Whether every accumulated event skips the refractory, so the batch
+    /// starts none. False when nothing is accumulated.
+    pub fn only_exempt(&self) -> bool {
+        self.event_count > 0 && self.exempt_events == self.event_count
     }
 
     /// Record that the event `description` stays deliverable for `lapse`.
@@ -394,15 +414,10 @@ impl SensorSlot {
 
         let tick = epoch_secs();
 
-        // Absolute refractory: drop all observations silently. The agent
-        // needs a beat to process what just arrived.
-        if self.engagement.in_absolute_refractory(tick) {
-            for (_, description) in &observations {
-                self.sensor.dropped(description);
-            }
-            self.interval.on_change();
-            return true;
-        }
+        // Absolute refractory: drop every observation silently, except one
+        // that skips the refractory. The agent needs a beat to process what
+        // just arrived.
+        let absolute = self.engagement.in_absolute_refractory(tick);
 
         // Relative refractory: per-event gating. Each observation must
         // individually clear the elevated threshold to be accumulated.
@@ -416,15 +431,22 @@ impl SensorSlot {
 
         let mut accepted = 0;
         for (magnitude, description) in observations {
-            if magnitude >= per_event_gate {
+            let exempt = self.sensor.skips_refractory(&description);
+            if exempt || (!absolute && magnitude >= per_event_gate) {
                 if let Some(lapse) = self.sensor.lapse(&description) {
                     self.accumulator.note_lapse(&description, lapse);
                 }
                 self.accumulator.accumulate(magnitude, description);
+                self.accumulator.exempt_events += u32::from(exempt);
                 accepted += 1;
             } else {
                 self.sensor.dropped(&description);
             }
+        }
+        if absolute {
+            // Activity during the refractory still speeds the poll.
+            self.interval.on_change();
+            return true;
         }
 
         if accepted > 0 {
@@ -437,7 +459,13 @@ impl SensorSlot {
         }
     }
 
+    /// Whether the accumulated magnitude reaches the threshold the
+    /// refractory sets. An event that skips the refractory is held to the
+    /// sensor's own threshold alone.
     pub fn ready_to_disclose(&self) -> bool {
+        if self.accumulator.exempt_events > 0 {
+            return self.accumulator.magnitude >= self.sensor.emission_threshold();
+        }
         match self
             .engagement
             .effective_threshold(self.sensor.emission_threshold(), epoch_secs())

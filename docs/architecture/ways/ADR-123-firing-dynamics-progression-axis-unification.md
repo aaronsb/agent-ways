@@ -386,3 +386,12 @@ The ADR's Open Questions section is preserved above for the historical record. T
 ## Amendment (2026-10-03): the attend outward gate was removed
 
 The follow-up item above that names the attend sensor-peers outward-gate application, and its link to `docs/attend-and-monitor/salience.md`, are superseded. ADR-136 moved peer messages to a message lane with no salience gate, so the per-signal gate in sensor-peers was removed, and `salience.md` was deleted with it. The link in that item no longer resolves. The engine described here still drives the ways outward gate and the attend event-lane refractory.
+
+## Amendment (2026-11-24): an observation may skip the attend refractory
+
+A sensor can now mark an observation as skipping its slot's refractory (`Sensor::skips_refractory`). Such an observation is accumulated during the absolute and the relative refractory alike, it is held only to the sensor's own emission threshold, and a batch made only of such observations records no fire, so it starts no refractory. Every other observation is gated as before.
+
+The processes sensor marks a watched build tool's finish this way. Once the sensor reported only the session's own builds (PR #1348), each finish started the sensor's refractory, and a rebuild within 60 seconds of a notice was dropped, so an agent that fixed a failing build never heard the result. A build finish arrives once per build the session ran, so it cannot flood the session. The operator chose this over counting only batches above the event lane's cut, which still let a failure silence the rebuild after it. The decision was made in an interview in the working session on 2026-11-24.
+
+The operator also asked for cooldowns kept per kind of signal, so that one kind going off never silences another, and so that awareness balances against overload instead of decaying to irrelevance. That change is tracked as its own issue.
+

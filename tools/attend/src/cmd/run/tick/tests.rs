@@ -117,6 +117,79 @@ fn a_line_the_refractory_drops_leaves_its_session_trigger_to_fire_again() {
     assert!(slot.accumulator.events.is_empty(), "spent, it fires no more");
 }
 
+/// A sensor that reports one scripted poll at a time, and lets a line
+/// with "finished" in it skip the refractory, as the processes sensor
+/// does for a build finishing.
+struct Builds(Vec<Vec<(f64, String)>>);
+impl sensors::Sensor for Builds {
+    fn name(&self) -> &str {
+        "processes"
+    }
+    fn poll(&mut self, _: &sensors::Focus) -> Vec<(f64, String)> {
+        if self.0.is_empty() { Vec::new() } else { self.0.remove(0) }
+    }
+    fn emission_threshold(&self) -> f64 {
+        2.0
+    }
+    fn base_interval(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+    fn min_interval(&self) -> Duration {
+        Duration::from_secs(5)
+    }
+    fn decay_threshold(&self) -> u32 {
+        5
+    }
+    fn skips_refractory(&self, description: &str) -> bool {
+        description.contains(" finished")
+    }
+}
+
+/// A sink that writes every line and keeps what it was handed.
+#[derive(Default)]
+struct Written(Vec<String>);
+impl Sink for Written {
+    fn deliver(&mut self, batch: &[Disclosure]) -> Vec<Vec<Delivery>> {
+        batch.iter().map(|d| d.lines.iter().map(|(l, _)| { self.0.push(l.clone()); Delivery::Written }).collect()).collect()
+    }
+}
+
+/// Builds finishing one after another, within seconds, are each written:
+/// a success, a failure, a second failure, then a success. None of them
+/// starts a refractory that would drop the next.
+#[test]
+fn builds_finishing_back_to_back_are_each_written() {
+    let results = ["cargo finished (success)", "cargo finished (failure, code 101)", "cargo finished (failure, code 101)", "cargo finished (success)"];
+    let polls = results.iter().map(|r| vec![(3.0, r.to_string())]).collect();
+    let mut slots = vec![sensors::slot(Box::new(Builds(polls)), sensor_spec::Lane::Event, None)];
+    slots[0].engagement = sensor_trait::EngagementState::new(build_engagement(&config::Config::default()));
+    let focus = Focus { description: String::new(), working_dir: "/p".into(), keywords: Vec::new() };
+    let mut governor = DisclosureGovernor::new_permissive(Duration::ZERO, 100, Duration::from_secs(60));
+    let mut sink = Written::default();
+    for _ in results {
+        slots[0].poll(&focus);
+        assert!(slots[0].ready_to_disclose(), "{:?}", slots[0].accumulator.events);
+        try_disclose(&mut slots, &[0], &mut governor, true, &mut sink);
+        assert!(!slots[0].engagement.in_absolute_refractory(sensor_trait::epoch_secs()), "a build's line starts no refractory");
+    }
+    assert_eq!(sink.0, results);
+}
+
+/// While another line holds the sensor in its refractory, a build
+/// finishing still gets through, and an app's start is still dropped.
+#[test]
+fn a_build_finishing_passes_a_refractory_another_line_started() {
+    let polls = vec![vec![(2.0, "docker started".to_string()), (3.0, "make finished".to_string())]];
+    let mut slot = sensors::slot(Box::new(Builds(polls)), sensor_spec::Lane::Event, None);
+    slot.engagement = sensor_trait::EngagementState::new(build_engagement(&config::Config::default()));
+    slot.engagement.record_fire(sensor_trait::epoch_secs(), 1.0);
+    assert!(slot.engagement.in_absolute_refractory(sensor_trait::epoch_secs()));
+    let focus = Focus { description: String::new(), working_dir: "/p".into(), keywords: Vec::new() };
+    slot.poll(&focus);
+    assert_eq!(slot.accumulator.events, ["make finished"]);
+    assert!(slot.ready_to_disclose());
+}
+
 #[test]
 fn hash_file_is_stable_and_content_sensitive() {
     // The same-hash skip on the reload path (issue #140) depends on
