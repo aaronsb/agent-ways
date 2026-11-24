@@ -286,10 +286,12 @@ pub struct ChatPane {
     /// shows every DM. A chat that reopens another tab starts from the
     /// marks the last chat kept ([`reopen`]).
     shown: crate::hidden::Hidden,
-    /// The attend CLI the cleanup items run ([`cleanup`]), and the last
-    /// delete made, for Undo delete.
+    /// The attend CLI the cleanup items run ([`cleanup`]), the last delete
+    /// made, for Undo delete, and the last batch of ended sessions
+    /// tombstoned, for Undo tombstone.
     attend: std::path::PathBuf,
     undo: Option<cleanup::LastDelete>,
+    undo_tombstone: Option<cleanup::LastTombstone>,
     /// The delete or tombstone attend is working on, one at a time, with
     /// no time limit ([`cleanup`]).
     removing: Option<cleanup::Removal>,
@@ -379,6 +381,7 @@ impl ChatPane {
             shown: crate::hidden::Hidden::default(),
             attend: crate::attend_cli::program(),
             undo: None,
+            undo_tombstone: None,
             removing: None,
             delete_question_life: cleanup::DELETE_QUESTION_LIFE,
             pending: pending::Pending::default(),

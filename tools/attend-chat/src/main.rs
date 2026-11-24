@@ -80,7 +80,10 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             delete follows it on the menu.
                             A DM view's row and tab and a claude's row carry the
                             pair for the DMs with it, and a dead claude's row
-                            Tombstone…. Each asks first: y goes ahead
+                            Tombstone…. A click on the Agents heading counts
+                            the ended sessions and offers Tombstone ended
+                            sessions… (N), then Undo tombstone for that batch.
+                            Each asks first: y goes ahead
   Ctrl+X Ctrl+S             send now, to a quiet agent too, in any terminal
                             (Claude Code's chord; Ctrl+Enter does the same where
                             the terminal reports it)

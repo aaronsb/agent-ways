@@ -42,6 +42,9 @@
 //!   Tombstone… for a claude that is not live. The operator's own row
 //!   offers Leave #channel in Remove's place: Remove never takes out the
 //!   human at the keyboard, here or in the Remove agent picker.
+//! - the Agents heading of the left column: Tombstone ended sessions… (N),
+//!   with the count a dry run found, and Undo tombstone after one
+//!   ([`super::cleanup`]).
 //! - a DM view, by its row or its tab: Hide DMs, Hide messages here,
 //!   Delete read messages for everyone…; an agent's own DM view: Hide
 //!   review, and Tombstone… for an agent that is not live.
@@ -54,7 +57,7 @@
 //!
 //! Every item that drops something asks first: Hide messages here, Delete
 //! read messages for everyone… (once its age is picked), Leave, Delete
-//! channel, Remove and Tombstone…. The question is the shell's
+//! channel, Remove, Tombstone… and Tombstone ended sessions…. The question is the shell's
 //! ([`agent_tui::Open::Ask`]), on the bottom bar with its two answers as
 //! lozenges: `y` or a click on the first goes ahead; `n`, Esc, a click
 //! anywhere else or any other key keeps things as they are. A click opens
@@ -84,7 +87,7 @@ use crate::chip::Seen;
 use crate::groups::Invites;
 use crate::peers::Peer;
 
-use super::cleanup::{Count, DeleteAsk, DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE};
+use super::cleanup::{sessions_word, Count, DeleteAsk, AGENTS_MENU, DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE};
 use super::dm::{Kind, HIDE_DMS, HIDE_REVIEW, REVIEW_DMS, SHOW_DMS};
 use crate::attend_cli::Scope;
 use super::keys::{self, EnterAction};
@@ -148,6 +151,8 @@ pub(super) enum Step {
     DeleteRead(DeleteAsk),
     /// Tombstone the dead agent of this session id, and its name.
     Tombstone(String, String),
+    /// Tombstone the ended sessions, this many by the count.
+    TombstoneEnded(usize),
     /// Delete the channel (`/dissolve`).
     Delete(String),
     /// Take a member out of the channel (`/kick`).
@@ -164,12 +169,13 @@ impl Step {
             Step::Leave(c) => (format!("leave #{c}?"), "leave", "stay"),
             Step::DeleteRead(d) => return d.question(id, life),
             Step::Tombstone(_, name) => (format!("tombstone @{name}? its messages and its Agents row go away"), "tombstone", "keep"),
+            Step::TombstoneEnded(n) => (format!("tombstone {}? their messages and their Agents rows go away", sessions_word(*n)), "tombstone", "keep"),
             Step::Delete(c) => (format!("delete #{c} and its history for everyone?"), "delete", "keep"),
             Step::Remove(c, m) => (format!("remove @{} from #{c}?", m.label), "remove", "keep"),
         };
         let q = Question::new(id, text, yes, no);
         match self {
-            Step::Tombstone(..) | Step::Delete(_) | Step::Remove(..) => q.expires(agent_tui::Expiry::new(life)),
+            Step::Tombstone(..) | Step::TombstoneEnded(_) | Step::Delete(_) | Step::Remove(..) => q.expires(agent_tui::Expiry::new(life)),
             _ => q,
         }
     }
@@ -180,6 +186,7 @@ impl Step {
         let action = match self {
             Step::DeleteRead(_) => "delete".to_string(),
             Step::Tombstone(_, name) => format!("tombstone @{name}"),
+            Step::TombstoneEnded(_) => "tombstone ended sessions".to_string(),
             Step::Delete(c) => format!("delete #{c}"),
             Step::Remove(c, m) => format!("remove @{} from #{c}", m.label),
             Step::HideHere(..) | Step::Leave(_) => return None,
@@ -505,6 +512,7 @@ impl ChatPane {
         match id {
             _ if id.starts_with(ASK) => return self.answered(id, value == "y"),
             "common" => return self.common_item(value),
+            AGENTS_MENU => return self.agents_item(value),
             "theme" => return self.theme_picked(value),
             "keys" => {
                 if let Some((_, jump, focus)) = PRESETS.iter().find(|(l, _, _)| *l == value) {
@@ -973,6 +981,7 @@ impl ChatPane {
                 }
             }
             Step::Tombstone(member, name) => self.tombstone(&member, &name),
+            Step::TombstoneEnded(_) => self.tombstone_ended(),
             Step::Delete(c) => {
                 self.run("dissolve", SlashOutcome::Dissolve(Some(c)));
             }

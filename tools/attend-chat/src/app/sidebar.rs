@@ -18,8 +18,10 @@
 //! A click on a claude's row shows the DMs between the operator and it,
 //! and lists that view under the row; a click on a channel shows it. A
 //! click on what is shown already opens its menu, as Alt+digit does; a
-//! human's row and a member's row open the agent's menu at once. A menu
-//! docks on the line under its row. `attend.chat.sidebar_key` shows or
+//! human's row and a member's row open the agent's menu at once, and a
+//! click on the Agents heading opens the heading's menu
+//! ([`super::cleanup`], Tombstone ended sessions…). A menu docks on the
+//! line under its row. `attend.chat.sidebar_key` shows or
 //! hides the column, and a terminal too narrow for it beside the feed hides
 //! it.
 
@@ -53,7 +55,8 @@ const MIN_FEED: u16 = 50;
 /// has no send into another agent's DMs. `Member` is a row under a
 /// channel's, by the channel's name and the member's id, the same whether
 /// the member participates or is invited, so the cursor keeps to it when
-/// an invitation is answered.
+/// an invitation is answered. `Agents` is the Agents heading, which a click
+/// reaches and the keyboard's rows leave out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SideHit {
     Agent(String),
@@ -61,6 +64,7 @@ pub(super) enum SideHit {
     Review(String),
     Channel(String),
     Member(String, String),
+    Agents,
 }
 
 /// A row of the Channels section: a channel, by its index in the world's
@@ -230,7 +234,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     chat.hits.side_lists = [below(agents), below(channels)];
     header(f, agents, &format!("Agents {live}/{}{}", seen.len(), more(sa, vis_a, n_a)));
     let w = inner.width.saturating_sub(1) as usize;
-    let mut hits = Vec::new();
+    let mut hits = vec![(Rect { height: agents.height.min(1), ..agents }, SideHit::Agents)];
     for (k, (i, (hit, s))) in agents_list.iter().enumerate().skip(sa).take(vis_a).enumerate() {
         let r = Rect { y: agents.y + 1 + k as u16, height: 1, ..agents };
         let focused = focus == Some(i);

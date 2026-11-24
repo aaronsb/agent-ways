@@ -468,7 +468,7 @@ impl<'a> Step<'a> {
                 let w = self.world()?;
                 let mut channels = w.rows.iter().enumerate().filter_map(|(i, h)| match h {
                     SideHit::Channel(c) => Some((i, c.clone())),
-                    SideHit::Agent(_) | SideHit::Dm(_) | SideHit::Review(_) | SideHit::Member(..) => None,
+                    SideHit::Agent(_) | SideHit::Dm(_) | SideHit::Review(_) | SideHit::Member(..) | SideHit::Agents => None,
                 });
                 let Some((i, name)) = channels.nth(n - 1) else { return Ok(()) };
                 if self.ix.side_focus().is_some() {

@@ -22,6 +22,8 @@
 //!   view: either input opens its menu.
 //! - A member's row under a channel opens its agent's menu at once, docked
 //!   under the member's row, whether it participates or is invited.
+//! - The Agents heading of the column, by either click, counts the ended
+//!   sessions and then opens its menu ([`super::cleanup`]).
 //! - `≡` opens the common menu; `+` asks a new channel's name in an entry
 //!   dialog docked under it. The compose box is never borrowed (ADR-409).
 
@@ -48,6 +50,8 @@ pub(super) enum Target {
     /// An agent by its row under a channel: the channel's name and the
     /// agent's membership id.
     Member(String, String),
+    /// The Agents heading of the column.
+    Agents,
 }
 
 /// How it acts: select, which on the target shown opens its menu when
@@ -67,6 +71,7 @@ impl Target {
             SideHit::Review(member) => Target::View(Kind::Review, member),
             SideHit::Channel(name) => Target::Channel(name),
             SideHit::Member(channel, member) => Target::Member(channel, member),
+            SideHit::Agents => Target::Agents,
         }
     }
 
@@ -91,6 +96,7 @@ impl ChatPane {
         match target {
             Target::Common => self.common_menu(),
             Target::NewChannel => self.new_channel(),
+            Target::Agents => self.count_ended(),
             Target::Agent(member) => {
                 let tab = self.normal_tab();
                 let shown = [Kind::Dm, Kind::Review].iter().any(|k| tab == k.tab(&member));

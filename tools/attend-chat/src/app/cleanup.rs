@@ -26,10 +26,18 @@
 //! - Tombstone…, on a claude whose session is not live, by its row or its
 //!   own DM view: asked, then `attend message tombstone <session-id>`.
 //!   attend's refusal is shown as it words it.
+//! - Tombstone ended sessions… (N), on the Agents heading's menu. A click
+//!   on the heading runs `attend message tombstone --ended --dry-run`, and
+//!   the menu opens once it has counted. With nothing to tombstone the item
+//!   is left out, as Undo delete is while there is nothing to undo, and a
+//!   menu with no item says so on the status line instead. The pick asks
+//!   once with the count, then runs `attend message tombstone --ended`; the
+//!   status line names the batch, and the heading's menu then offers Undo
+//!   tombstone, which runs `attend message tombstone --undo <batch>`.
 //!
 //! The verbs run through the attend CLI ([`crate::attend_cli`]), every
 //! form of `attend message delete` (the dry run, the delete, the undo) and
-//! `attend message tombstone`, on a thread of their own with no time
+//! of `attend message tombstone`, on a thread of their own with no time
 //! limit (ADR-405, amendment of 2026-10-14): a delete runs to its end. The
 //! status line says what is running and for how long (`deleting… 12 s`)
 //! until it ends, a fresh result taking the line for its few seconds, and
@@ -57,7 +65,12 @@ pub(super) const SHOW_HIDDEN: &str = "Show hidden messages";
 pub(super) const DELETE_READ: &str = "Delete read messages for everyone…";
 pub(super) const UNDO_DELETE: &str = "Undo delete";
 pub(super) const TOMBSTONE: &str = "Tombstone…";
+pub(super) const TOMBSTONE_ENDED: &str = "Tombstone ended sessions…";
+pub(super) const UNDO_TOMBSTONE: &str = "Undo tombstone";
 pub(super) const CUSTOM: &str = "Custom…";
+
+/// The menu id of the Agents heading's menu.
+pub(super) const AGENTS_MENU: &str = "agents";
 
 /// How long a question that removes something for everyone stays open,
 /// before it closes as a no: a delete's once its count has landed, and
@@ -79,6 +92,12 @@ pub(super) enum Job {
     Undo(LastDelete),
     /// A tombstone of the session `member`, named `name`.
     Tombstone { member: String, name: String },
+    /// The count of the ended sessions, for the Agents heading's menu.
+    CountEnded,
+    /// The tombstone of the ended sessions asked about.
+    TombstoneEnded,
+    /// An undo of the last batch of ended sessions tombstoned.
+    UndoTombstone(LastTombstone),
 }
 
 /// The delete or tombstone running, with no time limit: attend working,
@@ -101,8 +120,38 @@ impl Job {
             Job::Delete(_) => "deleting",
             Job::Undo(_) => "undoing the delete",
             Job::Tombstone { .. } => "tombstoning",
+            Job::CountEnded => "counting ended sessions",
+            Job::TombstoneEnded => "tombstoning ended sessions",
+            Job::UndoTombstone(_) => "undoing the tombstone",
         }
     }
+}
+
+/// The last batch of ended sessions this chat tombstoned: its batch and
+/// how many, for Undo tombstone on the Agents heading's menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LastTombstone {
+    batch: String,
+    count: usize,
+}
+
+/// The items of the Agents heading's menu: Tombstone ended sessions… with
+/// the `ended` sessions counted, left out when there are none, then Undo
+/// tombstone while the chat's last batch can be undone (`undo`).
+pub(super) fn agents_items(ended: usize, undo: bool) -> Vec<Item> {
+    let mut out = Vec::new();
+    if ended > 0 {
+        out.push(Item::new(format!("{TOMBSTONE_ENDED} ({ended})")));
+    }
+    if undo {
+        out.push(Item::new(UNDO_TOMBSTONE));
+    }
+    out
+}
+
+/// `1 ended session`, `3 ended sessions`.
+pub(super) fn sessions_word(n: usize) -> String {
+    format!("{n} ended session{}", if n == 1 { "" } else { "s" })
 }
 
 /// The last delete this chat made: its scope, its batch and how many it
@@ -382,6 +431,90 @@ impl ChatPane {
         self.ask_attend(attend_cli::tombstone_argv(member), Job::Tombstone { member: member.to_string(), name: name.to_string() });
     }
 
+    /// The Agents heading clicked: count the ended sessions; the heading's
+    /// menu opens once attend has counted ([`ChatPane::ended_counted`]).
+    /// Refused while a delete or a tombstone runs; a dry run of the chat
+    /// runs no attend.
+    pub(super) fn count_ended(&mut self) {
+        if self.dry_run {
+            return self.say("dry run: attend message tombstone --ended not run", false);
+        }
+        self.ask_attend(attend_cli::ended_argv(true), Job::CountEnded);
+    }
+
+    /// The count's answer: the Agents heading's menu, docked under the
+    /// heading, or with no item to offer the status line says so.
+    fn ended_counted(&mut self, answer: Result<serde_json::Value, Failure>) {
+        let ended = match answer.and_then(|doc| attend_cli::ended(&doc)) {
+            Ok(e) => e.count,
+            Err(e) => return self.say(e.to_string(), true),
+        };
+        let items = agents_items(ended, self.undo_tombstone.is_some());
+        if items.is_empty() {
+            return self.say("no ended session to tombstone", false);
+        }
+        let anchor = self.side_row(&super::sidebar::SideHit::Agents).map_or(Anchor::Center, Anchor::Row);
+        self.to_open = Some(Open::Pick { id: AGENTS_MENU.into(), title: "agents".into(), items, multi: false, anchor });
+    }
+
+    /// An item of the Agents heading's menu.
+    pub(super) fn agents_item(&mut self, item: &str) {
+        if item == UNDO_TOMBSTONE {
+            return self.undo_ended();
+        }
+        let Some(n) = item.strip_prefix(TOMBSTONE_ENDED).and_then(|rest| rest.trim().trim_start_matches('(').trim_end_matches(')').parse().ok()) else { return };
+        if !self.refused_while_removing() {
+            self.ask(Step::TombstoneEnded(n));
+        }
+    }
+
+    /// The tombstone of the ended sessions asked about, answered yes.
+    pub(super) fn tombstone_ended(&mut self) {
+        if self.dry_run {
+            return self.say("dry run: attend message tombstone --ended not run", false);
+        }
+        self.ask_attend(attend_cli::ended_argv(false), Job::TombstoneEnded);
+    }
+
+    /// The tombstone's report: said, and its batch kept for Undo tombstone.
+    fn tombstoned_ended(&mut self, answer: Result<serde_json::Value, Failure>) {
+        match answer.and_then(|doc| attend_cli::ended(&doc)) {
+            Ok(e) => match e.batch {
+                Some(batch) => {
+                    self.say(format!("tombstoned {}: their messages leave every tab · Undo tombstone on the Agents menu · batch {batch}", sessions_word(e.count)), false);
+                    self.undo_tombstone = Some(LastTombstone { batch, count: e.count });
+                }
+                None => self.say("no ended session to tombstone", false),
+            },
+            Err(e) => self.say(e.to_string(), true),
+        }
+    }
+
+    /// Undo tombstone: the last batch's tombstones removed, its sessions'
+    /// messages shown again.
+    fn undo_ended(&mut self) {
+        let Some(last) = self.undo_tombstone.clone() else { return };
+        if self.dry_run {
+            return self.say("dry run: attend message tombstone --undo not run", false);
+        }
+        self.ask_attend(attend_cli::undo_tombstone_argv(&last.batch), Job::UndoTombstone(last));
+    }
+
+    /// The undo's report.
+    fn untombstoned(&mut self, last: LastTombstone, answer: Result<serde_json::Value, Failure>) {
+        match answer.and_then(|doc| attend_cli::tombstones_undone(&doc)) {
+            Ok((restored, kept)) => {
+                self.undo_tombstone = None;
+                let kept = match kept {
+                    0 => String::new(),
+                    n => format!("; {n} tombstoned again since stay"),
+                };
+                self.say(format!("restored {restored} of {} from batch {}{kept}", sessions_word(last.count), last.batch), false);
+            }
+            Err(e) => self.say(e.to_string(), true),
+        }
+    }
+
     /// What the delete or tombstone running now is doing: `deleting…`.
     pub(super) fn removing_now(&self) -> Option<String> {
         self.removing.as_ref().map(|r| format!("{}…", r.job.doing()))
@@ -397,8 +530,8 @@ impl ChatPane {
     /// running`.
     pub(super) fn running_what(&self) -> Option<&'static str> {
         self.removing.as_ref().map(|r| match r.job {
-            Job::DryRun { .. } => "a count still running",
-            Job::Tombstone { .. } => "a tombstone still running",
+            Job::DryRun { .. } | Job::CountEnded => "a count still running",
+            Job::Tombstone { .. } | Job::TombstoneEnded | Job::UndoTombstone(_) => "a tombstone still running",
             Job::Delete(_) | Job::Undo(_) => "a delete still running",
         })
     }
@@ -418,6 +551,9 @@ impl ChatPane {
             Job::Delete(asked) => format!("stopped deleting in {}: the ones it already marked come back with `attend message delete --undo`, which takes back the newest delete", asked.label),
             Job::Undo(last) => format!("stopped undoing batch {}: Undo delete on its menu runs it again", last.batch),
             Job::Tombstone { member, name } => format!("stopped tombstoning @{name}: if it went through, `attend message tombstone --undo {member}` takes it back"),
+            Job::CountEnded => "stopped counting: nothing was tombstoned".to_string(),
+            Job::TombstoneEnded => "stopped tombstoning the ended sessions: if it went through, `attend message tombstone --undo` takes back the newest batch".to_string(),
+            Job::UndoTombstone(last) => format!("stopped undoing batch {}: Undo tombstone on the Agents menu runs it again", last.batch),
         };
         self.say(note, false);
         self.stale();
@@ -460,6 +596,9 @@ impl ChatPane {
                 Ok(_) => self.say(format!("tombstoned @{name}: its messages leave every tab · undo: attend message tombstone --undo {member}"), false),
                 Err(e) => self.say(e.to_string(), true),
             },
+            Job::CountEnded => self.ended_counted(answer),
+            Job::TombstoneEnded => self.tombstoned_ended(answer),
+            Job::UndoTombstone(last) => self.untombstoned(last, answer),
         }
         self.stale();
     }
@@ -610,6 +749,60 @@ mod tests {
         c.answered_expired(&id);
         assert!(c.asked.is_none());
         assert_eq!(c.status, "delete cancelled: no answer in 60 s");
+    }
+
+    fn labels(items: &[Item]) -> Vec<&str> {
+        items.iter().map(|i| i.label.as_str()).collect()
+    }
+
+    /// The Agents heading's menu offers the count when there is one, and
+    /// Undo tombstone while the last batch can be undone; with neither it
+    /// offers nothing.
+    #[test]
+    fn the_agents_menu_offers_what_there_is_to_do() {
+        assert_eq!(labels(&agents_items(3, false)), ["Tombstone ended sessions… (3)"]);
+        assert_eq!(labels(&agents_items(1, true)), ["Tombstone ended sessions… (1)", UNDO_TOMBSTONE]);
+        assert_eq!(labels(&agents_items(0, true)), [UNDO_TOMBSTONE], "nothing to tombstone: the item is left out");
+        assert!(agents_items(0, false).is_empty());
+    }
+
+    fn ended(count: u64, batch: Option<&str>) -> Result<serde_json::Value, Failure> {
+        Ok(serde_json::json!({"dry_run": batch.is_none(), "count": count, "batch": batch, "sessions": []}))
+    }
+
+    /// The count opens the menu; its pick asks once, with the count, and
+    /// the question expires as a no. A count of nothing opens no menu.
+    #[test]
+    fn the_count_opens_the_menu_and_its_pick_asks_once() {
+        let mut c = ChatPane::new(None, Default::default());
+        c.ended_counted(ended(2, None));
+        match c.to_open.take() {
+            Some(Open::Pick { id, items, .. }) => assert_eq!((id.as_str(), labels(&items)), (AGENTS_MENU, vec!["Tombstone ended sessions… (2)"])),
+            other => panic!("no menu: {other:?}"),
+        }
+        c.agents_item("Tombstone ended sessions… (2)");
+        let q = opened(&mut c);
+        assert_eq!(q.question, "tombstone 2 ended sessions? their messages and their Agents rows go away");
+        assert!(q.expiry.as_ref().is_some_and(|e| e.after == DELETE_QUESTION_LIFE && !e.answers_yes()), "{q:?}");
+        assert_eq!(c.asked.as_ref().map(|(_, s)| s.clone()), Some(Step::TombstoneEnded(2)));
+        c.ended_counted(ended(0, None));
+        assert!(c.to_open.is_none());
+        assert_eq!((c.status.as_str(), c.status_is_error), ("no ended session to tombstone", false));
+    }
+
+    /// The tombstone's batch is kept for Undo tombstone, and the undo's
+    /// report lets it go.
+    #[test]
+    fn the_batch_is_kept_for_undo_and_its_undo_lets_it_go() {
+        let mut c = ChatPane::new(None, Default::default());
+        c.tombstoned_ended(ended(2, Some("17-4")));
+        assert_eq!(c.status, "tombstoned 2 ended sessions: their messages leave every tab · Undo tombstone on the Agents menu · batch 17-4");
+        let last = c.undo_tombstone.clone().expect("kept for Undo tombstone");
+        c.ended_counted(ended(0, None));
+        assert!(matches!(c.to_open.take(), Some(Open::Pick { items, .. }) if labels(&items) == [UNDO_TOMBSTONE]), "Undo tombstone with nothing to count");
+        c.untombstoned(last, Ok(serde_json::json!({"batch": "17-4", "age_secs": 5, "restored": 1, "sessions": ["a"], "kept": ["b"]})));
+        assert_eq!(c.status, "restored 1 of 2 ended sessions from batch 17-4; 1 tombstoned again since stay");
+        assert!(c.undo_tombstone.is_none());
     }
 
     /// A question the shell drops leaves nothing waiting on its answer.

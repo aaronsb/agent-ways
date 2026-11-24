@@ -296,7 +296,7 @@ fn person_trays(base: &Path) -> Vec<PathBuf> {
 }
 
 /// The directories `scope` covers, and its label.
-fn scope_dirs(base: &Path, scope: &Scope) -> Result<(Vec<PathBuf>, String), DeleteError> {
+pub(crate) fn scope_dirs(base: &Path, scope: &Scope) -> Result<(Vec<PathBuf>, String), DeleteError> {
     let open = || base.join(attend_groups::BROADCAST_DIR);
     Ok(match scope {
         Scope::Open => (vec![open()], "#open".to_string()),

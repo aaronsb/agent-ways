@@ -211,6 +211,11 @@ tomb-menu    | gone  | wait:Agents rside:○ wait:Tombstone…
 tomb-ask     | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone
 tomb-said    | gone  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone pause:1.2 click:y_tombstone wait:tombstoned
 review-tomb  | gone  | wait:Agents rside:○ wait:Review_DMs click:Review_DMs wait:read_only rside:DMs wait:Tombstone…
+ended-menu   | gone  | wait:Agents side:Agents wait:Tombstone_ended
+ended-ask    | gone  | wait:Agents side:Agents wait:Tombstone_ended click:Tombstone_ended wait:y_tombstone
+ended-said   | gone  | wait:Agents side:Agents wait:Tombstone_ended click:Tombstone_ended wait:y_tombstone pause:1.2 click:y_tombstone wait:tombstoned_1
+ended-undo   | gone  | wait:Agents side:Agents wait:Tombstone_ended click:Tombstone_ended wait:y_tombstone pause:1.2 click:y_tombstone wait:tombstoned_1 rside:Agents wait:pick_one:_agents click:Undo_tombstone wait:restored
+ended-none   | base  | wait:Agents side:Agents wait:no_ended_session
 quit-ask     | base  | wait:Agents F2 q wait:quit?
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
@@ -401,7 +406,8 @@ fixture() { # kind
   fi
   [ "${1%16}" = full ] && mkdir -p "$sig/@five" "$sig/@eight" "$sig/@everyone" "$sig/@long"
   # In `gone`, gamma's record names a pid no process holds: it has
-  # exited, so its row offers Tombstone… and attend accepts it. Elsewhere
+  # exited, so its row offers Tombstone… and attend accepts it, and the
+  # Agents heading's menu counts it as the one ended session. Elsewhere
   # it is quiet, and a send to it is refused as one to a quiet agent.
   for s in "${sessions[@]}"; do
     local pid=$i

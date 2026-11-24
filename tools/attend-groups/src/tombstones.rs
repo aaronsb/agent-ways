@@ -9,11 +9,12 @@
 //! file, and its mark, once the mark has aged past its limits.
 //!
 //! Layout:
-//! - `<session-id>`: a session tombstone, an empty file whose mtime is
-//!   when it was written. Every reader skips what that session sent up to
-//!   then; what it sends later, back under `--resume`, shows. `attend
-//!   message tombstone` writes it for a session that has exited, and
-//!   `--undo` removes it.
+//! - `<session-id>`: a session tombstone, a file whose mtime is when it
+//!   was written. Every reader skips what that session sent up to then;
+//!   what it sends later, back under `--resume`, shows. `attend message
+//!   tombstone` writes it for a session that has exited, and `--undo`
+//!   removes it. A tombstone a batch wrote holds the batch's id; one a
+//!   single tombstone wrote is empty.
 //! - `messages/<key>`: one mark per message. The key is the message's
 //!   seen-set key, its filename, which is unique across rooms. The file's
 //!   mtime is the mark time and its content the id of the batch that wrote
@@ -22,6 +23,15 @@
 //!   `attend message delete --undo` can take that delete back. Batch ids
 //!   are the mark time in milliseconds, zero-padded, then the writer's pid,
 //!   so the newest batch sorts last.
+//! - `session-batches/<batch-id>`: the sessions one `attend message
+//!   tombstone --ended` tombstoned, one per line, so `--undo` can take that
+//!   batch back. The ids have the form of the delete batches' ids. A line
+//!   holds the session id alone when the batch wrote a new tombstone. When
+//!   the batch moved a tombstone already there, the line also holds the
+//!   earlier cut in milliseconds and the batch that owned the earlier
+//!   tombstone, or `-` for none. An undo restores only the tombstones that
+//!   still hold its batch's id, so a tombstone of the same session written
+//!   after the batch stands.
 //!
 //! The directory name starts with `_`, so the project-liveness sweep treats
 //! it as a shared room and reads only `.signal` files in it, of which it
@@ -38,6 +48,7 @@ pub const TOMBSTONES_DIR: &str = "_tombstones";
 
 const MESSAGES: &str = "messages";
 const BATCHES: &str = "batches";
+const SESSION_BATCHES: &str = "session-batches";
 
 /// The mark store under signals base `base`.
 pub fn dir(base: &Path) -> PathBuf {
@@ -50,6 +61,17 @@ fn messages_dir(base: &Path) -> PathBuf {
 
 fn batches_dir(base: &Path) -> PathBuf {
     dir(base).join(BATCHES)
+}
+
+fn session_batches_dir(base: &Path) -> PathBuf {
+    dir(base).join(SESSION_BATCHES)
+}
+
+/// A new batch id: the time in milliseconds, zero-padded, then this
+/// process's id, so the newest batch sorts last.
+fn new_batch_id() -> String {
+    let millis = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    format!("{millis:015}-{}", std::process::id())
 }
 
 /// The names of the files directly in `dir`, without dotfiles.
@@ -98,8 +120,8 @@ pub fn valid_session_id(id: &str) -> bool {
 }
 
 /// Tombstone session `id` as of now. A tombstone already there moves to
-/// now, so the cut takes in what the session sent since; returns whether
-/// one was there.
+/// now, so the cut takes in what the session sent since, and no batch owns
+/// it any more: a batch's undo leaves it. Returns whether one was there.
 pub fn mark_session(base: &Path, id: &str) -> io::Result<bool> {
     if !valid_session_id(id) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("`{id}` is not a session id")));
@@ -107,11 +129,160 @@ pub fn mark_session(base: &Path, id: &str) -> io::Result<bool> {
     fs::create_dir_all(dir(base))?;
     let path = dir(base).join(id);
     let existed = path.is_file();
-    let file = fs::OpenOptions::new().write(true).create(true).truncate(false).open(&path)?;
-    if existed {
-        file.set_modified(SystemTime::now())?;
-    }
+    let file = fs::OpenOptions::new().write(true).create(true).truncate(true).open(&path)?;
+    file.set_modified(SystemTime::now())?;
     Ok(existed)
+}
+
+/// What a session's tombstone held before a batch moved it: its cut, and
+/// the batch that owned it, if one did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Prior {
+    at: SystemTime,
+    owner: Option<String>,
+}
+
+impl Prior {
+    /// The tombstone of session `id` as it stands, if there is one.
+    fn of(base: &Path, id: &str) -> Option<Prior> {
+        let at = fs::metadata(dir(base).join(id)).and_then(|m| m.modified()).ok()?;
+        Some(Prior { at, owner: session_owner(base, id) })
+    }
+
+    /// The record line's tail: the cut in milliseconds, then the owner or
+    /// `-`.
+    fn line(&self) -> String {
+        let millis = self.at.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        format!("{millis} {}", self.owner.as_deref().unwrap_or("-"))
+    }
+
+    /// A record line's tail, as [`Prior::line`] writes it.
+    fn parse(millis: &str, owner: Option<&str>) -> Option<Prior> {
+        let at = SystemTime::UNIX_EPOCH + Duration::from_millis(millis.parse().ok()?);
+        Some(Prior { at, owner: owner.filter(|o| *o != "-" && valid_batch_id(o)).map(str::to_string) })
+    }
+}
+
+/// The batch whose id session `id`'s tombstone holds, if a batch wrote it.
+fn session_owner(base: &Path, id: &str) -> Option<String> {
+    fs::read_to_string(dir(base).join(id)).ok().map(|b| b.trim().to_string()).filter(|b| !b.is_empty())
+}
+
+/// Put session `id`'s tombstone back as `prior` says it was, or remove it
+/// when there was none.
+fn restore_session(base: &Path, id: &str, prior: Option<&Prior>) -> io::Result<()> {
+    let path = dir(base).join(id);
+    match prior {
+        None => match fs::remove_file(&path) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        },
+        Some(p) => write_session(&path, p.owner.as_deref().unwrap_or_default(), p.at),
+    }
+}
+
+/// Write the tombstone at `path` holding `owner`, its cut at `at`.
+fn write_session(path: &Path, owner: &str, at: SystemTime) -> io::Result<()> {
+    fs::write(path, owner)?;
+    fs::File::options().write(true).open(path)?.set_modified(at)
+}
+
+/// Tombstone sessions `ids` as of now, as one batch. An id that is not an
+/// agent's session id is left out. Returns the batch id and the sessions
+/// it tombstoned; with none it writes nothing and returns `None`. The
+/// batch's record is written before its tombstones. When a tombstone
+/// cannot be written, the ones written before it are put back as they were
+/// and the record is removed before the error returns, so no record lists
+/// a tombstone that was never there.
+pub fn mark_sessions(base: &Path, ids: &[String]) -> io::Result<Option<(String, Vec<String>)>> {
+    let mut ids: Vec<String> = ids.iter().filter(|id| valid_session_id(id)).cloned().collect();
+    ids.sort();
+    ids.dedup();
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    let batch = new_batch_id();
+    let priors: Vec<Option<Prior>> = ids.iter().map(|id| Prior::of(base, id)).collect();
+    let record: String = ids
+        .iter()
+        .zip(&priors)
+        .map(|(id, prior)| match prior {
+            Some(p) => format!("{id} {}\n", p.line()),
+            None => format!("{id}\n"),
+        })
+        .collect();
+    let record_path = session_batches_dir(base).join(&batch);
+    agent_settings::writer::write_atomic(&record_path, record)?;
+    let now = SystemTime::now();
+    for (n, id) in ids.iter().enumerate() {
+        if let Err(e) = write_session(&dir(base).join(id), &batch, now) {
+            for (done, prior) in ids.iter().zip(&priors).take(n + 1) {
+                restore_session(base, done, prior.as_ref()).ok();
+            }
+            fs::remove_file(&record_path).ok();
+            return Err(e);
+        }
+    }
+    Ok(Some((batch, ids)))
+}
+
+/// The session batches on record, oldest first.
+pub fn session_batches(base: &Path) -> Vec<String> {
+    let mut ids: Vec<String> = file_names(&session_batches_dir(base)).filter(|n| valid_batch_id(n)).collect();
+    ids.sort();
+    ids
+}
+
+/// What [`undo_sessions`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionUndo {
+    Undone {
+        batch: String,
+        /// The sessions whose tombstones it removed, or moved back to the
+        /// cut they had before the batch.
+        restored: Vec<String>,
+        /// The sessions it left as they are: tombstoned again since the
+        /// batch, or no longer tombstoned.
+        kept: Vec<String>,
+    },
+    /// No batch by that id, or none at all.
+    NoBatch,
+}
+
+/// Take back session batch `batch`, or the newest when `None`. Each
+/// tombstone that still holds the batch's id is removed, or moved back to
+/// the cut and the owner it had before the batch, and the batch's record
+/// is removed. A tombstone written since, by a single tombstone or another
+/// batch, stays.
+pub fn undo_sessions(base: &Path, batch: Option<&str>) -> io::Result<SessionUndo> {
+    let batch = match batch {
+        Some(b) if valid_batch_id(b) => b.to_string(),
+        Some(_) => return Ok(SessionUndo::NoBatch),
+        None => match session_batches(base).pop() {
+            Some(b) => b,
+            None => return Ok(SessionUndo::NoBatch),
+        },
+    };
+    let record_path = session_batches_dir(base).join(&batch);
+    let record = match fs::read_to_string(&record_path) {
+        Ok(r) => r,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(SessionUndo::NoBatch),
+        Err(e) => return Err(e),
+    };
+    let (mut restored, mut kept) = (Vec::new(), Vec::new());
+    for line in record.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(id) = parts.next().filter(|id| valid_session_id(id)) else { continue };
+        let prior = parts.next().and_then(|millis| Prior::parse(millis, parts.next()));
+        if session_owner(base, id).as_deref() == Some(batch.as_str()) {
+            restore_session(base, id, prior.as_ref())?;
+            restored.push(id.to_string());
+        } else {
+            kept.push(id.to_string());
+        }
+    }
+    fs::remove_file(&record_path)?;
+    Ok(SessionUndo::Undone { batch, restored, kept })
 }
 
 /// Remove session `id`'s tombstone. Returns whether there was one.
@@ -182,8 +353,7 @@ pub fn mark_messages(base: &Path, keys: &[String]) -> io::Result<Option<(String,
     if fresh.is_empty() {
         return Ok(None);
     }
-    let millis = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-    let batch = format!("{millis:015}-{}", std::process::id());
+    let batch = new_batch_id();
     fs::create_dir_all(&marks)?;
     let list: String = fresh.iter().map(|k| format!("{k}\n")).collect();
     agent_settings::writer::write_atomic(&batches_dir(base).join(&batch), list)?;
@@ -530,6 +700,80 @@ mod tests {
         assert_eq!(mark_messages(&b, &[]).unwrap(), None);
         assert_eq!(mark_messages(&b, &keys(&["../x", ".hidden"])).unwrap(), None);
         assert!(batches(&b).is_empty());
+        fs::remove_dir_all(&b).ok();
+    }
+
+    const S1: &str = "11111111-1111-4111-8111-111111111111";
+    const S2: &str = "22222222-2222-4222-8222-222222222222";
+    const S3: &str = "33333333-3333-4333-8333-333333333333";
+    const S4: &str = "44444444-4444-4444-8444-444444444444";
+
+    /// Date session `id`'s tombstone `ago` back.
+    fn age_session(b: &Path, id: &str, ago: Duration) {
+        fs::File::options().write(true).open(dir(b).join(id)).unwrap().set_modified(SystemTime::now() - ago).unwrap();
+    }
+
+    fn restored(u: SessionUndo) -> (Vec<String>, Vec<String>) {
+        match u {
+            SessionUndo::Undone { restored, kept, .. } => (restored, kept),
+            other => panic!("expected an undo, got {other:?}"),
+        }
+    }
+
+    /// A batch tombstones its sessions, moving one already there; a later
+    /// single tombstone of one of them, and one of another session, stand
+    /// through the batch's undo, and the moved one goes back to its cut.
+    #[test]
+    fn a_session_batch_undo_takes_back_only_what_it_still_owns() {
+        let b = base("sessions");
+        mark_session(&b, S1).unwrap();
+        age_session(&b, S1, OLD);
+        let ten_minutes_ago = SystemTime::now() - Duration::from_secs(600);
+        let (batch, ids) = mark_sessions(&b, &keys(&[S3, S1, S2, "aaron", S2])).unwrap().unwrap();
+        assert_eq!(ids, keys(&[S1, S2, S3]), "a person's id is left out, the rest sorted once");
+        assert_eq!(session_batches(&b), vec![batch.clone()]);
+        let marks = Marks::load(&b);
+        assert!([S1, S2, S3].iter().all(|s| marks.hides_sender(s, ten_minutes_ago)), "S1's cut moved to now");
+
+        mark_session(&b, S3).unwrap();
+        mark_session(&b, S4).unwrap();
+        let (back, kept) = restored(undo_sessions(&b, None).unwrap());
+        assert_eq!((back, kept), (keys(&[S1, S2]), keys(&[S3])));
+        assert_eq!(sessions(&b), keys(&[S1, S3, S4]), "S2 was new: removed; the later single tombstones stand");
+        let marks = Marks::load(&b);
+        assert!(!marks.hides_sender(S1, ten_minutes_ago) && marks.hides_sender(S1, SystemTime::now() - OLD - Duration::from_secs(60)), "S1 is back at its old cut");
+        assert_eq!(session_owner(&b, S1), None, "and owned by no batch, as before");
+        assert!(session_batches(&b).is_empty());
+        assert_eq!(undo_sessions(&b, None).unwrap(), SessionUndo::NoBatch, "nothing left to undo");
+        assert_eq!(undo_sessions(&b, Some(&batch)).unwrap(), SessionUndo::NoBatch, "undone once");
+        fs::remove_dir_all(&b).ok();
+    }
+
+    /// Two batches over one session: undoing the newer gives the tombstone
+    /// back to the older, whose undo then removes it.
+    #[test]
+    fn a_newer_batch_hands_its_session_back_to_the_older() {
+        let b = base("nested");
+        let (first, _) = mark_sessions(&b, &keys(&[S1])).unwrap().unwrap();
+        age_session(&b, S1, OLD);
+        std::thread::sleep(Duration::from_millis(2));
+        let (second, _) = mark_sessions(&b, &keys(&[S1, S2])).unwrap().unwrap();
+        assert_eq!(session_batches(&b), vec![first.clone(), second.clone()]);
+        assert_eq!(restored(undo_sessions(&b, None).unwrap()), (keys(&[S1, S2]), vec![]), "the newer batch first");
+        assert_eq!(sessions(&b), keys(&[S1]), "S2 was new to the newer batch");
+        assert_eq!(session_owner(&b, S1), Some(first.clone()), "S1 goes back to the older batch");
+        assert!(!Marks::load(&b).hides_sender(S1, SystemTime::now() - Duration::from_secs(600)), "at the older cut");
+        assert_eq!(restored(undo_sessions(&b, None).unwrap()), (keys(&[S1]), vec![]));
+        assert!(sessions(&b).is_empty() && session_batches(&b).is_empty());
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn no_session_writes_no_session_batch() {
+        let b = base("no-sessions");
+        assert_eq!(mark_sessions(&b, &keys(&["aaron", "../x"])).unwrap(), None);
+        assert!(session_batches(&b).is_empty() && sessions(&b).is_empty());
+        assert_eq!(undo_sessions(&b, Some("not a batch")).unwrap(), SessionUndo::NoBatch);
         fs::remove_dir_all(&b).ok();
     }
 }
