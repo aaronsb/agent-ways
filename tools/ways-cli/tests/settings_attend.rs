@@ -155,12 +155,29 @@ fn a_copied_attend_file_reads_with_file() {
     assert_eq!(fx.run(&["settings", "lint", "--file", user.to_str().unwrap()]).2, 3);
 }
 
+/// `engagement.peer_activity_window`, which attend 0.35.2's config template
+/// and `attend config tune --apply` wrote, is retired: lint names it, and
+/// `ways settings fix attend.engagement` removes it and keeps the rest.
+#[test]
+fn settings_fix_removes_the_retired_peer_activity_window() {
+    let fx = Fx::new();
+    fx.write(&fx.user(), "engagement:\n  burst_threshold: 5\n  peer_activity_window: 900  # per-peer engagement window\n");
+    let (out, _, code) = fx.run(&["settings", "lint"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("<ROOT>/xdg/config/attend/config.yaml:3: [attend.engagement] engagement.peer_activity_window: retired with the peers sensor's message scanning and is ignored; delete it"), "{out}");
+    let (_, err, code) = fx.run(&["settings", "fix", "attend.engagement"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(fx.read(&fx.user()), "engagement:\n  burst_threshold: 5\n", "the retired key goes, the operator's value stays");
+    let (out, _, code) = fx.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}");
+}
+
 #[test]
 fn emit_prints_attend_s_canonical_fragment_and_apply_takes_it_back() {
     let fx = Fx::new();
     let (frag, _, code) = fx.run(&["settings", "emit", "attend.engagement"]);
     assert_eq!(code, 0);
-    assert_eq!(frag, "engagement:\n  burst_threshold: 3\n  step_multiplier: 1.25\n  absolute_refractory: 60\n  decay_per_minute: 0.1\n  peer_activity_window: 900\n");
+    assert_eq!(frag, "engagement:\n  burst_threshold: 3\n  step_multiplier: 1.25\n  absolute_refractory: 60\n  decay_per_minute: 0.1\n");
     let path = fx.root.join("frag.yaml");
     fx.write(&path, &frag.replace("0.1", "0.2"));
     let (_, err, code) = fx.run(&["settings", "apply", "--file", path.to_str().unwrap()]);

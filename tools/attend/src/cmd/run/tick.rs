@@ -43,10 +43,6 @@ pub(super) struct TickState<'a> {
     /// event lane keeps `governor`; messages must not be starved by it.
     pub(super) msg_governor: &'a mut DisclosureGovernor,
     pub(super) last_checkpoint: &'a mut Instant,
-    /// Whether the peers sensor has checkpointed at least once this
-    /// process — the first poll persists its cold-start baseline even
-    /// when nothing changed (ADR-172; PR #385 review).
-    pub(super) peers_checkpointed_once: &'a mut bool,
     pub(super) last_instance_touch: &'a mut Instant,
     pub(super) last_cleanup: &'a mut Option<Instant>,
     pub(super) state_store: &'a state::StateStore,
@@ -175,26 +171,6 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         let scheduled = s.queue.pop().unwrap();
         let i = scheduled.index;
 
-        // ADR-172 Decision 3: the drain is a second writer to the shared
-        // seen-set. Re-import drain-recorded consumption from disk before
-        // the peers sensor scans, so a message already delivered at a
-        // turn boundary is not re-emitted by the poller. The remaining
-        // race (a drain landing between this read and the scan) costs at
-        // worst a duplicate notification — at-least-once, never loss.
-        if s.slots[i].is_crate("peers") {
-            if let Some(snap) = s.state_store.load() {
-                let marks: Vec<(String, String)> = snap
-                    .seen_signals
-                    .into_iter()
-                    .map(|k| ("seen_signal".to_string(), k))
-                    .chain(snap.baselined.then(|| ("baselined".to_string(), "true".to_string())))
-                    .collect();
-                if !marks.is_empty() {
-                    s.slots[i].import_state(&marks);
-                }
-            }
-        }
-
         let changed = s.slots[i].poll(s.focus);
 
         // Only log when something changed — quiet polls are silent.
@@ -223,24 +199,6 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         // refractory gate unchanged.
         let is_message_lane = s.slots[i].message_lane;
 
-        // ADR-172 Decision 3, the other direction: the sensor marks
-        // scanned signals seen in memory, but the drain reads the FILE
-        // at the next turn boundary — an interval-deferred checkpoint
-        // would let the drain re-deliver what the poller just surfaced.
-        // Checkpoint immediately on any peers change so on-disk
-        // consumption keeps pace with both writers. Union semantics
-        // make the extra write safe; message traffic makes it rare.
-        // The first peers poll checkpoints even when quiet: it may have
-        // just baselined the cold-start backlog in memory, and until
-        // that reaches disk the drain would treat the session as cold
-        // and baseline again (PR #385 review, blocking finding).
-        if is_message_lane && (changed || !*s.peers_checkpointed_once) {
-            let snapshot = collect_snapshot(s.slots);
-            s.state_store.checkpoint(&snapshot);
-            *s.last_checkpoint = Instant::now();
-            *s.peers_checkpointed_once = true;
-        }
-
         if (is_message_lane && s.slots[i].accumulator.magnitude > 0.0)
             || s.slots[i].ready_to_disclose()
         {
@@ -268,17 +226,9 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // lane (git/process) keeps the strict, rate-ballooning governor that
     // suppresses observation noise. The message lane, which a sensor's
     // file declares (ADR-403 §3a), rides a permissive governor: authored
-    // messages flow at normal cadence and a burst — already coalesced into
-    // one digest by sensor-peers — discloses promptly instead of being
-    // starved.
-    // KNOWN LIMITATION (#139): the lane is chosen per
-    // *sensor*, but the `peers` sensor emits BOTH authored messages and
-    // peer-presence *events* (peer started/exited, status). Today all of
-    // it rides the message lane, so peer-presence skips the refractory and
-    // neuron-decay the event lane gives git/process. No message loss —
-    // only presence-noise control is relaxed. The clean fix is to split
-    // message scanning into its own sensor so the lane is chosen per
-    // observation (also the seam a future Slack event-sensor wants).
+    // messages flow at normal cadence and a burst discloses promptly
+    // instead of being starved. The peers sensor reports presence alone,
+    // on the event lane, since the mod's drain carries messages (#139).
     let (msg_ready, evt_ready): (Vec<usize>, Vec<usize>) = ready_indices
         .iter()
         .partition(|&&i| s.slots[i].message_lane);
@@ -422,21 +372,14 @@ fn try_disclose(
     spent
 }
 
-/// The state a restarted run hands the sensor named `name`, running the
+/// The state a restarted host hands the sensor named `name`, running the
 /// compiled sensor `crate_id` when it is one, from the session's
-/// checkpoint: the reverse of [`collect_snapshot`]. The peers sensor gets
-/// its seen-set and cold-start mark, the context sensor its disclosed
-/// thresholds, and a file sensor its session memory, so a trigger that
-/// fired before a re-exec stays spent for the rest of the session.
+/// checkpoint: the reverse of [`collect_snapshot`]. The context sensor gets
+/// its disclosed thresholds, and a file sensor its session memory, so a
+/// trigger that fired before a re-exec stays spent for the rest of the
+/// session.
 pub(super) fn restored_state(name: &str, crate_id: Option<&str>, snapshot: &state::StateSnapshot) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = match crate_id.unwrap_or_default() {
-        "peers" => snapshot
-            .seen_signals
-            .iter()
-            .map(|s| ("seen_signal".to_string(), s.clone()))
-            .chain(std::iter::once(("reply_hint_shown".to_string(), snapshot.reply_hint_shown.to_string())))
-            .chain(snapshot.baselined.then(|| ("baselined".to_string(), "true".to_string())))
-            .collect(),
         "context" => snapshot.disclosed_thresholds.iter().map(|t| ("disclosed_threshold".to_string(), t.to_string())).collect(),
         _ => Vec::new(),
     };
@@ -449,30 +392,18 @@ pub(super) fn restored_state(name: &str, crate_id: Option<&str>, snapshot: &stat
 pub(super) fn collect_snapshot(slots: &[sensors::SensorSlot]) -> state::StateSnapshot {
     let mut snapshot = state::StateSnapshot::default();
     for slot in slots {
-        let peers = slot.is_crate("peers");
         for (key, value) in slot.export_state() {
             match key.as_str() {
-                "seen_signal" => {
-                    snapshot.seen_signals.insert(value);
-                }
                 "disclosed_threshold" => {
                     if let Ok(t) = value.parse::<u8>() {
                         snapshot.disclosed_thresholds.push(t);
                     }
-                }
-                "reply_hint_shown" => {
-                    snapshot.reply_hint_shown = value == "true";
                 }
                 "context_pct" => {
                     snapshot.context_pct = value.parse().ok();
                 }
                 crate::sensors::hosted::SESSION_MEMORY => {
                     snapshot.sensor_memory.insert(slot.name().to_string(), value);
-                }
-                // The message lane's cold-start mark: only the peers sensor
-                // applies the rule.
-                "baselined" if peers => {
-                    snapshot.baselined |= value == "true";
                 }
                 _ => {}
             }

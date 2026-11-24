@@ -233,7 +233,7 @@ fn room_label(room: &Room) -> String {
 /// without delivering; a message a delete marked is passed over unrecorded
 /// (`marks`, ADR-404 D3e). Under
 /// `baselining` (no seen-set yet) the messages from others go through
-/// `attend_state::cold_start`, the rule the peers sensor applies too:
+/// `attend_state::cold_start`:
 /// addressed mail sent since the session's process started and `#open` and
 /// channel messages posted since it started listening are delivered, the
 /// rest is marked without being shown, and the scan reports a note counting
@@ -265,7 +265,7 @@ pub(crate) fn scan_pending(
                 Some(f) if f.ends_with(".signal") => f.to_string(),
                 _ => continue,
             };
-            // The key the peers sensor uses: the signal's filename.
+            // The seen-set key: the signal's filename.
             let key = attend_state::seen_key(&filename);
             if seen.contains(&key) {
                 continue;
@@ -467,10 +467,10 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
 
     let store = attend_state::StateStore::new(Some(session_id.clone()));
 
-    // Cold start = no conduit has applied the cold-start rule yet: no
-    // state file, or one without `baselined` (the peers sensor checkpoints
-    // on its first poll, before it scans messages). Load once; the same
-    // snapshot supplies the seen-set.
+    // Cold start = no drain has applied the cold-start rule yet: no state
+    // file, or one without `baselined` (the sensor host checkpoints its
+    // own state into the same file before any drain runs). Load once; the
+    // same snapshot supplies the seen-set.
     let snapshot = store.load();
     let baselining = !snapshot.as_ref().is_some_and(|s| s.baselined);
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
@@ -552,8 +552,9 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // Deliver, THEN record: a crash between the two re-delivers at the
     // next boundary (the seen-set never got the marks), which dedup
     // tolerates — at-least-once. The reverse order would mark messages
-    // consumed with no conduit having shown them: loss on BOTH conduits,
-    // since the sensor imports drain marks (PR #385 review, finding 2).
+    // consumed with nothing having shown them: loss, since every reader
+    // of the seen-set takes a mark as delivered (PR #385 review, finding
+    // 2).
     if mode == DrainMode::Json {
         print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref(), lapsed);
     } else if hook_mode {
@@ -1457,62 +1458,6 @@ mod drain_tests {
             ]
         );
         assert_eq!(doc["schema"], DRAIN_JSON_SCHEMA);
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    /// Issue #534: one message, two conduits, one name. A real
-    /// `PeerSensor` polls the fixture tray (the Monitor conduit) and the
-    /// scan core drains it (the Stop-hook conduit); the sender text must
-    /// be identical, or a receiver has to know both forms to correlate a
-    /// notification with a later drain row.
-    #[cfg(feature = "sensor-peers")]
-    #[test]
-    fn monitor_and_drain_render_the_same_sender() {
-        use sensor_trait::{Focus, Sensor};
-
-        let dir = scan_fixture("conduits");
-        write_signal(&dir, "peer-1", "claude:other-session", "same name on both");
-        // Drain path.
-        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], false, &Default::default(), NOW);
-        assert_eq!(delivered.len(), 1);
-        let drained = &delivered[0];
-
-        // Monitor path: the sensor scans only the fixture, as its project
-        // tray. A non-empty state import skips the cold-start baseline
-        // that would otherwise swallow the fixture, and
-        // `reply_hint_shown` keeps the hint off the body.
-        let mut sensor = sensor_peers::PeerSensor::new();
-        let fixture = dir.clone();
-        sensor.set_receive_dirs_provider(std::sync::Arc::new(move |_: &str| {
-            vec![attend_groups::ReceiveDir { path: fixture.clone(), room: attend_groups::Room::Project }]
-        }));
-        sensor.import_state(&[("reply_hint_shown".to_string(), "true".to_string())]);
-        // A warm cache, so the wake gate lets the message out.
-        sensor.set_cache_lapsed_provider(std::sync::Arc::new(|_: &str| false));
-        // The fixture's cwd doubles as the focus so the sensor's
-        // `attend message reply` bookkeeping (keyed on the host session) sees
-        // an own-project message and records nothing.
-        let focus = Focus {
-            description: String::new(),
-            working_dir: "/src/cwd".to_string(),
-            keywords: Vec::new(),
-        };
-        let _ = sensor.poll(&focus); // first poll: peer-presence baseline, emits nothing
-        let observations = sensor.poll(&focus);
-
-        let expected = format!("message from {} ~{}: same name on both", drained.sender, short_id("peer-1"));
-        assert!(
-            observations.iter().any(|(_, line)| line == &expected),
-            "Monitor conduit did not emit {expected:?}; got {:?}",
-            observations.iter().map(|(_, l)| l.as_str()).collect::<Vec<_>>()
-        );
-        // Persona-plus-project form on both — not the pre-#534 Monitor
-        // form `claude//src/cwd`.
-        assert!(drained.sender.ends_with(" (cwd)"), "{:?}", drained.sender);
-        assert!(!drained.sender.contains('/'), "{:?}", drained.sender);
-        // The canonical id rides the row, so the label never has to be
-        // the key (ADR-171).
-        assert_eq!(drained.sender_id, "claude:other-session");
         std::fs::remove_dir_all(&dir).ok();
     }
 

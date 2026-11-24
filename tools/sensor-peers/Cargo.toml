@@ -2,18 +2,13 @@
 name = "sensor-peers"
 version = "0.6.0"
 edition = "2021"
-description = "discovers Claude Code sessions and reads peer signals"
+description = "discovers Claude Code sessions and reports their presence"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-agent-identity = { path = "../agent-identity" }
 attend-groups = { path = "../attend-groups" }
-attend-instances = { path = "../attend-instances" }
 attend-presence = { path = "../attend-presence" }
-attend-state = { path = "../attend-state" }
 claude-sessions = { path = "../claude-sessions" }
 sensor-trait = { path = "../sensor-trait" }
-# The cache clock the wake gate reads (ADR-406 item 2).
-sensor-keepwarm = { path = "../sensor-keepwarm" }
 ways-core = { path = "../ways-core" }
 serde_json = "1"

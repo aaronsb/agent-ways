@@ -41,7 +41,6 @@ use std::time::Duration;
 ///   seen_signal: <signal filename>
 ///   disclosed_thresholds: 40,50,65,...
 ///   context_pct: 31.2
-///   reply_hint_shown: true
 ///   git_branch: main
 ///   git_head: abc1234
 ///   baselined: true
@@ -52,12 +51,11 @@ pub struct StateSnapshot {
     pub seen_signals: HashSet<String>,
     /// A conduit applied the cold-start rule (`cold_start`) for this
     /// session. Until one has, the session is cold whatever else the file
-    /// holds: the peers sensor checkpoints on its first poll, before its
-    /// first message scan.
+    /// holds: the sensor host checkpoints its own state into the file
+    /// before any drain runs.
     pub baselined: bool,
     pub disclosed_thresholds: Vec<u8>,
     pub context_pct: Option<f64>,
-    pub reply_hint_shown: bool,
     pub git_branch: Option<String>,
     pub git_head: Option<String>,
     /// The attend mod version this session's mod last reported with its
@@ -100,8 +98,6 @@ impl StateSnapshot {
         if let Some(pct) = self.context_pct {
             lines.push(format!("context_pct: {:.1}", pct));
         }
-
-        lines.push(format!("reply_hint_shown: {}", self.reply_hint_shown));
 
         if let Some(ref branch) = self.git_branch {
             lines.push(format!("git_branch: {}", branch));
@@ -149,9 +145,10 @@ impl StateSnapshot {
                     "context_pct" => {
                         state.context_pct = value.parse().ok();
                     }
-                    "reply_hint_shown" => {
-                        state.reply_hint_shown = value == "true";
-                    }
+                    // The peers sensor's reply hint, which went with its
+                    // message scanning (#1316): a file an older attend wrote
+                    // still holds the line.
+                    "reply_hint_shown" => {}
                     "git_branch" => {
                         state.git_branch = Some(value.to_string());
                     }
@@ -372,7 +369,6 @@ impl StateStore {
                 StateSnapshot {
                     disclosed_thresholds: disk.disclosed_thresholds.clone(),
                     context_pct: disk.context_pct,
-                    reply_hint_shown: disk.reply_hint_shown,
                     git_branch: disk.git_branch.clone(),
                     git_head: disk.git_head.clone(),
                     sensor_memory: disk.sensor_memory.clone(),
@@ -382,7 +378,6 @@ impl StateStore {
                 StateSnapshot {
                     disclosed_thresholds: mem.disclosed_thresholds.clone(),
                     context_pct: mem.context_pct,
-                    reply_hint_shown: mem.reply_hint_shown,
                     git_branch: mem.git_branch.clone(),
                     git_head: mem.git_head.clone(),
                     sensor_memory: mem.sensor_memory.clone(),
@@ -548,7 +543,6 @@ mod tests {
         let mut snap = StateSnapshot {
             disclosed_thresholds: vec![40, 50],
             context_pct: Some(31.2),
-            reply_hint_shown: true,
             git_branch: Some("main".into()),
             git_head: Some("abc1234".into()),
             ..Default::default()
@@ -559,7 +553,7 @@ mod tests {
         assert!(text.contains("seen_signal: abc-123.signal"));
         assert!(text.contains("disclosed_thresholds: 40,50"));
         assert!(text.contains("context_pct: 31.2"));
-        assert!(text.contains("reply_hint_shown: true"));
+        assert!(!text.contains("reply_hint_shown"), "no reply hint is written");
         assert!(text.contains("git_branch: main"));
         assert!(text.contains("git_head: abc1234"));
 
@@ -567,9 +561,20 @@ mod tests {
         assert_eq!(back.seen_signals, snap.seen_signals);
         assert_eq!(back.disclosed_thresholds, snap.disclosed_thresholds);
         assert_eq!(back.context_pct, snap.context_pct);
-        assert_eq!(back.reply_hint_shown, snap.reply_hint_shown);
         assert_eq!(back.git_branch, snap.git_branch);
         assert_eq!(back.git_head, snap.git_head);
+    }
+
+    /// A state file an older attend wrote holds a `reply_hint_shown` line,
+    /// from the peers sensor's message scanning that #1316 removed. It is
+    /// skipped, and the lines around it still read.
+    #[test]
+    fn an_old_reply_hint_line_is_skipped() {
+        let back = StateSnapshot::deserialize("seen_signal: a.signal\nreply_hint_shown: true\ncontext_pct: 31.2\nbaselined: true\n");
+        assert!(back.seen_signals.contains("a.signal"));
+        assert_eq!(back.context_pct, Some(31.2));
+        assert!(back.baselined);
+        assert!(!back.serialize().contains("reply_hint_shown"), "the next write drops it");
     }
 
     /// ADR-172 Decision 3: a sensor checkpoint whose in-memory set
@@ -612,7 +617,7 @@ mod tests {
         let store = StateStore::new_in(dir.clone(), Some("s2".into())).with_signals_base(dir.clone());
         let mem = StateSnapshot {
             disclosed_thresholds: vec![40],
-            reply_hint_shown: true,
+            context_pct: Some(12.0),
             ..Default::default()
         };
         store.checkpoint(&mem);
@@ -620,7 +625,7 @@ mod tests {
         store.mark_seen([key.clone()]);
         let after = store.load().unwrap();
         assert_eq!(after.disclosed_thresholds, vec![40]);
-        assert!(after.reply_hint_shown);
+        assert_eq!(after.context_pct, Some(12.0));
         assert!(after.seen_signals.contains(&key));
         fs::remove_dir_all(&dir).ok();
     }

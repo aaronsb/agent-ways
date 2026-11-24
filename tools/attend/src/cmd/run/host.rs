@@ -202,7 +202,6 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     let mut msg_governor = DisclosureGovernor::new_permissive(Duration::from_secs(3), 30, Duration::from_secs(60));
     let mut queue: BinaryHeap<ScheduledSensor> = slots.iter().enumerate().map(|(index, s)| ScheduledSensor { fire_at: s.next_fire, index }).collect();
     let mut last_checkpoint = Instant::now();
-    let mut peers_checkpointed_once = false;
     let mut last_instance_touch = Instant::now();
     let mut last_cleanup: Option<Instant> = None;
     let mut sink = Signals { writer, closed: false };
@@ -250,7 +249,6 @@ pub(crate) fn cmd_host(a: &HostArgs) {
             governor: &mut governor,
             msg_governor: &mut msg_governor,
             last_checkpoint: &mut last_checkpoint,
-            peers_checkpointed_once: &mut peers_checkpointed_once,
             last_instance_touch: &mut last_instance_touch,
             last_cleanup: &mut last_cleanup,
             state_store: &state_store,

@@ -129,7 +129,6 @@ engagement:
   step_multiplier: 1.25      # per-burst threshold elevation
   absolute_refractory: 60    # seconds of complete suppression after burst
   decay_per_minute: 0.1      # relative refractory decay rate
-  peer_activity_window: 900  # per-peer engagement window
 
 # Background signal-file cleanup inside `attend run`. Reaping is by project
 # liveness (ADR-136), not by age. `attend message cleanup` runs it by hand.

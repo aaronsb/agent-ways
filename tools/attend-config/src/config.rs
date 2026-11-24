@@ -70,7 +70,6 @@ pub struct EngagementConfig {
     pub step_multiplier: f64,
     pub absolute_refractory: Duration,
     pub decay_per_minute: f64,
-    pub peer_activity_window: Duration,
 }
 
 impl Default for Config {
@@ -110,7 +109,6 @@ impl Config {
             step_multiplier: float(get("attend.engagement.step_multiplier", layers), 1.25),
             absolute_refractory: secs(get("attend.engagement.absolute_refractory", layers), 60),
             decay_per_minute: float(get("attend.engagement.decay_per_minute", layers), 0.1),
-            peer_activity_window: secs(get("attend.engagement.peer_activity_window", layers), 900),
         };
         let cleanup = CleanupConfig {
             enabled: get("attend.cleanup.enabled", layers).and_then(|v| v.as_bool()).unwrap_or(true),

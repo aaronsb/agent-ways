@@ -660,8 +660,8 @@ pub(crate) struct TombstoneArgs {
 
 #[derive(Args)]
 pub(crate) struct TuneArgs {
-    /// Write the derived absolute_refractory, decay_per_minute and
-    /// peer_activity_window to the user config, changing nothing else
+    /// Write the derived absolute_refractory and decay_per_minute to the
+    /// user config, changing nothing else
     #[arg(long)]
     pub(crate) apply: bool,
 }

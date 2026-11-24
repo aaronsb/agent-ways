@@ -462,11 +462,6 @@ impl SensorSlot {
         self.sensor.name()
     }
 
-    /// Whether the slot runs the compiled sensor `id`.
-    pub fn is_crate(&self, id: &str) -> bool {
-        self.crate_id.as_deref() == Some(id)
-    }
-
     pub fn description(&self) -> &str {
         self.sensor.description()
     }

@@ -40,21 +40,6 @@ impl sensors::Sensor for Marked {
     fn decay_threshold(&self) -> u32 {
         3
     }
-    fn export_state(&self) -> Vec<(String, String)> {
-        vec![("baselined".into(), "true".into())]
-    }
-}
-
-/// The peers sensor's state is the crate's, whatever its file is named:
-/// a `chat.yaml` running it keeps the mark, and a file named `peers`
-/// running another crate does not.
-#[test]
-fn the_snapshot_keys_the_peers_state_on_the_crate_and_not_the_name() {
-    let peers_as_chat = sensors::slot(Box::new(Marked("chat")), sensor_spec::Lane::Message, Some("peers"));
-    assert!(peers_as_chat.is_crate("peers"));
-    assert!(collect_snapshot(&[peers_as_chat]).baselined);
-    let git_as_peers = sensors::slot(Box::new(Marked("peers")), sensor_spec::Lane::Event, Some("git"));
-    assert!(!collect_snapshot(&[git_as_peers]).baselined);
 }
 
 /// A file sensor named `ways-update` whose session trigger has fired and

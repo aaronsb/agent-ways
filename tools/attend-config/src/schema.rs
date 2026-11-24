@@ -92,6 +92,7 @@ const SECTIONS: &[SectionSpec] = &[
 const RETIRED: &[(&str, &str)] = &[
     ("signals", "`signals:` was retired with liveness reaping (#141) and is ignored; delete it"),
     ("sensors", "`sensors:` was retired by ADR-403 and is ignored; each sensor is a file under attend/sensors/"),
+    ("engagement.peer_activity_window", "retired with the peers sensor's message scanning and is ignored; delete it"),
 ];
 
 /// Where the sensor file for `name` goes, for a file at `scope`.
@@ -232,14 +233,6 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("0.1"),
         doc: "How fast a raised threshold returns to its base, per minute.",
         long: "Converted at load to a half-life of ln(0.5)/ln(1-rate) x 60 seconds: about 395 s at 0.1.",
-        ..BASE
-    },
-    KeySpec {
-        name: "attend.engagement.peer_activity_window",
-        section: "attend.engagement",
-        path: &["engagement", "peer_activity_window"],
-        default: DefaultValue::Yaml("900"),
-        doc: "Seconds of the window the peers sensor counts each peer's activity in.",
         ..BASE
     },
     KeySpec {

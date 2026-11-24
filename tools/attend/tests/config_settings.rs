@@ -84,7 +84,7 @@ fn text(b: &[u8]) -> String {
 
 /// A hand-edited user file: comments, an order, and a burst_threshold of the
 /// operator's own that tune must not overwrite.
-const HAND: &str = "# my attend settings\ngovernor:\n  base_cooldown: 20   # slower\n\nengagement:\n  # tuned by hand in March\n  burst_threshold: 5\n  step_multiplier: 1.5\n  absolute_refractory: 60   # think time\n  decay_per_minute: 0.1\n  peer_activity_window: 900\n# trailing note\n";
+const HAND: &str = "# my attend settings\ngovernor:\n  base_cooldown: 20   # slower\n\nengagement:\n  # tuned by hand in March\n  burst_threshold: 5\n  step_multiplier: 1.5\n  absolute_refractory: 60   # think time\n  decay_per_minute: 0.1\n# trailing note\n";
 
 // ── tune --apply ───────────────────────────────────────────────
 
@@ -96,20 +96,20 @@ fn tune_apply_changes_only_the_derived_keys_and_keeps_comments() {
     let out = fx.run(&["config", "tune", "--apply"]);
     assert!(out.status.success(), "{}{}", text(&out.stdout), text(&out.stderr));
     let after = std::fs::read_to_string(fx.user()).unwrap();
-    // Only the three derived values may differ, each on its own line.
+    // Only the two derived values may differ, each on its own line.
     let (old, new): (Vec<&str>, Vec<&str>) = (HAND.lines().collect(), after.lines().collect());
     assert_eq!(old.len(), new.len(), "{after}");
     for (a, b) in old.iter().zip(&new) {
-        let derived = ["absolute_refractory:", "decay_per_minute:", "peer_activity_window:"].iter().any(|k| a.trim_start().starts_with(k));
+        let derived = ["absolute_refractory:", "decay_per_minute:"].iter().any(|k| a.trim_start().starts_with(k));
         if !derived {
             assert_eq!(a, b, "a line tune does not own changed:\n{after}");
         }
     }
     assert!(after.contains("  absolute_refractory: 70   # think time\n"), "the inline comment stays:\n{after}");
     assert!(after.contains("burst_threshold: 5") && after.contains("step_multiplier: 1.5"), "{after}");
-    // The think time is 70 s; the window is the turn cycle's p90, 120 s,
-    // times the operator's burst_threshold, 5.
-    assert!(after.contains("peer_activity_window: 600"), "{after}");
+    // The burst window is the turn cycle's p90, 120 s, times the operator's
+    // burst_threshold, 5: ten minutes, over which a 1.5 step decays.
+    assert!(after.contains("decay_per_minute: 0.075"), "{after}");
 }
 
 #[cfg(unix)]
@@ -157,7 +157,7 @@ fn tune_apply_derives_from_the_file_as_it_is_under_the_lock() {
     drop(held);
     assert!(child.wait().unwrap().success());
     let after = std::fs::read_to_string(fx.user()).unwrap();
-    assert!(after.contains("peer_activity_window: 600"), "derived from burst_threshold 5, not the 3 read before the lock:\n{after}");
+    assert!(after.contains("decay_per_minute: 0.0625"), "derived from burst_threshold 5, not the 3 read before the lock:\n{after}");
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn tune_apply_on_no_file_writes_only_the_derived_values() {
     let body = std::fs::read_to_string(fx.user()).unwrap();
     assert_eq!(
         body,
-        "# attend settings; `ways settings help attend` describes each key\nengagement:\n  absolute_refractory: 70\n  decay_per_minute: 0.1042\n  peer_activity_window: 360\n"
+        "# attend settings; `ways settings help attend` describes each key\nengagement:\n  absolute_refractory: 70\n  decay_per_minute: 0.1042\n"
     );
     let lint = fx.run(&["config", "lint"]);
     assert!(lint.status.success(), "{}", text(&lint.stdout));

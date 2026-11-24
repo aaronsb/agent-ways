@@ -50,7 +50,6 @@ use attend_config::sensors::Loaded;
 use sensor_spec::{Block, Kind, Lane, Severity};
 
 use crate::config::Config;
-use crate::groups::Groups;
 use hosted::{FileSensor, Poll};
 
 /// A sensor's recorded state, as `attend sensor list` and the settings
@@ -354,19 +353,12 @@ pub fn compiled(id: &str) -> Option<Compiled> {
     Some(Compiled { description: s.description().to_string(), source: s.source() })
 }
 
-/// What a running sensor needs beyond its file: the peers sensor reads the
-/// config and the groups, and a recorded sensor keys its store by the
-/// session.
-#[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
+/// What a running sensor needs beyond its file: an mcp sensor reads the
+/// config, and a recorded sensor keys its store by the session.
 pub struct Ctx<'a> {
     pub cfg: &'a Config,
-    pub groups: Option<&'a Groups>,
     /// The session its reports go to; none when the caller has no id.
     pub session: Option<&'a str>,
-    /// Built for the sensor host ([`register_host_sensors`]): the peers
-    /// sensor reports presence alone, since the mod's drain carries
-    /// messages.
-    pub host: bool,
 }
 
 /// The compiled sensors the sensor host does not run. The mod takes
@@ -419,18 +411,7 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
             Box::new(KeepwarmSensor::new(ident.session_id.clone(), crate::util::keepwarm_dir()))
         }
         #[cfg(feature = "sensor-peers")]
-        "peers" => {
-            let mut p = PeerSensor::new();
-            p.set_presence_only(ctx.host);
-            // Group membership is re-read on every poll, so a focus group
-            // joined or left mid-session counts without a restart (ADR-118).
-            if let Some(groups) = ctx.groups {
-                let groups = groups.clone();
-                p.set_receive_dirs_provider(std::sync::Arc::new(move |origin: &str| groups.receive_dirs(origin)));
-            }
-            p.set_peer_activity_window(ctx.cfg.engagement.peer_activity_window);
-            Box::new(p)
-        }
+        "peers" => Box::new(PeerSensor::new()),
         id => return Err(format!("crate {id} is not compiled into this attend")),
     };
     Ok(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, ctx.session, record))
@@ -467,21 +448,20 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
 }
 
 /// The slots the sensor host of `session` polls, and their names: every
-/// sensor that runs but keepwarm and disclosure, with the
-/// peers sensor reporting presence alone, on the event lane, since
-/// presence is no one's words.
+/// sensor that runs but keepwarm and disclosure, with the peers sensor on
+/// the event lane, since presence is no one's words.
 ///
 /// References:
 /// - ADR-416 items 4 and 5: what the host runs, and the lane rule.
 pub fn register_host_sensors(cfg: &Config, focus: &Focus, session: &str) -> (Vec<SensorSlot>, Vec<String>) {
-    let ctx = Ctx { cfg, groups: None, session: Some(session), host: true };
+    let ctx = Ctx { cfg, session: Some(session) };
     register(&ctx, focus)
 }
 
 /// The lane the sensor host runs `h` on, and so the lane `attend sensor
 /// poll` and `fire` deliver it on: its file's, but the event lane for the
-/// peers sensor, which the host runs presence-only, since presence is no
-/// one's words.
+/// peers sensor, which reports presence alone, since presence is no one's
+/// words.
 ///
 /// References:
 /// - ADR-416 item 4: the lane rule.
@@ -512,11 +492,11 @@ fn register(ctx: &Ctx, focus: &Focus) -> (Vec<SensorSlot>, Vec<String>) {
             }
             continue;
         }
-        if ctx.host && h.crate_id().is_some_and(|id| NOT_HOSTED.contains(&id)) {
+        if h.crate_id().is_some_and(|id| NOT_HOSTED.contains(&id)) {
             crate::emit::log(&format!("sensor {}: the sensor host does not run it", h.name()));
             continue;
         }
-        let lane = if ctx.host { host_lane(&h) } else { h.lane().unwrap_or(Lane::Event) };
+        let lane = host_lane(&h);
         match build(&h, ctx, &focus.working_dir, true) {
             Ok(sensor) => {
                 slots.push(slot(sensor, lane, h.crate_id()));
