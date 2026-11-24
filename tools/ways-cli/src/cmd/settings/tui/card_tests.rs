@@ -138,8 +138,9 @@ fn a_shipped_crate_sensor_s_card_names_its_crate_version_and_cadence() {
     // a command's program, where a crate's source is attend's to say.
     let example = &card(&tab, "example-command").item;
     assert_eq!((example.state, example.source.as_deref()), (sensor(SensorState::Off), Some("sh")));
-    let keepwarm = &card(&tab, "keepwarm").item;
-    assert_eq!((keepwarm.source.as_deref(), keepwarm.state, keepwarm.detail.as_deref()), (None, sensor(SensorState::Unknown), Some("enabled; attend does not list it")));
+    // A sensor attend does not list reads as unknown, with why.
+    let update = &card(&tab, "ways-update").item;
+    assert_eq!((update.source.as_deref(), update.state, update.detail.as_deref()), (Some("ways"), sensor(SensorState::Unknown), Some("enabled; attend does not list it")));
     let _ = std::fs::remove_dir_all(&h);
 }
 

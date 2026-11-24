@@ -171,7 +171,6 @@ fn an_open_post_alone_reports_no_lapse() {
 #[test]
 fn the_keepwarm_wake_still_fires_at_fifty_minutes() {
     let f = addressed("cold-keepwarm", Some(51 * MIN));
-    f.sensor("keepwarm", "enabled: true\n");
     assert!(f.attend(&["keepwarm", "on"]).status.success());
     assert_eq!(f.ok(&["keepwarm", "check"]), "", "the first check baselines");
     assert!(f.ok(&["keepwarm", "check"]).starts_with("keepwarm: 51m idle"));

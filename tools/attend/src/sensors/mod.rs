@@ -39,9 +39,6 @@ pub use sensor_peers::PeerSensor;
 #[cfg(feature = "sensor-processes")]
 pub use sensor_processes::ProcessSensor;
 
-#[cfg(feature = "sensor-keepwarm")]
-pub use sensor_keepwarm::KeepwarmSensor;
-
 use std::time::Duration;
 
 use attend_config::sensors::Loaded;
@@ -319,21 +316,6 @@ fn claim_crates(all: &mut [Hosted]) {
     }
 }
 
-/// Whether this build has the compiled sensor `id` and an enabled file runs
-/// it. It reads the files and builds `id` alone, so no other sensor's state
-/// is read.
-#[cfg_attr(not(feature = "sensor-keepwarm"), allow(dead_code))]
-pub fn crate_enabled(cfg: &Config, project: &str, id: &str) -> bool {
-    let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
-    runs_crate(&loaded, id) && compiled(id).is_some()
-}
-
-/// Whether an enabled file of `loaded` names the compiled sensor `id`.
-#[cfg_attr(not(feature = "sensor-keepwarm"), allow(dead_code))]
-fn runs_crate(loaded: &[Loaded], id: &str) -> bool {
-    loaded.iter().filter(|l| !l.is_refused()).filter_map(|l| l.spec.as_ref()).any(|s| s.enabled && matches!(&s.block, Block::Crate(c) if c.id == id))
-}
-
 /// A compiled sensor's description and source, when this build has it.
 pub fn compiled(id: &str) -> Option<Compiled> {
     let s: Box<dyn Sensor> = match id {
@@ -343,8 +325,6 @@ pub fn compiled(id: &str) -> Option<Compiled> {
         "peers" => Box::new(PeerSensor::new()),
         #[cfg(feature = "sensor-processes")]
         "processes" => Box::new(ProcessSensor::new()),
-        #[cfg(feature = "sensor-keepwarm")]
-        "keepwarm" => Box::new(KeepwarmSensor::new(String::new(), std::path::PathBuf::new())),
         _ => return None,
     };
     Some(Compiled { description: s.description().to_string(), source: s.source() })
@@ -357,13 +337,6 @@ pub struct Ctx<'a> {
     /// The session its reports go to; none when the caller has no id.
     pub session: Option<&'a str>,
 }
-
-/// The compiled sensors the sensor host does not run. The mod takes
-/// keepwarm's wake from `attend keepwarm check`.
-///
-/// References:
-/// - ADR-416 item 4: keepwarm's wake is not a signal.
-const NOT_HOSTED: &[&str] = &["keepwarm"];
 
 /// The sensor `h` configures, ready to poll, or why it cannot run here.
 pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<dyn Sensor>, String> {
@@ -394,16 +367,6 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
             Some(list) => ProcessSensor::with_watch(list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()),
             None => ProcessSensor::new(),
         }),
-        // Pinned to this session's transcript, so a peer session in the same
-        // project is never its idle clock (ADR-182).
-        #[cfg(feature = "sensor-keepwarm")]
-        "keepwarm" => {
-            let ident = attend_presence::session::identity();
-            if !ident.session_resolved {
-                return Err("no resolved session id, so no transcript to read".into());
-            }
-            Box::new(KeepwarmSensor::new(ident.session_id.clone(), crate::util::keepwarm_dir()))
-        }
         #[cfg(feature = "sensor-peers")]
         "peers" => Box::new(PeerSensor::new()),
         id => return Err(format!("crate {id} is not compiled into this attend")),
@@ -442,7 +405,7 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
 }
 
 /// The slots the sensor host of `session` polls, and their names: every
-/// sensor that runs but keepwarm, with the peers sensor on
+/// sensor that runs, with the peers sensor on
 /// the event lane, since presence is no one's words.
 ///
 /// References:
@@ -484,10 +447,6 @@ fn register(ctx: &Ctx, focus: &Focus) -> (Vec<SensorSlot>, Vec<String>) {
             if h.state != State::Off {
                 crate::emit::log(&format!("sensor {}: {}{}", h.name(), h.state.label(), h.state.detail().map(|d| format!(": {d}")).unwrap_or_default()));
             }
-            continue;
-        }
-        if h.crate_id().is_some_and(|id| NOT_HOSTED.contains(&id)) {
-            crate::emit::log(&format!("sensor {}: the sensor host does not run it", h.name()));
             continue;
         }
         let lane = host_lane(&h);
@@ -587,10 +546,9 @@ mod tests {
     fn the_lane_comes_from_the_file() {
         let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), "/nonexistent/p", |_| None);
         let lane = |n: &str| all.iter().find(|h| h.name() == n).and_then(Hosted::lane);
-        assert_eq!(lane("peers"), Some(Lane::Message));
-        assert_eq!(lane("keepwarm"), Some(Lane::Message));
+        assert_eq!(lane("peers"), Some(Lane::Event), "the shipped file names no lane");
         assert_eq!(lane("git"), Some(Lane::Event));
-        assert_eq!(lane("chat"), Some(Lane::Message), "the peers crate's lane, under any name");
+        assert_eq!(lane("chat"), Some(Lane::Event), "a crate file with no lane rides the event lane");
         let chat = all.iter().find(|h| h.name() == "chat").unwrap();
         assert_eq!(chat.crate_id(), Some("peers"));
     }
@@ -602,16 +560,7 @@ mod tests {
         let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), "/nonexistent/p", |_| None);
         let lane = |n: &str| all.iter().find(|h| h.name() == n).map(host_lane);
         assert_eq!(lane("chat"), Some(Lane::Event), "the peers crate, under any name and whatever its file says");
-        assert_eq!(lane("keepwarm"), Some(Lane::Message));
         assert_eq!(lane("git"), Some(Lane::Event));
-    }
-
-    #[test]
-    fn a_crate_runs_when_an_enabled_file_names_it() {
-        assert!(runs_crate(&loaded(&[]), "keepwarm"));
-        assert!(!runs_crate(&loaded(&[("keepwarm", "enabled: false\n")]), "keepwarm"));
-        assert!(runs_crate(&loaded(&[("keepwarm", "enabled: false\n"), ("wake", "kind: crate\ncrate: keepwarm\n")]), "keepwarm"));
-        assert!(!runs_crate(&loaded(&[]), "nope"));
     }
 
     /// Only a sensor file changes the stamp: a swap file, a lock or any

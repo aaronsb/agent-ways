@@ -8,6 +8,8 @@
 //! `ATTEND_BIN` runs the suite against another build, such as the parent
 //! commit's, to see which tests fail before the change.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -258,4 +260,51 @@ fn init_never_overwrites_a_file() {
     let out = fx.run(&["config", "init"]);
     assert!(out.status.success());
     assert_eq!(std::fs::read_to_string(fx.user()).unwrap(), "# mine\n");
+}
+
+/// A user's file for a sensor attend removed, the disclosure sensor here,
+/// that sets more than `enabled` reads as no sensor: `attend sensor list`
+/// lists no row for it and says to delete it, and `attend config lint`
+/// warns, where it would read as invalid with no shipped file under it.
+// #1316 grace: remove after the next release.
+#[test]
+fn a_file_for_a_removed_sensor_warns_and_lists_no_row() {
+    let f = common::Fixture::new("removed-disclosure");
+    f.sensor("disclosure", "interval: 90\nthreshold: 2.0\n");
+    let list = f.attend(&["sensor", "list"]);
+    let listed = String::from_utf8_lossy(&list.stdout);
+    assert!(list.status.success(), "{}", String::from_utf8_lossy(&list.stderr));
+    assert!(!listed.lines().any(|l| l.starts_with("disclosure ") || l.contains("invalid")), "no row and nothing invalid: {listed}");
+    assert!(listed.contains("disclosure.yaml: the disclosure sensor was removed; delete this file"), "{listed}");
+    assert!(!listed.contains("kind is required"), "{listed}");
+    let lint = f.attend(&["config", "lint"]);
+    let said = String::from_utf8_lossy(&lint.stdout);
+    assert_eq!(lint.status.code(), Some(0), "{said}");
+    assert!(said.contains("disclosure.yaml: [attend.sensors.disclosure] disclosure: warning: the disclosure sensor was removed; delete this file"), "{said}");
+}
+
+/// With a user's and a project's file for each removed sensor, `attend
+/// sensor list` names every file once: one line for each disclosure file,
+/// and one line naming both keepwarm files.
+// #1316 grace: remove after the next release.
+#[test]
+fn sensor_list_names_each_removed_file_once() {
+    let f = common::Fixture::new("removed-both");
+    f.sensor("disclosure", "interval: 90\n");
+    f.sensor("keepwarm", "enabled: false\n");
+    let project = Path::new(&f.origin).join(".claude").join("attend").join("sensors");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("disclosure.yaml"), "interval: 60\n").unwrap();
+    std::fs::write(project.join("keepwarm.yaml"), "enabled: true\n").unwrap();
+    let list = f.attend(&["sensor", "list"]);
+    let listed = String::from_utf8_lossy(&list.stdout).into_owned();
+    let lines: Vec<&str> = listed.lines().map(str::trim).filter(|l| l.starts_with("disclosure: ") || l.starts_with("keepwarm: ")).collect();
+    let user = f.home.join("config").join("attend").join("sensors");
+    let disclosure: Vec<&&str> = lines.iter().filter(|l| l.starts_with("disclosure: ")).collect();
+    assert_eq!(disclosure.len(), 2, "{listed}");
+    assert!(disclosure.iter().any(|l| l.contains(&user.join("disclosure.yaml").display().to_string())), "{listed}");
+    assert!(disclosure.iter().any(|l| l.contains(&project.join("disclosure.yaml").display().to_string())), "{listed}");
+    let keepwarm: Vec<&&str> = lines.iter().filter(|l| l.starts_with("keepwarm: ")).collect();
+    assert_eq!(keepwarm.len(), 1, "one line for both keepwarm files: {listed}");
+    assert!(keepwarm[0].contains(&user.join("keepwarm.yaml").display().to_string()) && keepwarm[0].contains(&project.join("keepwarm.yaml").display().to_string()), "{listed}");
 }

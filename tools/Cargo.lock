@@ -1633,7 +1633,6 @@ version = "0.1.0"
 dependencies = [
  "claude-sessions",
  "jiff",
- "sensor-trait",
  "serde",
  "serde_json",
 ]

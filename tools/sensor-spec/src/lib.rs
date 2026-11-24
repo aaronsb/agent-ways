@@ -200,10 +200,6 @@ pub struct SensorSpec {
     /// A crate sensor's author field: the field of its compiled items that
     /// holds who composed one.
     pub author: Option<String>,
-    /// Why the host runs this compiled sensor on its declared lane whatever
-    /// the author rule says: the reason the host's own table of compiled
-    /// sensors gives. No file field sets it; parsing leaves it empty.
-    pub fixed_lane: Option<String>,
     /// The tool permissions the sensor needs (ADR-116).
     pub requires: Vec<String>,
     pub triggers: Vec<Trigger>,
@@ -224,7 +220,7 @@ impl SensorSpec {
 
     /// Why a sensor that declares the message lane runs on the event lane.
     pub fn lane_refusal(&self) -> Option<String> {
-        if self.declared_lane != Lane::Message || self.fixed_lane.is_some() {
+        if self.declared_lane != Lane::Message {
             return None;
         }
         match self.kind {

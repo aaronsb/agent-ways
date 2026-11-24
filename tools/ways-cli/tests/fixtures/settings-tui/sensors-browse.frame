@@ -5,18 +5,18 @@ agent-tui frame 100x30
 |│ ▸ example-command · setting   value                 ││watches build/package tools and correlates │|
 |│ ▸ example-mcp · setting       value                 ││exits with markers                         │|
 |│ ▸ git · setting               value                 ││                                           │|
-|│ ▸ keepwarm · setting          value                 ││origin    builtin                          │|
-|│ ▸ peers · setting             value                 ││kind      crate                            │|
-|│▌▾ processes · setting         value                 ││state     unknown · enabled; attend absent │|
-|│     enabled                   true                  ││interval  30s quiet, 5s busy               │|
-|│     interval                  30                    ││threshold 2                                │|
-|│     min_interval              5                     ││lane      event                            │|
-|│     threshold                 2.0                   ││                                           │|
-|│     decay_threshold           5                     ││8 entries, 0 changed                       │|
-|│     lane                      event                 ││                                           │|
+|│ ▸ peers · setting             value                 ││origin    builtin                          │|
+|│▌▾ processes · setting         value                 ││kind      crate                            │|
+|│     enabled                   true                  ││state     unknown · enabled; attend absent │|
+|│     interval                  30                    ││interval  30s quiet, 5s busy               │|
+|│     min_interval              5                     ││threshold 2                                │|
+|│     threshold                 2.0                   ││lane      event                            │|
+|│     decay_threshold           5                     ││                                           │|
+|│     lane                      event                 ││8 entries, 0 changed                       │|
 |│     requires                  [Bash(ps:*)]          ││                                           │|
 |│     watch                     (built-in)            ││                                           │|
 |│ ▸ ways-update · setting       value                 ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -69,59 +69,56 @@ styles
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6   2-11  - - BOLD
-  6  12-21  - - DIM
+  6   2-8   - - BOLD
+  6   9-18  - - DIM
   6  32-36  - - DIM
   6  54-65  - - DIM
   6  66-72  LightBlue - -
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7   2-8   - - BOLD
-  7   9-18  - - DIM
-  7  32-36  - - DIM
+  7   1-1   Cyan - BOLD|REVERSED
+  7   2-12  - - BOLD|REVERSED
+  7  13-22  - - BOLD|DIM|REVERSED
+  7  23-31  - - BOLD|REVERSED
+  7  32-36  - - BOLD|DIM|REVERSED
+  7  37-53  - - BOLD|REVERSED
   7  54-65  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   1-1   Cyan - BOLD|REVERSED
-  8   2-12  - - BOLD|REVERSED
-  8  13-22  - - BOLD|DIM|REVERSED
-  8  23-31  - - BOLD|REVERSED
-  8  32-36  - - BOLD|DIM|REVERSED
-  8  37-53  - - BOLD|REVERSED
   8  54-65  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9  32-33  LightBlue - -
   9  54-65  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10  32-33  LightBlue - -
+ 10  32-32  LightBlue - -
  10  54-65  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  32-32  LightBlue - -
  11  54-65  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
+ 12  32-32  LightBlue - -
  12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  32-32  LightBlue - -
  13  54-75  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
+ 14  32-43  LightBlue - -
  14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  32-43  LightBlue - -
  15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
+ 16   2-14  - - BOLD
+ 16  15-24  - - DIM
+ 16  32-36  - - DIM
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17   2-14  - - BOLD
- 17  15-24  - - DIM
- 17  32-36  - - DIM
  17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM

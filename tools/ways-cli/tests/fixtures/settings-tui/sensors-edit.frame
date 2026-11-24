@@ -12,10 +12,10 @@ agent-tui frame 100x30
 |│     decay_threshold           4                     ││writes   ~/.config/attend/sensors/git.yaml │|
 |│     lane                      event                 ││[attend.sensors.git.interval]              │|
 |│     requires                  [Bash(git:*)]         ││                                           │|
-|│ ▸ keepwarm · setting          value                 ││                                           │|
 |│ ▸ peers · setting             value                 ││                                           │|
 |│ ▸ processes · setting         value                 ││                                           │|
 |│ ▸ ways-update · setting       value                 ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -96,27 +96,24 @@ styles
  12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13   2-11  - - BOLD
- 13  12-21  - - DIM
+ 13   2-8   - - BOLD
+ 13   9-18  - - DIM
  13  32-36  - - DIM
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14   2-8   - - BOLD
- 14   9-18  - - DIM
+ 14   2-12  - - BOLD
+ 14  13-22  - - DIM
  14  32-36  - - DIM
  14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15   2-12  - - BOLD
- 15  13-22  - - DIM
+ 15   2-14  - - BOLD
+ 15  15-24  - - DIM
  15  32-36  - - DIM
  15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16   2-14  - - BOLD
- 16  15-24  - - DIM
- 16  32-36  - - DIM
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM

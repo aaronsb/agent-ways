@@ -3,9 +3,9 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! `attend keepwarm check` through the CLI: ADR-182's judgment run once per
-//! call, for a host that polls without `attend run` (ADR-406 items 10 and
-//! 13). A stand-in `ways` on PATH serves the transcript reading the sensor
-//! takes from `ways context --json`.
+//! call, for the attend mod, which polls it. A
+//! stand-in `ways` on PATH serves the transcript reading the check takes
+//! from `ways context --json`, and the `mods.attend` settings.
 
 mod common;
 use common::Fixture;
@@ -38,8 +38,8 @@ fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
 }
 
-/// A fixture with the keepwarm sensor on, and a `ways` that prints
-/// whatever [`Warm::reading`] last wrote.
+/// A fixture and a `ways` that prints whatever [`Warm::reading`] last
+/// wrote, and the `mods.attend` settings [`Warm::settings`] last wrote.
 struct Warm {
     f: Fixture,
     bin: PathBuf,
@@ -49,7 +49,6 @@ struct Warm {
 impl Warm {
     fn new(tag: &str) -> Self {
         let f = Fixture::new(tag);
-        f.sensor("keepwarm", "enabled: true\n");
         let bin = f.home.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let reading = f.home.join("reading.json");
@@ -75,6 +74,12 @@ impl Warm {
             std::fs::set_permissions(&ways, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         Warm { f, bin, reading }
+    }
+
+    /// The effective `mods.attend` keys `ways settings list` answers with,
+    /// as a JSON object of key to value.
+    fn settings(&self, keys: &str) {
+        std::fs::write(self.f.home.join("settings.json"), format!(r#"{{"view":"effective","keys":{keys}}}"#)).unwrap();
     }
 
     /// The transcript's usage tail: `(seconds ago, cache read, cache write)`.
@@ -199,18 +204,108 @@ fn a_paid_cold_write_arms_keepwarm() {
     assert_eq!(arm["auto"], true, "{arm}");
 }
 
-/// The sensor's own switch in attend's config turns the check off too.
+/// `mods.attend.keepwarm: off`, the switch the attend mod reads, turns the
+/// check off, the plain one and the policy's, where a wake is due. With
+/// the key on, the same session wakes: the control.
 #[test]
-fn the_check_is_off_where_the_sensor_is_off() {
+fn the_check_is_off_where_mods_attend_keepwarm_is_off() {
     let w = Warm::new("kw-config-off");
+    w.settings(r#"{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepwarm":{"value":"off"}}"#);
+    w.reading(&[(51 * MIN, 200_000, 500)]);
+    assert!(w.run(&["keepwarm", "on"]).status.success());
+    for args in [&["keepwarm", "check"][..], &["keepwarm", "check", "--policy", "--json", "--autocompact", "off"][..]] {
+        for _ in 0..2 {
+            let out = w.run(args);
+            assert_eq!(out.status.code(), Some(0), "{args:?}");
+            let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(!String::from_utf8_lossy(&out.stdout).starts_with("keepwarm: "), "{args:?}: {said}");
+            assert!(said.contains("mods.attend.keepwarm is off"), "{args:?}: {said}");
+        }
+    }
+    let on = Warm::new("kw-config-on");
+    on.settings(r#"{"mods.attend.keepwarm":{"value":"on"}}"#);
+    on.reading(&[(51 * MIN, 200_000, 500)]);
+    assert!(on.run(&["keepwarm", "on"]).status.success());
+    on.check();
+    assert!(on.check().starts_with("keepwarm: "), "the control wakes");
+}
+
+/// A `keepwarm.yaml` that sets `enabled: false`, the opt-out from when a
+/// shipped sensor file switched keepwarm on, still turns the check off for
+/// this release, and the check names the setting to move to. One that
+/// switches nothing off does not stop a due wake. `attend sensor list`
+/// names the setting for either.
+#[test]
+fn a_legacy_keepwarm_yaml_opt_out_is_honoured_for_one_release() {
+    let w = Warm::new("kw-legacy-off");
     w.f.sensor("keepwarm", "enabled: false\n");
     w.reading(&[(51 * MIN, 200_000, 500)]);
     assert!(w.run(&["keepwarm", "on"]).status.success());
     w.check();
     let out = w.run(&["keepwarm", "check"]);
     assert_eq!(out.status.code(), Some(0));
-    assert!(out.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("no sensor file runs the keepwarm sensor"));
+    assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("keepwarm.yaml no longer switches keepwarm: set `ways settings set mods.attend.keepwarm off`"), "{err}");
+    assert!(err.contains("this release still honours their enabled: false as an opt-out"), "{err}");
+    let list = w.run(&["sensor", "list"]);
+    let listed = String::from_utf8_lossy(&list.stdout);
+    assert!(listed.contains("keepwarm: ") && listed.contains("no longer switches keepwarm"), "{listed}");
+
+    let on = Warm::new("kw-legacy-on");
+    on.f.sensor("keepwarm", "enabled: true\n");
+    on.reading(&[(51 * MIN, 200_000, 500)]);
+    assert!(on.run(&["keepwarm", "on"]).status.success());
+    on.check();
+    assert!(on.check().starts_with("keepwarm: "), "a file that opts out of nothing stops no wake");
+    let listed = String::from_utf8_lossy(&on.run(&["sensor", "list"]).stdout).into_owned();
+    assert!(listed.contains("no longer switches keepwarm") && !listed.contains("still honours"), "{listed}");
+}
+
+/// The project's `keepwarm.yaml` in the fixture project.
+fn project_keepwarm(w: &Warm, text: &str) {
+    let dir = std::path::Path::new(&w.f.origin).join(".claude").join("attend").join("sensors");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("keepwarm.yaml"), text).unwrap();
+}
+
+/// The legacy files resolve `enabled` as the layers did: the project's
+/// file over the user's, and a file that does not set it leaves it to the
+/// one below. A user's tuning file and a project's `enabled: false` read
+/// off; a user's `enabled: false` and a project's `enabled: true` read on.
+/// The check's note names every file present.
+#[test]
+fn the_legacy_files_resolve_enabled_project_over_user() {
+    let off = Warm::new("kw-legacy-proj-off");
+    off.f.sensor("keepwarm", "interval: 90\n");
+    project_keepwarm(&off, "enabled: false\n");
+    off.reading(&[(51 * MIN, 200_000, 500)]);
+    assert!(off.run(&["keepwarm", "on"]).status.success());
+    off.check();
+    let out = off.run(&["keepwarm", "check"]);
+    assert!(out.stdout.is_empty(), "the project's opt-out holds: {}", String::from_utf8_lossy(&out.stdout));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("config/attend/sensors/keepwarm.yaml and ") && err.contains("proj/.claude/attend/sensors/keepwarm.yaml no longer switch keepwarm"), "{err}");
+
+    let on = Warm::new("kw-legacy-proj-on");
+    on.f.sensor("keepwarm", "enabled: false\n");
+    project_keepwarm(&on, "enabled: true\n");
+    on.reading(&[(51 * MIN, 200_000, 500)]);
+    assert!(on.run(&["keepwarm", "on"]).status.success());
+    on.check();
+    assert!(on.check().starts_with("keepwarm: "), "the project's enabled: true wins over the user's opt-out");
+}
+
+/// `attend config lint` names a legacy `keepwarm.yaml` and the config key
+/// to move to, as a warning that leaves the exit alone.
+#[test]
+fn attend_config_lint_names_the_legacy_keepwarm_file() {
+    let w = Warm::new("kw-legacy-lint");
+    w.f.sensor("keepwarm", "enabled: false\n");
+    let out = w.run(&["config", "lint"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{said}");
+    assert!(said.contains("keepwarm.yaml: [attend.sensors.keepwarm] keepwarm: warning: ") && said.contains("`ways settings set mods.attend.keepwarm off`"), "{said}");
 }
 
 /// Outside a Claude Code session there is nothing to warm: nothing printed,

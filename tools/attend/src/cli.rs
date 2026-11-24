@@ -287,8 +287,8 @@ pub(crate) enum SensorCmd {
     ///
     /// The attend mod starts one host for each listening session and stops
     /// it when the session stops listening. The host polls the sensors the
-    /// files declare for --cwd, except keepwarm and disclosure, and the
-    /// peers sensor reports sessions starting and leaving but no messages.
+    /// files declare for --cwd; the peers sensor reports sessions starting
+    /// and leaving but no messages.
     /// Each report the governor lets through becomes a signal from
     /// `system:<sensor>` addressed to --session, on the sensor's lane, with
     /// the expiry its trigger sets; the mod delivers it as it delivers a

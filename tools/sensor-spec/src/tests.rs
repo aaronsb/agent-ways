@@ -69,7 +69,7 @@ fn a_file_carrying_lane_exception_fails_lint_with_a_message_naming_its_removal()
     assert_eq!(e[0].severity, Severity::Error);
     assert_eq!(
         e[0].to_string(),
-        "lane_exception: error: lane_exception is removed from the sensor spec and is ignored; delete it. peers and keepwarm keep the message lane without it"
+        "lane_exception: error: lane_exception is removed from the sensor spec and is ignored; delete it"
     );
     let s = p.spec.expect("the sensor still loads, without the field");
     assert_eq!(s.lane(), Lane::Event, "no file field keeps an authorless sensor on the message lane");

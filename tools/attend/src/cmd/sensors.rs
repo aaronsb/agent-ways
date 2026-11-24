@@ -106,6 +106,10 @@ pub(crate) fn list(json: bool) {
     let all = sensors::catalog(&cfg, &focus.working_dir);
     if json {
         crate::cmd::print_json(&Value::Array(all.iter().map(entry).collect()));
+        // stdout stays one JSON document; the note goes beside it.
+        for note in removed(&focus.working_dir) {
+            eprintln!("{note}");
+        }
         return;
     }
     let mut t = agent_fmt::Table::new(&["Sensor", "Kind", "Origin", "State", "Lane", "Interval", "Source", "File"]);
@@ -126,16 +130,39 @@ pub(crate) fn list(json: bool) {
         t.add_owned(vec![h.name().to_string(), kind.into(), i.origin_text(), i.state.word().into(), lane.into(), interval, source, path]);
     }
     t.print();
-    let lines: Vec<String> = all
+    let mut lines: Vec<String> = all
         .iter()
         .flat_map(|h| h.state.detail().map(|d| format!("{}: {}: {d}", h.name(), h.state.label())).into_iter().chain(h.notes.iter().map(|n| format!("{}: {n}", h.name()))))
         .collect();
+    lines.extend(removed(&focus.working_dir));
     if !lines.is_empty() {
         println!();
         for l in lines {
             println!("  {l}");
         }
     }
+}
+
+/// A note for each file kept for a sensor attend removed
+/// ([`attend_config::sensors::removed_notes`]): keepwarm's names the config
+/// key that replaced it. Such a file defines no sensor, so the table does
+/// not list it.
+// #1316 grace: remove after the next release.
+fn removed(project: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (p, note) in attend_config::sensors::removed_notes(std::path::Path::new(project)) {
+        let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+        // Each note names its file: keepwarm's names every file already,
+        // so the one line serves all of them.
+        let line = match note.contains(&p.display().to_string()) {
+            true => format!("{name}: {note}"),
+            false => format!("{name}: {}: {note}", p.display()),
+        };
+        if !out.contains(&line) {
+            out.push(line);
+        }
+    }
+    out
 }
 
 /// `~` for the home directory, so the table stays narrow.

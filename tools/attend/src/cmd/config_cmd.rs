@@ -46,6 +46,8 @@ pub(crate) fn show(working_dir: &str) {
 }
 
 /// Print every finding in the user and project files; 3 when there is one.
+/// A sensor file kept for a sensor attend removed is named too, as a
+/// warning that leaves the exit alone.
 pub(crate) fn lint(working_dir: &str) -> i32 {
     let layers = config::layers(Path::new(working_dir));
     let mut n = 0;
@@ -54,6 +56,10 @@ pub(crate) fn lint(working_dir: &str) -> i32 {
             println!("{f}");
             n += 1;
         }
+    }
+    // #1316 grace: remove after the next release.
+    for line in attend_config::sensors::removed_lint(Path::new(working_dir)) {
+        println!("{line}");
     }
     if n == 0 {
         return 0;
