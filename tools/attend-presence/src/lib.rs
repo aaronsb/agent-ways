@@ -80,6 +80,24 @@ pub fn running_sessions() -> Vec<String> {
     ids
 }
 
+/// The ids of the Claude Code sessions whose recorded process still runs on
+/// this host: [`running_sessions`], except that a pid given to a later
+/// process does not count ([`record_process_runs`]). For a caller that
+/// holds something for a session while it lives, such as its name: a
+/// killed session whose pid a long-running daemon took would otherwise
+/// hold it for as long as the daemon runs.
+pub fn sessions_still_running() -> Vec<String> {
+    let mut ids: Vec<String> = session::sessions_dirs()
+        .iter()
+        .flat_map(|d| claude_sessions::read_session_records(d))
+        .filter(|r| record_process_runs(r.pid, r.started_at_ms))
+        .map(|r| r.session_id)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// Whether `member_id` is a Claude Code session whose process this host saw
 /// exit: it is not [`alive`], and either the session records naming it all
 /// name processes that no longer run ([`record_process_runs`]), or, with no
@@ -204,6 +222,21 @@ mod tests {
             assert!(crate::has_exited("reused"), "the record's process started a day ago; this pid's process is later");
             record(home, "c", pid, "undated", None);
             assert!(!crate::has_exited("undated"), "a record with no start time is judged by its pid");
+        });
+    }
+
+    /// A session whose recorded pid a later process took is not still
+    /// running, though `running_sessions` counts it; a record with no start
+    /// time is judged by its pid alone.
+    #[test]
+    fn a_reused_pid_does_not_keep_a_session_running() {
+        with_home(|home| {
+            let pid = std::process::id();
+            record(home, "a", pid, "current", Some(SystemTime::now()));
+            record(home, "b", pid, "reused", Some(SystemTime::now() - Duration::from_secs(24 * 3600)));
+            record(home, "c", pid, "undated", None);
+            assert_eq!(crate::sessions_still_running(), ["current", "undated"]);
+            assert_eq!(crate::running_sessions(), ["current", "reused", "undated"], "the loose scan still counts the pid");
         });
     }
 

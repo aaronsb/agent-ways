@@ -174,8 +174,12 @@ impl InstanceEntry {
 #[derive(Clone)]
 enum Liveness {
     /// [`attend_presence::alive`] over a process scan taken for each
-    /// allocation: a Claude Code process holds the session's record, or the
-    /// session listens in a process that runs, or its heartbeat is fresh.
+    /// registry call: the process a Claude Code session record names still
+    /// runs, judged with the record's start time so a pid a later process
+    /// took does not count ([`attend_presence::sessions_still_running`]),
+    /// or the session listens in a process that runs, or its heartbeat is
+    /// fresh. GC spares a live row, so a reused pid counted as live would
+    /// hold a killed session's name for as long as that process ran.
     Presence,
     /// A caller's predicate over session ids.
     Given(Arc<dyn Fn(&str) -> bool + Send + Sync>),
@@ -190,7 +194,7 @@ impl Liveness {
     fn judge(&self) -> Predicate<'_> {
         match self {
             Liveness::Presence => {
-                let running: HashSet<String> = attend_presence::running_sessions().into_iter().collect();
+                let running: HashSet<String> = attend_presence::sessions_still_running().into_iter().collect();
                 Box::new(move |id| attend_presence::alive(id, &running))
             }
             Liveness::Given(live) => Box::new(move |id| live(id)),
