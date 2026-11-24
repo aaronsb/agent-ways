@@ -2130,7 +2130,7 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "ways"
-version = "1.54.2"
+version = "1.55.0"
 dependencies = [
  "agent-fmt",
  "agent-identity",
