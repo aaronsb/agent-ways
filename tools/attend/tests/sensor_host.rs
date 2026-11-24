@@ -269,6 +269,51 @@ fn without_moved_from_a_new_id_fires_once_of_its_own() {
     assert!(from(&f, "beacon").iter().any(|(_, t)| t.contains("|to:sess-new|")));
 }
 
+/// The name `attend peer whoami --display` prints for the fixture's
+/// session.
+fn display_name(f: &Fixture) -> String {
+    f.ok(&["peer", "whoami", "--display"]).trim().to_string()
+}
+
+/// The instance `sid` holds in the fixture's project, from the registry.
+fn instance(f: &Fixture, sid: &str) -> Option<String> {
+    attend_instances::Registry::with_base(f.cache().join("instances")).lookup(&f.origin, sid)
+}
+
+/// The host takes the session's instance slot as it starts, so its name
+/// carries a suffix: nothing else registers a listening session (#1108).
+#[test]
+fn a_host_registers_the_session_and_whoami_shows_its_suffix() {
+    let f = quiet("host-register");
+    let bare = display_name(&f);
+    assert!(!bare.contains('-'), "no suffix before a host runs: {bare}");
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("the instance slot", Duration::from_secs(20), || instance(&f, &f.sid).is_some());
+    assert_eq!(instance(&f, &f.sid).as_deref(), Some("alpha"));
+    assert_eq!(display_name(&f), format!("{bare}-alpha"));
+}
+
+/// After `/clear` the host started with `--moved-from` moves the old id's
+/// slot to the new id before it registers, so the suffix stays. A second
+/// session holds alpha, so the old id holds beta, and a new id registering
+/// on its own would take gamma.
+#[test]
+fn a_host_with_moved_from_keeps_the_old_suffix() {
+    let f = quiet("host-rename");
+    let other = Host::start(&f, "sess-other", &[]);
+    other.wait_for("the other session's slot", Duration::from_secs(20), || instance(&f, "sess-other").is_some());
+    let old = Host::start(&f, "sess-old", &[]);
+    old.wait_for("the old id's slot", Duration::from_secs(20), || instance(&f, "sess-old").is_some());
+    assert_eq!(instance(&f, "sess-old").as_deref(), Some("beta"));
+    drop(old);
+    f.set_session_id("sess-new");
+    let bare = display_name(&f);
+    let new = Host::start(&f, "sess-new", &["--moved-from", "sess-old"]);
+    new.wait_for("the new id's slot", Duration::from_secs(20), || instance(&f, "sess-new").is_some());
+    assert_eq!(instance(&f, "sess-new").as_deref(), Some("beta"), "the new id keeps the old suffix");
+    assert_eq!(display_name(&f), format!("{bare}-beta"));
+}
+
 /// A command the host runs does not act as the session: its `attend
 /// message send` is refused, and writes no signal.
 #[test]

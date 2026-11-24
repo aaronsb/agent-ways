@@ -504,18 +504,14 @@ pub(super) fn tick_iteration(s: &mut TickState) {
         *s.last_checkpoint = Instant::now();
     }
 
-    // Periodic instance-registry upsert — refresh `last_seen` so the
-    // GC clock cannot expire an active session, and *re-register* if
-    // our entry is missing (issue #378). `touch` was a silent no-op
-    // for unregistered sessions, which left a session whose entry was
-    // GC'd or never written rendering as the bare nickname forever
-    // ("bare @Hana"). `register` is idempotent — an existing entry is
-    // refreshed and keeps its slot; a missing one is re-allocated —
-    // so the roster self-heals within one interval.
+    // Periodic instance-registry refresh — `last_seen` moves so the GC
+    // clock cannot expire an active session, and a missing entry is
+    // allocated again (issue #378), so the roster heals within one
+    // interval. An alias row stays an alias: after `/clear` the new host
+    // renamed this id's slot, and this host, still running until the mod
+    // ends it, must not take the old id a fresh slot.
     if s.register_instances && s.last_instance_touch.elapsed() >= INSTANCE_TOUCH_INTERVAL {
-        s.instance_registry
-            .register(&s.focus.working_dir, s.heartbeat_id)
-            .ok();
+        s.instance_registry.keep(&s.focus.working_dir, s.heartbeat_id).ok();
         *s.last_instance_touch = Instant::now();
     }
 
