@@ -56,7 +56,12 @@ fn key(tab: &Tab) -> String {
 impl Hidden {
     /// Whether `tab` hides `sig`: it is at or before the tab's watermark.
     pub fn hides(&self, tab: &Tab, sig: &Signal) -> bool {
-        self.marks.get(&key(tab)).is_some_and(|mark| order(sig) <= *mark)
+        self.covers(tab, order(sig))
+    }
+
+    /// Whether `tab`'s watermark is at or past `at`.
+    pub fn covers(&self, tab: &Tab, at: Order) -> bool {
+        self.marks.get(&key(tab)).is_some_and(|mark| at <= *mark)
     }
 
     /// Hide in `tab` every message at or before `upto`. A watermark only
@@ -92,6 +97,23 @@ impl Hidden {
     pub fn hide_in(path: &Path, tab: &Tab, upto: Order) -> std::io::Result<Hidden> {
         let mut now = Hidden::load(path);
         now.hide(tab, upto);
+        now.save(path)?;
+        Ok(now)
+    }
+
+    /// Record in the file at `path` that `tab` showed every DM up to `upto`,
+    /// as [`Hidden::hide_in`] does, for the DM marks a chat keeps across
+    /// restarts ([`crate::last_tab::shown_path`]). The operator view's mark
+    /// drops each DM view's mark at or before it: the operator view's mark
+    /// hides all that one hides, so the file keeps one line for each agent
+    /// with DMs past it, not one for every agent ever seen.
+    pub fn shown_in(path: &Path, tab: &Tab, upto: Order) -> std::io::Result<Hidden> {
+        let mut now = Hidden::load(path);
+        now.hide(tab, upto);
+        if *tab == Tab::Merged {
+            let all = now.marks[&key(&Tab::Merged)];
+            now.marks.retain(|k, mark| !k.starts_with("dm:") || *mark > all);
+        }
         now.save(path)?;
         Ok(now)
     }

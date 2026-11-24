@@ -26,6 +26,7 @@ mod keys;
 mod menu;
 mod participants;
 mod pending;
+mod reopen;
 mod unsent;
 mod settings_view;
 mod sidebar;
@@ -162,9 +163,16 @@ pub struct ChatPane {
     status_set_at: Option<Instant>,
     status_is_error: bool,
     tab_cycle: Option<TabCycle>,
-    /// The foreground tab (#393). Merged at launch: the full stream is
-    /// the opening posture; per-channel focus is an explicit gesture.
+    /// The foreground tab (#393). Merged at launch, the full stream,
+    /// unless the chat reopens the tab the last chat showed
+    /// ([`Chat::reopen_last_tab`]).
     foreground: Tab,
+    /// The state directory the chat records the shown tab and the operator
+    /// view's DM watermark in, for the next chat to reopen
+    /// ([`crate::last_tab`]); none records nothing. With it, the record the
+    /// file holds now, written again only when it changes.
+    state_dir: Option<std::path::PathBuf>,
+    recorded: Option<crate::last_tab::Last>,
     feed: FeedState,
     /// The feed's height in the last frame, for paging.
     feed_rows: u16,
@@ -274,8 +282,9 @@ pub struct ChatPane {
     /// The newest DM to the operator that the operator view, and each DM
     /// view, held when it was last shown, kept as watermarks of the kind
     /// Hide messages here keeps: an agent's row marks the DMs past both
-    /// ([`dm`]). In memory only: the chat opens on the operator view, which
-    /// shows every DM.
+    /// ([`dm`]). In memory: the chat opens on the operator view, which
+    /// shows every DM. A chat that reopens another tab starts from the
+    /// marks the last chat kept ([`reopen`]).
     shown: crate::hidden::Hidden,
     /// The attend CLI the cleanup items run ([`cleanup`]), and the last
     /// delete made, for Undo delete.
@@ -324,6 +333,8 @@ impl ChatPane {
             status_is_error: false,
             tab_cycle: None,
             foreground: Tab::default(),
+            state_dir: None,
+            recorded: None,
             feed: FeedState::default(),
             feed_rows: 0,
             rx,
@@ -568,6 +579,11 @@ impl ChatPane {
             self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, invites(!self.dry_run), instances, &self.foreground, &self.views));
             self.remember_dm_names();
             self.refocus();
+            // A join since the last read, the chat's own or another's,
+            // marks the operator a member of the channel shown; a DM view
+            // shown keeps the mark of the DMs it holds.
+            self.record_tab();
+            self.keep_dm_view_shown();
         }
         self.world.as_ref().expect("just built")
     }
@@ -597,6 +613,8 @@ impl ChatPane {
             }
             let left = std::mem::replace(&mut self.foreground, t);
             self.note_shown(&left);
+            self.record_tab();
+            self.keep_dm_view_shown();
             self.feed = FeedState::default();
             self.invalidate();
             if self.world.is_some() {
@@ -1385,6 +1403,14 @@ impl Chat {
     /// attend-chat's state directory ([`ChatPane::keep_unsent`]).
     pub fn unsent_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Chat {
         self.pane_mut().unsent_dir = dir.into();
+        self
+    }
+
+    /// Open on the tab the last chat showed, as recorded in the state
+    /// directory `dir`, and record there each tab shown from now on
+    /// ([`crate::last_tab`], [`reopen`]).
+    pub fn reopen_last_tab(mut self, dir: impl Into<std::path::PathBuf>) -> Chat {
+        self.pane_mut().reopen_last_tab(dir.into());
         self
     }
 

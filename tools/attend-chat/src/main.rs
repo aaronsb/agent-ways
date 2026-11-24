@@ -218,13 +218,14 @@ fn main() {
 
     // The shell's signal handler stays installed after it closes, so the
     // process ends here, with 128 plus the signal when one ended it.
-    // What the last chat kept unsent, at a hangup or Send and quit, opens
-    // in the compose box.
+    // The tab the last chat showed opens again, unless its channel is gone
+    // or left. What the last chat kept unsent, at a hangup or Send and
+    // quit, opens in the compose box, on that draft's own tab.
     // A panic keeps what waits and the draft, as the unasked end does, and
     // so does a forced exit, which ends the process without that end.
     attend_chat::app::keep_on_panic();
     attend_chat::app::keep_on_forced_exit();
-    let code = match agent_tui::run(chat.restore_unsent().into_app()) {
+    let code = match agent_tui::run(chat.reopen_last_tab(attend_chat::hidden::state_dir()).restore_unsent().into_app()) {
         Ok(session) => session.signal.map_or(0, |sig| 128 + sig),
         Err(e) => {
             eprintln!("attend-chat: terminal: {e}");

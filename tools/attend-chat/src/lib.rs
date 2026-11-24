@@ -17,6 +17,7 @@ pub mod grammar;
 pub mod groups;
 pub mod helper;
 pub mod hidden;
+pub mod last_tab;
 pub mod legend;
 pub mod peers;
 pub mod sessions;
