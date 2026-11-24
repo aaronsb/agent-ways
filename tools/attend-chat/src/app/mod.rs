@@ -284,7 +284,7 @@ pub struct ChatPane {
     /// Hide messages here keeps: an agent's row marks the DMs past both
     /// ([`dm`]). In memory: the chat opens on the operator view, which
     /// shows every DM. A chat that reopens another tab starts from the
-    /// operator view's mark the last chat kept ([`reopen`]).
+    /// marks the last chat kept ([`reopen`]).
     shown: crate::hidden::Hidden,
     /// The attend CLI the cleanup items run ([`cleanup`]), and the last
     /// delete made, for Undo delete.

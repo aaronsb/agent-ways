@@ -12,7 +12,7 @@ mod support;
 
 use std::path::PathBuf;
 
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use agent_tui::testkit;
 use agent_tui::theme::{Palette, Shape};
 use attend_chat::app::Chat;
@@ -253,4 +253,73 @@ fn leaving_the_operator_view_keeps_its_mark_for_the_next_chat() {
     assert!(!marked(&mut next), "the DM the operator view showed");
     next.push(dm("d-2", held + 60));
     assert!(marked(&mut next), "a DM after it, from before this start");
+}
+
+/// Click the agent's row in the left column, which shows its DM view.
+fn open_agent_dms(c: &mut Chat) {
+    let name = agent_identity::Identity::for_cwd("/work/alpha", agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let rows = testkit::rows(&testkit::render_screen(c, 120, 35));
+    let (x, y) = rows
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(y, r)| {
+            let col = r.split('│').next()?;
+            col.find(&name).map(|b| (col[..b].chars().count() as u16, y as u16))
+        })
+        .unwrap_or_else(|| panic!("no {name} in the column: {rows:#?}"));
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    assert_eq!(*c.foreground(), Tab::Dm(AGENT_SID.into()), "the click shows the agent's DMs");
+}
+
+/// A DM read in the agent's DM view, without the operator view shown,
+/// stays read after a restart that reopens a channel.
+#[test]
+fn a_dm_read_in_its_dm_view_stays_read_after_a_restart() {
+    let dir = state("dm-view");
+    Last { tab: channel("kept"), member: true }.save(&last_tab::path(&dir)).unwrap();
+    let mark = now() - 3600;
+    Hidden::hide_in(&last_tab::shown_path(&dir), &Tab::Merged, (mark, 0, 0)).unwrap();
+    let mut first = chat(&dir).heartbeat(false).dry_run(true);
+    first.push(dm("d-1", mark + 60));
+    assert!(marked(&mut first), "the DM came after the operator view's mark");
+    open_agent_dms(&mut first);
+    show(&mut first, "kept");
+    assert!(!marked(&mut first), "read in its DM view");
+    drop(first);
+    let mut next = chat(&dir).heartbeat(false).dry_run(true);
+    assert_eq!(*next.foreground(), channel("kept"));
+    next.push(dm("d-1", mark + 60));
+    assert!(!marked(&mut next), "still read after the restart");
+    next.push(dm("d-2", mark + 120));
+    assert!(marked(&mut next), "a later DM still marks the agent");
+}
+
+/// The operator view's mark marks the agents' DM-view marks it covers
+/// as no longer needed, and the file drops them.
+#[test]
+fn the_operator_view_mark_drops_the_dm_marks_it_covers() {
+    let dir = state("prune");
+    let path = last_tab::shown_path(&dir);
+    Hidden::shown_in(&path, &Tab::Dm("old".into()), (100, 0, 0)).unwrap();
+    Hidden::shown_in(&path, &Tab::Dm("new".into()), (300, 0, 0)).unwrap();
+    let kept = Hidden::shown_in(&path, &Tab::Merged, (200, 0, 0)).unwrap();
+    assert!(kept.has(&Tab::Merged) && kept.has(&Tab::Dm("new".into())) && !kept.has(&Tab::Dm("old".into())), "{kept:?}");
+    assert_eq!(Hidden::load(&path), kept, "as written");
+}
+
+/// With no mark kept, a chat that reopens a channel keeps the start as the
+/// operator view's mark, so the next chat starts from it and not from its
+/// own start.
+#[test]
+fn the_fallback_mark_is_kept_for_the_next_chat() {
+    let dir = state("fallback");
+    Last { tab: channel("kept"), member: true }.save(&last_tab::path(&dir)).unwrap();
+    let before = now();
+    let first = chat(&dir).heartbeat(false).dry_run(true);
+    let after = now();
+    drop(first);
+    let kept = Hidden::load(&last_tab::shown_path(&dir));
+    assert!(kept.has(&Tab::Merged), "the start is written: {kept:?}");
+    assert!(kept.hides(&Tab::Merged, &dm("old", before - 1)) && !kept.hides(&Tab::Merged, &dm("later", after + 1)), "{kept:?}");
 }

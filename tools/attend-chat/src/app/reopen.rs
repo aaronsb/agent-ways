@@ -6,7 +6,7 @@
 //! names attend-chat's state directory ([`super::Chat::reopen_last_tab`]);
 //! the chat then reopens the tab recorded there, records each change of
 //! the shown tab and of the operator's membership of it, and keeps the
-//! operator view's DM watermark across restarts. What the files hold and
+//! DM watermarks of the operator view and the DM views across restarts. What the files hold and
 //! how a record is chosen is [`crate::last_tab`]'s; here is when the chat
 //! reads and writes them.
 
@@ -26,18 +26,24 @@ impl ChatPane {
     /// that does not parse, the chat opens where it opens without one.
     ///
     /// A chat that opens on another tab than the operator view has not
-    /// shown that view, which shows every DM. The view's watermark from
-    /// the last chat stands in for it, so the DMs that came while no chat
-    /// ran mark their agents' rows; with none kept, the DMs from before
-    /// this start count as shown.
+    /// shown that view, which shows every DM. The DM marks the last chat
+    /// kept stand in for it, so the DMs that came while no chat ran mark
+    /// their agents' rows, and those read in a DM view do not. With no
+    /// operator view mark kept, the DMs from before this start count as
+    /// shown, and the start is kept as the mark for the next chat.
     pub(super) fn reopen_last_tab(&mut self, dir: PathBuf) {
         let last = Last::load(&last_tab::path(&dir));
         let known = crate::groups::channels(ColorDepth::NoColor);
         if let Some(tab) = last_tab::reopen(last.as_ref(), &known, &human_member_id()) {
             if tab != Tab::Merged {
-                let mut kept = Hidden::load(&last_tab::shown_path(&dir));
+                let path = last_tab::shown_path(&dir);
+                let mut kept = Hidden::load(&path);
                 if !kept.has(&Tab::Merged) {
-                    kept.hide(&Tab::Merged, (now(), 0, 0));
+                    let start = (now(), 0, 0);
+                    match Hidden::shown_in(&path, &Tab::Merged, start) {
+                        Ok(written) => kept = written,
+                        Err(_) => kept.hide(&Tab::Merged, start),
+                    }
                 }
                 self.shown = kept;
             }
@@ -67,11 +73,17 @@ impl ChatPane {
         }
     }
 
-    /// Keep the operator view's DM watermark as it is left: the newest DM
-    /// it held, or this moment when it held none.
-    pub(super) fn keep_operator_view_mark(&self, newest: Option<Order>) {
+    /// Keep the DM mark `mark` as its view is left ([`Hidden::shown_in`]):
+    /// the newest DM the view held. The operator view keeps this moment
+    /// when it held none; a DM view that held none keeps nothing.
+    pub(super) fn keep_shown(&self, mark: &Tab, newest: Option<Order>) {
         let Some(dir) = &self.state_dir else { return };
-        let _ = Hidden::hide_in(&last_tab::shown_path(dir), &Tab::Merged, newest.unwrap_or((now(), 0, 0)));
+        let upto = match (mark, newest) {
+            (_, Some(n)) => n,
+            (Tab::Merged, None) => (now(), 0, 0),
+            _ => return,
+        };
+        let _ = Hidden::shown_in(&last_tab::shown_path(dir), mark, upto);
     }
 }
 

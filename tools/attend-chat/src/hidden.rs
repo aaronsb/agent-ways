@@ -96,6 +96,23 @@ impl Hidden {
         Ok(now)
     }
 
+    /// Record in the file at `path` that `tab` showed every DM up to `upto`,
+    /// as [`Hidden::hide_in`] does, for the DM marks a chat keeps across
+    /// restarts ([`crate::last_tab::shown_path`]). The operator view's mark
+    /// drops each DM view's mark at or before it: the operator view's mark
+    /// hides all that one hides, so the file keeps one line for each agent
+    /// with DMs past it, not one for every agent ever seen.
+    pub fn shown_in(path: &Path, tab: &Tab, upto: Order) -> std::io::Result<Hidden> {
+        let mut now = Hidden::load(path);
+        now.hide(tab, upto);
+        if *tab == Tab::Merged {
+            let all = now.marks[&key(&Tab::Merged)];
+            now.marks.retain(|k, mark| !k.starts_with("dm:") || *mark > all);
+        }
+        now.save(path)?;
+        Ok(now)
+    }
+
     /// Take `tab`'s watermark out of the file at `path`, every other kept;
     /// the watermarks now in force.
     pub fn show_in(path: &Path, tab: &Tab) -> std::io::Result<Hidden> {

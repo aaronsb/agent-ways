@@ -14,9 +14,11 @@
 //!   is not recorded, and the file keeps the channel shown before it. The
 //!   write replaces the file whole, through a temporary file and a rename,
 //!   so a chat that is killed leaves the last record it made.
-//! - `shown`, the operator view's DM watermark: the newest DM to the
-//!   operator that the operator view held when it was last left, in the
-//!   format of Hide messages here's file ([`crate::hidden`]).
+//! - `shown`, the DM watermarks: the newest DM to the operator that the
+//!   operator view, and each agent's DM view, held when it was last left,
+//!   in the format of Hide messages here's file ([`crate::hidden`]). The
+//!   operator view's mark drops the DM views' marks it covers
+//!   ([`crate::hidden::Hidden::shown_in`]).
 //!
 //! `last-tab` is one line: `all` for the operator view, or `#name` for a
 //! channel, followed by a tab and `member` when the operator was a member
