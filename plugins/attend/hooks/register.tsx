@@ -95,7 +95,7 @@ import {
   shortId,
 } from './lib.ts'
 import type { Decision, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
-import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
+import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit, HOST_EXIT_WAIT_MS, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
 import type { HostChild, HostEnd, HostSpec } from './host.ts'
 
 
@@ -461,8 +461,11 @@ async function markCompacted($: $) {
 // settles (a /clear's with --moved-from), and after an exit of its own,
 // HOST_RESPAWNS times in ten minutes at most. Each line on its stdout is a
 // signal it wrote to the store, and forces a tick so the poll delivers it.
-// Nothing here locks: the module keeps one host, ended before another
-// starts, and a reload's unload ends the old module's.
+// Nothing here locks: the module keeps one host. One it ends lingers until
+// it next looks at its stop flag, so the next host waits for that exit, up
+// to HOST_EXIT_WAIT_MS, before it spawns. A reload's unload ends the old
+// module's host, which the new module has no handle on and cannot wait
+// for, so the two can overlap while the old one lingers.
 //
 // References:
 // - ADR-416 item 2: the host's life under the mod, its cue and its cap.
@@ -493,40 +496,52 @@ async function setHostFor($: $, mod: Mod, want: HostSpec) {
   await updateStatus($, s => ({ ...s, hostFor: hostRecord(want) }))
 }
 
-/** One host's life, on session.start's `$`: spawn it directly (argv[0] is
- *  attend), read it until it ends or the module ends it, then decide what
- *  its end leads to. stderr goes to the debug log. */
+/** One host's life, on session.start's `$`: wait for the host before it to
+ *  exit, spawn this one directly (argv[0] is attend), read it until it ends
+ *  or the module ends it, then decide what its end leads to. stderr goes to
+ *  the debug log. */
 async function runHost($: $, mod: Mod, want: HostSpec) {
+  const prior = mod.lastHost
   let stopRead = () => {}
   const stopped = new Promise<'stop'>(resolve => (stopRead = () => resolve('stop')))
-  let end: (() => void) | undefined
+  let end: (() => Promise<unknown>) | undefined
+  let markExited = () => {}
   const h: HostChild = {
     ...want,
     isEnding: false,
     stop: () => {
       stopRead()
-      end?.()
+      void end?.()
     },
+    exited: new Promise<void>(resolve => (markExited = resolve)),
   }
   mod.host = h
-  let parent: string | undefined
-  try {
-    parent = claudePid(await $.process.hookEnv())
-  } catch {
-    // An engine without it: the host watches its own parent alone.
-  }
-  if (h.isEnding) return
+  mod.lastHost = h
   let result: HostEnd
   let failed: string | undefined
   try {
+    if (prior) await exitOf($, prior)
+    let parent: string | undefined
+    try {
+      parent = claudePid(await $.process.hookEnv())
+    } catch {
+      // An engine without it: the host watches its own parent alone.
+    }
+    if (h.isEnding) return
     const child = $.process.spawn({ argv: hostArgv(want, mod.cwd, parent) })
-    // Ending the read kills the child.
-    end = () => void child.return({ code: null, signal: 'SIGTERM' }).catch(() => undefined)
+    // Ending the read kills the child. With a pull in flight, as the loop
+    // below always has, the return settles once the stream has ended, so
+    // once the child has gone.
+    let closing: Promise<unknown> | undefined
+    end = () => (closing ??= child.return({ code: null, signal: 'SIGTERM' }).catch(() => undefined))
     if ((await readStatus($)).hostStopped) await updateStatus($, s => ({ ...s, hostStopped: false }))
     let held = ''
     for (;;) {
       const r = await Promise.race([child.next(), stopped])
-      if (r === 'stop') return
+      if (r === 'stop') {
+        await end()
+        return
+      }
       if (r.done) {
         result = r.value as HostEnd
         break
@@ -541,9 +556,21 @@ async function runHost($: $, mod: Mod, want: HostSpec) {
     }
   } catch (err) {
     failed = String(err)
+  } finally {
+    markExited()
   }
   if (h.isEnding) return
   await hostEnded($, mod, h, result, failed)
+}
+
+/** Waits for `prior` to exit, at most HOST_EXIT_WAIT_MS. */
+async function exitOf($: $, prior: HostChild) {
+  let timer: { cancel: () => void } | undefined
+  await new Promise<void>(resolve => {
+    timer = $.clock.after(HOST_EXIT_WAIT_MS, resolve)
+    void prior.exited.then(resolve)
+  })
+  timer?.cancel()
 }
 
 /** A cue from the host: a tick now, or once the one running ends. */
@@ -1100,6 +1127,7 @@ export const register: Register = on => {
     contextTokens: undefined,
     heldNote: undefined,
     host: undefined,
+    lastHost: undefined,
     hostFor: undefined,
     isListeningOff: false,
     hostRespawns: [],

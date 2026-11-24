@@ -52,8 +52,16 @@ export function hostSpecFor(id: string, current: HostSpec | undefined, kept: Hos
 }
 
 /** A running host: what it was spawned for, and how to end it. `isEnding`
- *  is set once the module ends it, so its end is not taken for an exit. */
-export type HostChild = HostSpec & { isEnding: boolean; stop: () => void }
+ *  is set once the module ends it, so its end is not taken for an exit.
+ *  `exited` settles once its child has gone, or once it is known no child
+ *  was spawned. */
+export type HostChild = HostSpec & { isEnding: boolean; stop: () => void; exited: Promise<void> }
+
+/** The longest a new host waits for the one it replaces to exit. A host
+ *  looks at its stop flag after a sleep of up to a second, so it lingers
+ *  after SIGTERM; past this bound the new one spawns anyway, so a host that
+ *  will not exit cannot hold the session's sensors off. */
+export const HOST_EXIT_WAIT_MS = 3_000
 
 /** A host that exits on its own is spawned again after HOST_RESPAWN_MS, at
  *  most HOST_RESPAWNS times in HOST_WINDOW_MS; the next exit stops it. */

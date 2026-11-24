@@ -200,6 +200,9 @@ export type Mod = {
   heldNote: string | undefined
   /** The sensor host this module spawned, while it runs. */
   host: HostChild | undefined
+  /** The host this module started last, running or ended: the next one
+   *  waits for its exit before it spawns. */
+  lastHost: HostChild | undefined
   /** The host the session should have: set on activation and when a
    *  /clear or a /resume settles; undefined while the session is dormant. */
   hostFor: HostSpec | undefined
