@@ -79,23 +79,28 @@ fn build_marker_path() -> Option<PathBuf> {
     Some(base.join("attend").join("last-build-status"))
 }
 
+/// The magnitude of a build exit that did not fail. The sensor reports
+/// only the session's own builds, and one of them finishing is worth a
+/// line on its own: 3.0 meets the event lane's cut (attend's
+/// `EVENT_CUT`), which holds any batch under it unwritten.
+const BUILD_EXIT: f64 = 3.0;
+
 /// Format a build-tool exit event, optionally enriched with success/
 /// failure context from a marker and with the hosted apps that exited
 /// with the tool. Pure function — the sensor's `poll()` delegates here so
 /// the enrichment arms get direct unit test coverage without needing a
 /// real filesystem.
 ///
-/// The success case sits at 2.5 rather than the issue spec's 2.0 on
-/// purpose: that's the same magnitude the sensor emits when no marker
-/// is present, so opting into the wrapper never *lowers* an exit's
-/// visibility. Failures stay at 3.5 to break through refractory gating.
+/// A success and an exit with no marker share [`BUILD_EXIT`], so opting
+/// into the wrapper never *lowers* an exit's visibility. Failures stay
+/// at 3.5 to break through refractory gating.
 fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64, hosted_exits: &[String]) -> (f64, String) {
     const MARKER_WINDOW_SECS: u64 = 60;
     let matched = marker.filter(|m| marker_matches(m, app, now, MARKER_WINDOW_SECS));
     let (mag, status) = match matched {
-        Some(m) if m.code == 0 => (2.5, Some("success".to_string())),
+        Some(m) if m.code == 0 => (BUILD_EXIT, Some("success".to_string())),
         Some(m) => (3.5, Some(format!("failure, code {}", m.code))),
-        None => (2.5, None),
+        None => (BUILD_EXIT, None),
     };
     let exits = (!hosted_exits.is_empty()).then(|| format!("{} exited", hosted_exits.join(", ")));
     let notes: Vec<String> = status.into_iter().chain(exits).collect();
@@ -851,7 +856,7 @@ mod tests {
     #[test]
     fn format_build_exit_no_marker_falls_back_to_legacy_text() {
         let (mag, text) = format_build_exit("cargo", None, 1000, &[]);
-        assert_eq!(mag, 2.5);
+        assert_eq!(mag, BUILD_EXIT);
         assert!(text.starts_with("cargo finished. "));
         assert!(!text.contains("success"));
         assert!(!text.contains("failure"));
@@ -863,7 +868,7 @@ mod tests {
         // filter inside format_build_exit is the only gate.
         let m = BuildMarker { cmd: "cargo".into(), code: 0, ts: 100 };
         let (mag, text) = format_build_exit("cargo", Some(&m), 1000, &[]);
-        assert_eq!(mag, 2.5);
+        assert_eq!(mag, BUILD_EXIT);
         assert!(!text.contains("success"));
     }
 
@@ -872,7 +877,7 @@ mod tests {
         // Marker for a different command must not tag this exit.
         let m = BuildMarker { cmd: "rustc".into(), code: 0, ts: 1000 };
         let (mag, text) = format_build_exit("cargo", Some(&m), 1010, &[]);
-        assert_eq!(mag, 2.5);
+        assert_eq!(mag, BUILD_EXIT);
         assert!(!text.contains("success"));
     }
 
@@ -880,7 +885,7 @@ mod tests {
     fn format_build_exit_matching_success_marker() {
         let m = BuildMarker { cmd: "cargo".into(), code: 0, ts: 1000 };
         let (mag, text) = format_build_exit("cargo", Some(&m), 1010, &[]);
-        assert_eq!(mag, 2.5);
+        assert_eq!(mag, BUILD_EXIT);
         assert!(text.contains("(success)"));
     }
 
