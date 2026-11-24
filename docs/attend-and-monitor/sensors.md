@@ -111,6 +111,8 @@ A process can rename itself, so the name the sensor tracks is not always `comm` 
 
 A `ps` read that fails or lists no process skips that poll. The first failed read and the recovery are each logged once on stderr. After six failed reads in a row, the recovering poll sets a new baseline silently and does not report what changed during the outage. The sensor reads `ps -u $USER -o pid=,ppid=,lstart=,comm=`. A `ps` that cannot print `lstart` or take `-u`, such as busybox's, fails that read. The sensor then reads `ps -o pid=,ppid=,user=,comm=` from then on, keeps the rows owned by `$USER`, and says so once on stderr. Busybox cuts the `user` column to eight characters, so a longer user name is matched by its first eight.
 
+Apps are reported wherever they run on the machine. Build tools are reported only for the session's own builds: in the sensor host, a watched tool counts only when it runs under the session's Claude Code (the pid the attend mod passes as `--parent`). A build another session or a terminal runs is not reported to this session. A build the session started stays tracked when its shell exits and it is adopted by init, so `cargo build &` reports its finish when it ends. A watched tool above Claude Code, such as a `make` target that starts `claude`, does not hide the session's builds.
+
 The sensor tracks application presence, not process churn (ADR-113). Four rules keep a build to one event:
 
 - A watched tool running under another watched tool, such as `rustc` under `cargo` or `cc` under `make`, is part of that build and is not counted. A watched tool run on its own is counted. Any other app is counted wherever it runs, so `node` under `npm` and `docker` under `make` stay visible.
@@ -122,10 +124,12 @@ The sensor tracks application presence, not process churn (ADR-113). Four rules 
 |---|---|---|
 | app started (still running one poll later, up to 30 s) | 2.0 | `docker started` |
 | app exited | 2.0 | `nvim exited` |
-| watched build tool finished, no marker | 2.5 | ``cargo finished. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps`` |
-| watched build tool finished, success | 2.5 | `cargo finished (success). …` |
+| watched build tool finished, no marker | 3.0 | ``cargo finished. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps`` |
+| watched build tool finished, success | 3.0 | `cargo finished (success). …` |
 | watched build tool finished, failure | 3.5 | `cargo finished (failure, code 101). …` |
-| watched build tool finished with a hosted app | 2.5, or 3.5 on a failure marker | `npm finished (node exited). …` |
+| watched build tool finished with a hosted app | 3.0, or 3.5 on a failure marker | `npm finished (node exited). …` |
+
+The sensor host writes an event-lane batch only at magnitude 3.0 or more, so a lone app start or exit is logged and not delivered, and a lone build finish is delivered.
 
 ### The watch list
 

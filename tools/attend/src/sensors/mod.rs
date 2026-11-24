@@ -338,6 +338,8 @@ pub struct Ctx<'a> {
     pub session: Option<&'a str>,
     /// The session's Claude Code pid. The processes sensor reports only the
     /// builds that run under it; none reports every build the user runs.
+    /// Only the sensor host sets it: a one-shot `attend sensor poll` keeps
+    /// no process state between runs, so a root would change nothing.
     #[cfg_attr(not(feature = "sensor-processes"), allow(dead_code))]
     pub root: Option<u32>,
 }
@@ -415,8 +417,8 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
 ///
 /// References:
 /// - ADR-416 items 4 and 5: what the host runs, and the lane rule.
-pub fn register_host_sensors(cfg: &Config, focus: &Focus, session: &str, root: u32) -> (Vec<SensorSlot>, Vec<String>) {
-    let ctx = Ctx { cfg, session: Some(session), root: Some(root) };
+pub fn register_host_sensors(cfg: &Config, focus: &Focus, session: &str, root: Option<u32>) -> (Vec<SensorSlot>, Vec<String>) {
+    let ctx = Ctx { cfg, session: Some(session), root };
     register(&ctx, focus)
 }
 

@@ -315,8 +315,7 @@ fn require_hosted(h: &Hosted, verb: &str, json: bool) {
 /// The sensor `h`, keyed by `session` so it reads the session's store,
 /// writing it only with `record`; or exit 3 saying why it cannot run.
 fn open(h: &Hosted, cfg: &Config, project: &str, session: Option<&str>, record: bool, verb: &str) -> sensors::hosted::FileSensor {
-    let root = attend_presence::process::claude_ancestor(std::process::id());
-    sensors::file_sensor(h, &Ctx { cfg, session, root }, project, record).unwrap_or_else(|why| {
+    sensors::file_sensor(h, &Ctx { cfg, session, root: None }, project, record).unwrap_or_else(|why| {
         eprintln!("attend sensor {verb}: {}: {why}", h.name());
         std::process::exit(agent_settings::exit::REJECTED);
     })

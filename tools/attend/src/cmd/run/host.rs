@@ -171,9 +171,15 @@ pub(crate) fn cmd_host(a: &HostArgs) {
 
     let cfg = config::Config::load(&focus.working_dir);
     // The session's Claude Code: --parent when the mod passed it, else the
-    // process that started the host. The processes sensor reports only the
-    // builds that run under it.
-    let (mut slots, names) = sensors::register_host_sensors(&cfg, &focus, &session, a.parent.unwrap_or(parent));
+    // Claude Code above the host. The processes sensor reports only the
+    // builds that run under it. A host whose parent is gone has been
+    // adopted, so its own parent would be init, which every build runs
+    // under, and is not used.
+    let root = a.parent.or_else(|| attend_presence::process::claude_ancestor(std::process::id()));
+    if root.is_none() {
+        emit::log("no Claude Code found above the host; the processes sensor reports every build the user runs");
+    }
+    let (mut slots, names) = sensors::register_host_sensors(&cfg, &focus, &session, root);
     let curve = build_engagement(&cfg);
     for slot in &mut slots {
         slot.engagement = sensor_trait::EngagementState::new(curve.clone());

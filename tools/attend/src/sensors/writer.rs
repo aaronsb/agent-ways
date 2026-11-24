@@ -112,6 +112,14 @@ mod tests {
         Writer { session: SID.into(), cwd: "/work/proj".into() }
     }
 
+    /// A finished build is worth a line on its own: its magnitude clears
+    /// the event lane's cut, so the host writes it.
+    #[cfg(feature = "sensor-processes")]
+    #[test]
+    fn a_lone_build_exit_clears_the_event_cut() {
+        assert!(!below_cut(sensor_spec::Lane::Event, sensor_processes::BUILD_EXIT));
+    }
+
     #[test]
     fn an_event_lapses_after_its_trigger_s_expiry_or_the_decay_window() {
         assert_eq!(expires_at(Lane::Event, Some(Lapse::After(120)), 1000), Some(1120));

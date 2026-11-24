@@ -83,7 +83,7 @@ fn build_marker_path() -> Option<PathBuf> {
 /// only the session's own builds, and one of them finishing is worth a
 /// line on its own: 3.0 meets the event lane's cut (attend's
 /// `EVENT_CUT`), which holds any batch under it unwritten.
-const BUILD_EXIT: f64 = 3.0;
+pub const BUILD_EXIT: f64 = 3.0;
 
 /// Format a build-tool exit event, optionally enriched with success/
 /// failure context from a marker and with the hosted apps that exited
@@ -92,8 +92,8 @@ const BUILD_EXIT: f64 = 3.0;
 /// real filesystem.
 ///
 /// A success and an exit with no marker share [`BUILD_EXIT`], so opting
-/// into the wrapper never *lowers* an exit's visibility. Failures stay
-/// at 3.5 to break through refractory gating.
+/// into the wrapper never *lowers* an exit's visibility. A failure sits
+/// higher, at 3.5, so it is the louder of the two.
 fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64, hosted_exits: &[String]) -> (f64, String) {
     const MARKER_WINDOW_SECS: u64 = 60;
     let matched = marker.filter(|m| marker_matches(m, app, now, MARKER_WINDOW_SECS));
@@ -325,10 +325,10 @@ fn ps_rows(output: std::io::Result<Output>, columns: Columns) -> Option<Vec<Proc
 /// bounds the walk per process (ADR-137) and stops a pid cycle.
 const MAX_ANCESTRY: usize = 16;
 
-/// Whether `pid` runs under `root` in the process table `procs`, within
-/// [`MAX_ANCESTRY`] hops. A parent missing from the table ends the walk.
-fn descends_from(procs: &[Proc], pid: u32, root: u32) -> bool {
-    let parent: HashMap<u32, u32> = procs.iter().map(|p| (p.pid, p.ppid)).collect();
+/// Whether `pid` runs under `root`, given `parent`, each pid's parent in
+/// one process table, within [`MAX_ANCESTRY`] hops. A parent missing from
+/// the table ends the walk.
+fn descends_from(parent: &HashMap<u32, u32>, pid: u32, root: u32) -> bool {
     let mut cur = pid;
     for _ in 0..MAX_ANCESTRY {
         let Some(&ppid) = parent.get(&cur) else { return false };
@@ -372,6 +372,12 @@ struct HeldExit {
     hosts: Vec<u32>,
 }
 
+/// [`tally_under`] with no root, as the tests call it.
+#[cfg(test)]
+fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
+    tally_under(procs, None, is_relevant, is_watched)
+}
+
 /// Sort relevant processes into apps and tools. A watched tool is always
 /// relevant, whatever `is_relevant` says of it. A watched tool running
 /// under another watched tool is left out: `rustc` under `cargo` or `cc`
@@ -382,7 +388,17 @@ struct HeldExit {
 /// `make` is counted, and recorded as hosted by the tool above it. Every
 /// process is first given its [`canonical_name`]. `is_relevant` is given
 /// the `comm` as `ps` printed it and the canonical name, in that order.
-fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
+///
+/// The walk for a watched tool above a process stops at `root`, the
+/// session's Claude Code, when there is one: a `make` that started Claude
+/// Code does not make the session's own `cargo` a nested part of its
+/// build.
+fn tally_under(
+    procs: &[Proc],
+    root: Option<u32>,
+    is_relevant: impl Fn(&str, &str) -> bool,
+    is_watched: impl Fn(&str) -> bool,
+) -> Snapshot {
     let raw: Vec<&str> = procs.iter().map(|p| p.comm.as_str()).collect();
     let procs: Vec<Proc> = procs.iter().map(|p| Proc { comm: canonical_name(&p.comm).to_string(), ..p.clone() }).collect();
     let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
@@ -390,6 +406,9 @@ fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: i
         let mut tools = Vec::new();
         let mut ppid = p.ppid;
         for _ in 0..MAX_ANCESTRY {
+            if Some(ppid) == root {
+                break;
+            }
             let Some(parent) = by_pid.get(&ppid) else { break };
             if is_watched(&parent.comm) {
                 tools.push(parent.pid);
@@ -587,12 +606,21 @@ impl ProcessSensor {
         if failed > 0 {
             eprintln!("[attend] processes: ps reads again after {failed} failed poll(s)");
         }
-        let mut current = tally(&rows, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
-        if let Some(root) = self.root {
-            current.tools.retain(|pid, _| descends_from(&rows, *pid, root));
-        }
+        let mut current = tally_under(&rows, self.root, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
         for (pid, tool) in current.tools.iter_mut() {
             tool.ticks = ticks(*pid);
+        }
+        if let Some(root) = self.root {
+            // A tool under the root is the session's. One the session
+            // started that is no longer under it, because its shell exited
+            // and it was adopted, is still the same run and stays tracked,
+            // so its finish is reported when it ends, not when it moves.
+            let parent: HashMap<u32, u32> = rows.iter().map(|p| (p.pid, p.ppid)).collect();
+            let prior = &self.prior_tools;
+            current.tools.retain(|pid, tool| {
+                descends_from(&parent, *pid, root)
+                    || prior.get(pid).is_some_and(|p| p.name == tool.name && same_start(p, tool))
+            });
         }
         if !self.baseline_established || failed >= REBASELINE_AFTER {
             eprintln!("[attend] processes: baseline established ({} apps: {})",
@@ -1643,5 +1671,61 @@ mod tests {
         unrooted.observe(rows(&[]), no_ticks, &focus, 0);
         unrooted.observe(rows(&[(211, 210, "cargo")]), no_ticks, &focus, 0);
         assert_eq!(texts(&unrooted.observe(rows(&[]), no_ticks, &focus, 0)), vec!["cargo finished"]);
+    }
+
+    /// A build the session started is still the session's after its shell
+    /// exits and init adopts it: moving is no finish, and its real exit is
+    /// reported once.
+    #[test]
+    fn a_rooted_build_adopted_by_init_reports_only_its_real_finish() {
+        const CLAUDE: (u32, u32, &str) = (100, 1, "claude");
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), CLAUDE, (110, 100, "zsh")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        assert!(s.observe(rows(&[]), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows(&[(120, 110, "cargo")]), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows(&[(120, 1, "cargo")]), no_ticks, &focus, 0).is_empty(), "adoption is no finish");
+        assert_eq!(s.prior_tools.keys().copied().collect::<Vec<_>>(), vec![120]);
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["cargo finished"]);
+    }
+
+    /// A watched tool above the session's Claude Code, such as a `make`
+    /// target that starts `claude`, does not make the session's builds a
+    /// nested part of its own.
+    #[test]
+    fn a_watched_tool_above_the_root_does_not_hide_the_session_s_builds() {
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), (90, 1, "make"), (100, 90, "claude"), (110, 100, "zsh")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        assert!(s.observe(rows(&[]), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows(&[(120, 110, "cargo")]), no_ticks, &focus, 0).is_empty());
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["cargo finished"]);
+    }
+
+    fn chain(len: u32) -> HashMap<u32, u32> {
+        // 1000 → 1001 → … : pid 1000 + i has parent 1000 + i + 1.
+        (0..len).map(|i| (1000 + i, 1000 + i + 1)).collect()
+    }
+
+    #[test]
+    fn descends_from_reaches_a_root_max_ancestry_hops_up_and_no_further() {
+        let parent = chain(MAX_ANCESTRY as u32 + 1);
+        assert!(descends_from(&parent, 1000, 1000 + MAX_ANCESTRY as u32));
+        assert!(!descends_from(&parent, 1000, 1000 + MAX_ANCESTRY as u32 + 1));
+    }
+
+    #[test]
+    fn descends_from_ends_on_a_pid_cycle_and_a_missing_parent() {
+        let cycle: HashMap<u32, u32> = [(5, 6), (6, 5)].into_iter().collect();
+        assert!(!descends_from(&cycle, 5, 7));
+        assert!(!descends_from(&HashMap::new(), 5, 7));
     }
 }
