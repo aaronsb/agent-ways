@@ -302,7 +302,7 @@ const NPM_EXEC: &[&str] = &["exec", "x"];
 fn canonical_name(comm: &str) -> &str {
     // macOS `ps` prints `comm` as the executable's path, and a login shell
     // as `-zsh`; the name is the last path part without the dash.
-    let comm = if comm.contains(' ') { comm } else { comm.rsplit('/').next().unwrap_or(comm) };
+    let comm = if comm.starts_with('/') { comm.rsplit('/').next().unwrap_or(comm) } else { comm };
     let comm = comm.strip_prefix('-').unwrap_or(comm);
     if let Some((_, name)) = ALIASES.iter().find(|(alias, _)| *alias == comm) {
         return name;
@@ -1602,6 +1602,7 @@ mod tests {
         assert_eq!(canonical_name("-zsh"), "zsh");
         assert_eq!(canonical_name("/Users/me/.cargo/bin/cargo"), "cargo");
         assert_eq!(canonical_name("/usr/local/bin/claude"), "claude");
+        assert_eq!(canonical_name("/Users/Jane Doe/.cargo/bin/cargo"), "cargo", "a path with a space");
         assert_eq!(canonical_name("npm exec /x/y"), "npx", "a title with spaces keeps its words");
     }
 
