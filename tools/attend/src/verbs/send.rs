@@ -314,28 +314,29 @@ struct LiveSession {
     cwd: String,
     nickname: String,
     name: String,
-    /// Holds a registry row, so its name is one the registry gave it. A
-    /// session with no row shows as its bare nickname without holding it.
-    registered: bool,
 }
 
+/// The live sessions other than this one, each named as `attend peer list`
+/// shows it, a session with no row by its nickname and short id.
 fn live_sessions() -> Vec<LiveSession> {
     let registry = attend_instances::Registry::new();
-    list_peers()
+    let listed: Vec<(String, String, Option<String>)> = list_peers()
         .into_iter()
         .map(|(id, cwd, _, _, _)| {
             let instance = registry.lookup(&cwd, &id);
-            let (nickname, name) = crate::verbs::peers::names(&cwd, instance.as_deref());
-            LiveSession { id, cwd, nickname, name, registered: instance.is_some() }
+            (id, cwd, instance)
+        })
+        .collect();
+    let rowless = |dir: &str| -> Vec<&str> {
+        listed.iter().filter(|(_, c, inst)| inst.is_none() && attend_presence::session::same_dir(c, dir)).map(|(id, ..)| id.as_str()).collect()
+    };
+    listed
+        .iter()
+        .map(|(id, cwd, instance)| {
+            let (nickname, name) = crate::verbs::peers::names(cwd, id, instance.as_deref(), &rowless(cwd));
+            LiveSession { id: id.clone(), cwd: cwd.clone(), nickname, name }
         })
         .collect()
-}
-
-/// The name session `me` holds in the registry, or `None` when it holds
-/// none: an unresolved session, or one that runs no sensor host.
-fn own_name(me: &Session) -> Option<String> {
-    let instance = attend_instances::Registry::new().lookup(&me.origin_path, &me.session_id)?;
-    me.resolved().then(|| crate::verbs::peers::names(&me.origin_path, Some(&instance)).1)
 }
 
 /// The people attend knows by member id (ADR-170): the person at this
@@ -371,7 +372,7 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     //
     // References:
     // - ADR-129, amendment of 2026-11-24: addressing.
-    if let Some(name) = own_name(me).filter(|name| name.eq_ignore_ascii_case(to) || (me.resolved() && me.session_id == to)) {
+    if let Some(name) = crate::util::you_are(me).filter(|name| name.eq_ignore_ascii_case(to) || me.session_id == to) {
         return Err(SendError::ToSelf { name });
     }
     let sessions = live_sessions();
@@ -380,15 +381,14 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     if let Some(s) = sessions.iter().find(|s| s.id == to) {
         return Ok(Dest::Sessions { cwd: s.cwd.clone(), ids: vec![s.id.clone()] });
     }
-    // A registered session's full name before its nickname: `Urban` is the
-    // session that holds the bare name, not every `Urban-*` beside it. A
-    // session with no row shows as its bare nickname without holding it,
-    // so it answers only through the nickname, with every session that
-    // carries it.
+    // A session's full name before its nickname: `Urban` is the session
+    // that holds the bare name, not every `Urban-*` beside it, and a
+    // session with no row answers to `Urban·3fa2`. With no session named
+    // so, the nickname answers for every session that carries it.
     //
     // References:
     // - ADR-129, amendment of 2026-11-24: addressing.
-    let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| s.registered && s.name.eq_ignore_ascii_case(to)).collect();
+    let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| s.name.eq_ignore_ascii_case(to)).collect();
     let matched = if by_name.is_empty() {
         sessions.iter().filter(|s| s.nickname.eq_ignore_ascii_case(to)).collect()
     } else {
@@ -749,7 +749,7 @@ fn sender_dest(sender: Sender) -> Result<Dest, SendError> {
                 return Ok(Dest::Sessions { cwd: live.cwd.clone(), ids: vec![live.id.clone()] });
             }
             let name = match &sender.cwd {
-                Some(cwd) => crate::verbs::peers::names(cwd, registry.lookup(cwd, &sender.id).as_deref()).1,
+                Some(cwd) => crate::verbs::peers::names(cwd, &sender.id, registry.lookup(cwd, &sender.id).as_deref(), &[]).1,
                 None => format!("session {}", sender.id.chars().take(8).collect::<String>()),
             };
             Err(SendError::SenderExited { session: sender.id, name })

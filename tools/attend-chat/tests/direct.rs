@@ -28,6 +28,7 @@ const PEER_CWD: &str = "/work/peer";
 fn base() -> &'static Path {
     support::fixture("direct", |_| {
         support::pin_alive(PEER_SID);
+        support::hold_name(&format!("claude:{PEER_SID}"), PEER_CWD);
         let sessions = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".claude").join("sessions");
         std::fs::create_dir_all(&sessions).unwrap();
         std::fs::write(sessions.join("4242.json"), format!(r#"{{"pid":4242,"sessionId":"{PEER_SID}","cwd":"{PEER_CWD}"}}"#)).unwrap();

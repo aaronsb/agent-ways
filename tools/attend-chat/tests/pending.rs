@@ -44,6 +44,7 @@ fn fixture() {
         let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
         std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
         for (i, (sid, name)) in [(ALPHA_SID, "alpha"), (BETA_SID, "beta"), (GAMMA_SID, "gamma")].into_iter().enumerate() {
+            support::hold_name(&format!("claude:{sid}"), &cwd(name));
             let record = format!("{{\"pid\":1,\"sessionId\":\"{sid}\",\"cwd\":\"{}\"}}\n", cwd(name));
             std::fs::write(home.join(format!(".claude/sessions/{i}.json")), record).unwrap();
         }
@@ -74,6 +75,7 @@ fn chat() -> Chat {
 }
 
 fn sig(id: &str, message: &str) -> Signal {
+    support::hold_name(&format!("claude:{ALPHA_SID}"), &cwd("alpha"));
     Signal {
         id: id.into(),
         from: format!("claude:{ALPHA_SID}"),

@@ -35,6 +35,7 @@ fn fixture() {
 }
 
 fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel) -> Signal {
+    support::hold_name(from, cwd);
     Signal {
         id: id.into(),
         from: from.into(),

@@ -62,7 +62,8 @@ pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: 
     if let Some(sid) = from.strip_prefix("claude:") {
         let id = Identity::for_cwd(cwd, depth);
         // The instance suffix: none for the session that holds the bare
-        // name, the first live one in its directory.
+        // name, the first live one in its directory, and a short session
+        // id for a session with no row.
         //
         // References:
         // - ADR-129, amendment of 2026-11-24: the first live session is bare.
@@ -84,11 +85,13 @@ pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: 
     }
 }
 
-/// Compose a claude session's name: `<nickname>-<instance>`, or the
-/// bare nickname for the session that holds the bare name. Also the bare
-/// nickname when the registry has no entry — a session that runs no
-/// sensor host, one before it has registered, or an unreadable registry
-/// file. [`crate::display_name`] joins the two.
+/// Compose a claude session's name: `<nickname>-<instance>`, the bare
+/// nickname for the session that holds the bare name, or
+/// `<nickname>·<short id>` when the registry has no entry — a session that
+/// runs no sensor host, a headless run, one before it has registered, or
+/// an unreadable registry file. [`crate::session_name`] joins them; a
+/// single label does not know the other rowless sessions, so the short id
+/// is never grown here.
 ///
 /// This is the one derivation of the persona's first line; the
 /// sensor, the drain, and the attend-chat chip all call it, so a
@@ -100,7 +103,7 @@ pub fn render_sender_label(from: &str, cwd: &str, painter: &Painter, instances: 
 /// - ADR-129: the instance suffix, and the bare name (amendment of
 ///   2026-11-24).
 pub fn with_instance(nickname: &str, cwd: &str, session_id: &str, instances: &SnapshotCache) -> String {
-    crate::display_name(nickname, instances.lookup(cwd, session_id).as_deref())
+    crate::session_name(nickname, session_id, instances.lookup(cwd, session_id).as_deref(), &[])
 }
 
 fn compose(primary: &str, secondary: &str, id: &Identity, painter: &Painter) -> String {
@@ -168,7 +171,7 @@ mod tests {
     }
 
     /// The first live session is bare, the second wears its suffix, and a
-    /// session with no row falls back to the bare nickname.
+    /// session with no row shows its short session id.
     #[test]
     fn with_instance_is_bare_for_the_first_and_suffixed_for_the_second() {
         let dir = std::env::temp_dir().join(format!("attend-identity-view-reg-{}", std::process::id()));
@@ -179,7 +182,22 @@ mod tests {
         let cache = SnapshotCache::with_registry(Registry::with_base(dir.clone()));
         assert_eq!(with_instance("Nick", "/home/me/repo", "sess-1", &cache), "Nick");
         assert_eq!(with_instance("Nick", "/home/me/repo", "sess-2", &cache), "Nick-alpha");
-        assert_eq!(with_instance("Nick", "/home/me/repo", "unregistered", &cache), "Nick");
+        assert_eq!(with_instance("Nick", "/home/me/repo", "unregistered", &cache), "Nick·unre", "no row: the nickname and a short id");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A session with no registry row (one that runs no sensor host, a
+    /// headless run) holds no name: beside the bare holder it shows as its
+    /// nickname and the first four characters of its session id.
+    #[test]
+    fn a_rowless_session_beside_the_bare_holder_renders_distinctly() {
+        let dir = std::env::temp_dir().join(format!("attend-identity-view-rowless-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let registry = Registry::with_liveness(dir.clone(), |_| true);
+        registry.register("/home/me/repo", "sess-bare").unwrap();
+        let cache = SnapshotCache::with_registry(Registry::with_base(dir.clone()));
+        assert_eq!(with_instance("Nick", "/home/me/repo", "sess-bare", &cache), "Nick");
+        assert_eq!(with_instance("Nick", "/home/me/repo", "3fa2c0de-0000-4000-8000-000000000001", &cache), "Nick·3fa2");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -189,6 +207,6 @@ mod tests {
         let plain = render_sender_label("claude:abc", "/home/me/repo", &Painter::plain(), &cache);
         assert!(!plain.contains('\x1b'), "plain leaked ANSI: {plain:?}");
         let expected = Identity::for_cwd("/home/me/repo", ColorDepth::NoColor);
-        assert_eq!(plain, format!("{} (repo)", expected.nickname));
+        assert_eq!(plain, format!("{}·abc (repo)", expected.nickname));
     }
 }

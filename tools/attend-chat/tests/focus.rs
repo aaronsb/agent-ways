@@ -40,6 +40,7 @@ fn chat() -> Chat {
     // A question's yes arms at once: the delay has tests of its own.
     let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true).question_arm(std::time::Duration::ZERO);
     for (i, (sid, cwd)) in [(ALPHA_SID, "/work/alpha"), (BETA_SID, "/work/beta")].into_iter().enumerate() {
+        support::hold_name(&format!("claude:{sid}"), cwd);
         c.push(Signal {
             id: format!("t-{i}"),
             from: format!("claude:{sid}"),

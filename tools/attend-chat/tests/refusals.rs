@@ -21,6 +21,7 @@ const QUIET_SID: &str = "cccccccc-0000-4000-8000-000000000003";
 const QUIET_CWD: &str = "/work/gamma";
 
 fn sig(sid: &str, cwd: &str) -> Signal {
+    support::hold_name(&format!("claude:{sid}"), cwd);
     Signal {
         id: format!("t-{sid}"),
         from: format!("claude:{sid}"),

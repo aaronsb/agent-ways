@@ -16,7 +16,8 @@ pub struct Agent {
     /// The working directory its identity derives from.
     pub cwd: String,
     /// The persona name with its instance suffix, as peers see it: the
-    /// bare nickname for the first live session in its directory.
+    /// bare nickname for the first live session in its directory, and the
+    /// nickname with a short session id for a session with no row.
     ///
     /// References:
     /// - ADR-129, amendment of 2026-11-24: the first live session is bare.
@@ -68,14 +69,26 @@ pub fn peers() -> Peers {
     let cwd = session.origin_path.clone();
     let self_sid = session.session_resolved.then(|| session.session_id.clone());
     let self_instance = self_sid.as_deref().and_then(|sid| registry.lookup(&cwd, sid));
-    let me = agent(self_sid, &cwd, self_instance, "working".to_string(), None, true);
-
-    let peers: Vec<Agent> = list_peers()
+    let listed: Vec<_> = list_peers()
         .into_iter()
         .map(|(sid, peer_cwd, _project, status, ctx)| {
             let instance = registry.lookup(&peer_cwd, &sid);
-            let here = attend_presence::session::same_dir(&peer_cwd, &cwd);
-            agent(Some(sid), &peer_cwd, instance, status, Some(ctx), here)
+            (sid, peer_cwd, instance, status, ctx)
+        })
+        .collect();
+    // The sessions with no row, by directory, so two of them in one
+    // directory show short ids that differ.
+    let rowless = |dir: &str| -> Vec<String> {
+        let me = self_sid.iter().filter(|_| self_instance.is_none()).map(|sid| (sid.as_str(), cwd.as_str()));
+        let others = listed.iter().filter(|(_, _, inst, ..)| inst.is_none()).map(|(sid, c, ..)| (sid.as_str(), c.as_str()));
+        me.chain(others).filter(|(_, c)| attend_presence::session::same_dir(c, dir)).map(|(sid, _)| sid.to_string()).collect()
+    };
+    let me = agent(self_sid.clone(), &cwd, self_instance.clone(), "working".to_string(), None, true, &rowless(&cwd));
+    let peers: Vec<Agent> = listed
+        .iter()
+        .map(|(sid, peer_cwd, instance, status, ctx)| {
+            let here = attend_presence::session::same_dir(peer_cwd, &cwd);
+            agent(Some(sid.clone()), peer_cwd, instance.clone(), status.clone(), Some(*ctx), here, &rowless(peer_cwd))
         })
         .collect();
 
@@ -165,20 +178,37 @@ fn parent_scope(cwd: &str) -> String {
     }
 }
 
-fn agent(session_id: Option<String>, cwd: &str, instance: Option<String>, status: String, context_pct: Option<f64>, here: bool) -> Agent {
-    let (nickname, name) = names(cwd, instance.as_deref());
+fn agent(
+    session_id: Option<String>,
+    cwd: &str,
+    instance: Option<String>,
+    status: String,
+    context_pct: Option<f64>,
+    here: bool,
+    rowless: &[String],
+) -> Agent {
+    let (nickname, name) = match &session_id {
+        Some(sid) => names(cwd, sid, instance.as_deref(), &rowless.iter().map(String::as_str).collect::<Vec<_>>()),
+        // An unresolved process has no session id to show.
+        None => {
+            let nickname = agent_identity::Identity::for_cwd(cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+            (nickname.clone(), nickname)
+        }
+    };
     let instance = instance.filter(|i| i != attend_instances::BARE);
     Agent { session_id, cwd: cwd.to_string(), name, nickname, instance, status, context_pct, here }
 }
 
-/// A session's `(nickname, name)` at `cwd`: the persona, and the name peers
-/// see it by, with its instance suffix unless it holds the bare name.
+/// Session `session_id`'s `(nickname, name)` at `cwd`: the persona, and the
+/// name peers see it by ([`attend_instances::session_name`]). `rowless`
+/// holds the ids of the sessions with no row in that directory.
 ///
 /// References:
-/// - ADR-129, amendment of 2026-11-24: the first live session is bare.
-pub(crate) fn names(cwd: &str, instance: Option<&str>) -> (String, String) {
+/// - ADR-129, amendment of 2026-11-24: the first live session is bare, and
+///   a session with no row shows a short session id.
+pub(crate) fn names(cwd: &str, session_id: &str, instance: Option<&str>, rowless: &[&str]) -> (String, String) {
     let nickname = agent_identity::Identity::for_cwd(cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
-    let name = attend_instances::display_name(&nickname, instance);
+    let name = attend_instances::session_name(&nickname, session_id, instance, rowless);
     (nickname, name)
 }
 

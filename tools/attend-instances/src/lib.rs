@@ -136,14 +136,40 @@ pub const GREEK: &[&str] = &[
     "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega",
 ];
 
-/// The name a session in a directory wears: its nickname alone when it
-/// holds the bare name or has no row, else `nickname-instance`. Every
-/// surface that shows a session's name builds it here.
-pub fn display_name(nickname: &str, instance: Option<&str>) -> String {
+/// The mark between a nickname and the short session id of a session that
+/// holds no name (`Urban·3fa2`).
+pub const ID_MARK: char = '·';
+
+/// How many characters of its session id a session with no row shows,
+/// unless another such session in its directory shares them.
+pub const SHORT_ID_LEN: usize = 4;
+
+/// The name a session in a directory is shown by. Only a session with a
+/// registry row holds a name: its nickname alone for the bare name, else
+/// `nickname-instance`. Any other Claude Code session, such as one that
+/// runs no sensor host or a headless run, shows as its nickname and a
+/// short session id, `nickname·3fa2`, whoever holds the bare name.
+/// `rowless` lists the ids of the other sessions with no row in the same
+/// directory where the caller knows them ([`short_id`]); pass `&[]` where
+/// it does not. Every surface that shows a session's name builds it here.
+pub fn session_name(nickname: &str, session_id: &str, instance: Option<&str>, rowless: &[&str]) -> String {
     match instance {
-        Some(inst) if inst != BARE => format!("{nickname}-{inst}"),
-        _ => nickname.to_string(),
+        Some(BARE) => nickname.to_string(),
+        Some(inst) => format!("{nickname}-{inst}"),
+        None => format!("{nickname}{ID_MARK}{}", short_id(session_id, rowless)),
     }
+}
+
+/// The first [`SHORT_ID_LEN`] characters of `session_id`, extended one at
+/// a time while another id in `others` starts with the same characters.
+pub fn short_id(session_id: &str, others: &[&str]) -> String {
+    let chars: Vec<char> = session_id.chars().collect();
+    let mut len = SHORT_ID_LEN.min(chars.len());
+    let prefix = |len: usize| chars[..len].iter().collect::<String>();
+    while len < chars.len() && others.iter().any(|o| *o != session_id && o.starts_with(&prefix(len))) {
+        len += 1;
+    }
+    prefix(len)
 }
 
 /// One row in the registry. Keep field set tight — every consumer
@@ -871,7 +897,7 @@ mod tests {
         with_registry(|r| {
             assert_eq!(r.register("/x", "sess-a").unwrap(), BARE);
             assert_eq!(r.lookup("/x", "sess-a").as_deref(), Some(BARE));
-            assert_eq!(display_name("Urban", r.lookup("/x", "sess-a").as_deref()), "Urban");
+            assert_eq!(session_name("Urban", "sess-a", r.lookup("/x", "sess-a").as_deref(), &[]), "Urban");
         });
     }
 
@@ -881,7 +907,7 @@ mod tests {
             r.register("/x", "sess-a").unwrap();
             assert_eq!(r.register("/x", "sess-b").unwrap(), "alpha");
             assert_eq!(r.register("/x", "sess-c").unwrap(), "beta");
-            assert_eq!(display_name("Urban", r.lookup("/x", "sess-b").as_deref()), "Urban-alpha");
+            assert_eq!(session_name("Urban", "sess-b", r.lookup("/x", "sess-b").as_deref(), &[]), "Urban-alpha");
         });
     }
 
@@ -987,7 +1013,7 @@ mod tests {
             s.end("sess-b");
             assert_eq!(s.register("/x", "sess-c").unwrap(), "alpha");
             assert_eq!(s.lookup("/x", "sess-b").as_deref(), Some("alpha"), "the retired row reads the name it held");
-            assert_ne!(display_name("Urban", s.lookup("/x", "sess-b").as_deref()), display_name("Urban", s.lookup("/x", "sess-a").as_deref()));
+            assert_ne!(session_name("Urban", "sess-b", s.lookup("/x", "sess-b").as_deref(), &[]), session_name("Urban", "sess-a", s.lookup("/x", "sess-a").as_deref(), &[]));
             assert_eq!(s.register("/x", "sess-d").unwrap(), "beta");
             s.end("sess-c");
             assert_eq!(s.register("/x", "sess-e").unwrap(), "alpha", "neither the retired row nor the ended slot blocks alpha");
@@ -1384,12 +1410,17 @@ sess-a:
         assert_eq!(next_free_instance(&taken), BARE, "the bare name comes first");
     }
 
+    /// Only a session with a row holds a name; one with no row shows its
+    /// short session id, grown only where another rowless id shares it.
     #[test]
-    fn display_name_is_bare_for_the_bare_name_and_no_row() {
-        assert_eq!(display_name("Urban", None), "Urban");
-        assert_eq!(display_name("Urban", Some(BARE)), "Urban");
-        assert_eq!(display_name("Urban", Some("alpha")), "Urban-alpha");
-        assert_eq!(display_name("Urban", Some("25")), "Urban-25");
+    fn a_session_name_is_held_only_with_a_row() {
+        assert_eq!(session_name("Urban", "3fa2c0de", Some(BARE), &[]), "Urban");
+        assert_eq!(session_name("Urban", "3fa2c0de", Some("alpha"), &[]), "Urban-alpha");
+        assert_eq!(session_name("Urban", "3fa2c0de", Some("25"), &[]), "Urban-25");
+        assert_eq!(session_name("Urban", "3fa2c0de", None, &[]), "Urban·3fa2");
+        assert_eq!(session_name("Urban", "3fa2c0de", None, &["3fa2c0de", "9c01"]), "Urban·3fa2", "itself and unlike ids do not grow it");
+        assert_eq!(session_name("Urban", "3fa2c0de", None, &["3fa2cafe"]), "Urban·3fa2c0");
+        assert_eq!(session_name("Urban", "s1", None, &[]), "Urban·s1", "a short id shows whole");
     }
 
     #[test]

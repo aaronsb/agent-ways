@@ -70,6 +70,7 @@ fn chat(enhanced: bool) -> Chat {
 }
 
 fn sig(id: &str, sid: &str, cwd: &str) -> Signal {
+    support::hold_name(&format!("claude:{sid}"), cwd);
     Signal {
         id: id.into(),
         from: format!("claude:{sid}"),

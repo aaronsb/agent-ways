@@ -279,18 +279,24 @@ fn instance(f: &Fixture, sid: &str) -> Option<String> {
     attend_instances::Registry::with_base(f.cache().join("instances")).lookup(&f.origin, sid)
 }
 
+/// The fixture project's nickname.
+fn nickname(f: &Fixture) -> String {
+    agent_identity::Identity::for_cwd(&f.origin, agent_theme::ColorDepth::NoColor).nickname.to_string()
+}
+
 /// The host takes the session's instance slot as it starts: nothing else
-/// registers a listening session (#1108). Alone in its project, the session
-/// holds the bare name, so whoami shows the nickname with no suffix.
+/// registers a listening session (#1108). Before it does, the session holds
+/// no name and whoami shows its nickname and a short session id. Alone in
+/// its project, it then holds the bare name.
 #[test]
 fn a_host_registers_the_session_bare_when_it_is_alone() {
     let f = quiet("host-register");
-    let bare = display_name(&f);
-    assert!(!bare.contains('-'), "no suffix before a host runs: {bare}");
+    let short: String = f.sid.chars().take(attend_instances::SHORT_ID_LEN).collect();
+    assert_eq!(display_name(&f), format!("{}·{short}", nickname(&f)), "no name before a host runs");
     let host = Host::start(&f, &f.sid, &[]);
     host.wait_for("the instance slot", Duration::from_secs(20), || instance(&f, &f.sid).is_some());
     assert_eq!(instance(&f, &f.sid).as_deref(), Some(attend_instances::BARE));
-    assert_eq!(display_name(&f), bare);
+    assert_eq!(display_name(&f), nickname(&f));
 }
 
 /// After `/clear` the host started with `--moved-from` moves the old id's
@@ -310,11 +316,10 @@ fn a_host_with_moved_from_keeps_the_old_suffix() {
     assert_eq!(instance(&f, "sess-old").as_deref(), Some("alpha"));
     drop(old);
     f.set_session_id("sess-new");
-    let bare = display_name(&f);
     let new = Host::start(&f, "sess-new", &["--moved-from", "sess-old"]);
     new.wait_for("the new id's slot", Duration::from_secs(20), || instance(&f, "sess-new").is_some());
     assert_eq!(instance(&f, "sess-new").as_deref(), Some("alpha"), "the new id keeps the old suffix");
-    assert_eq!(display_name(&f), format!("{bare}-alpha"));
+    assert_eq!(display_name(&f), format!("{}-alpha", nickname(&f)));
 }
 
 /// A command the host runs does not act as the session: its `attend

@@ -255,6 +255,25 @@ fn a_bare_name_no_session_holds_is_ambiguous() {
     assert!(files(&a.tray(&f)).is_empty());
 }
 
+/// A session with no registry row shows as its nickname and a short
+/// session id, and that display form reaches it, beside the bare holder.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_rowless_session_is_reached_by_its_display_name() {
+    let f = Fixture::new("addr-rowless-name");
+    let _env = enter(&f);
+    let held = Peer::start(&f, "peer-held", "twin");
+    let rowless = Peer::start(&f, "3fa2c0de-0000-4000-8000-000000000001", "twin");
+    let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+    assert_eq!(registry.register(&held.cwd, "peer-held").unwrap(), attend_instances::BARE);
+    let name = agent_identity::Identity::for_cwd(&held.cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let sent = send(Some(&format!("{name}·3fa2")), None, "just you").expect("sent");
+    assert_eq!(read(&rowless.tray(&f), &sent.id).0.as_deref(), Some("3fa2c0de-0000-4000-8000-000000000001"));
+    let sent = send(Some(&name), None, "the bare holder").expect("sent");
+    assert_eq!(read(&held.tray(&f), &sent.id).0.as_deref(), Some("peer-held"));
+}
+
 /// A name that is no live session and no known person is refused.
 #[test]
 fn an_unknown_name_is_refused() {

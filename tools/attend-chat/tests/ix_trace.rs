@@ -45,6 +45,7 @@ const BETA_SID: &str = "bbbbbbbb-0000-4000-8000-000000000002";
 const NOW: u64 = 1_790_950_000;
 
 fn signal(i: usize, sid: &str, cwd: &str, channel: Channel) -> Signal {
+    support::hold_name(&format!("claude:{sid}"), cwd);
     Signal {
         id: format!("t-{i}"),
         from: format!("claude:{sid}"),
