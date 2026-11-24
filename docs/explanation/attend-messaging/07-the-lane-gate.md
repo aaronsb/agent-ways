@@ -10,15 +10,11 @@ aliases: []
 
 # The lane gate
 
-The scenarios show the two lanes *in use*. This page is the mechanism
-underneath them: the single fork every observation passes through, and what
-each branch does with it. If [[04.001.E]] is the *why*, this is *how the
-routing decides*.
+The scenarios show the two lanes *in use*. This page is the mechanism underneath them: the single fork every observation passes through, and what each branch does with it. If [[04.001.E]] is the *why*, this is *how the routing decides*.
 
 ## The one question the gate asks
 
-Everything attend notices — a colleague's `@you`, a git commit, a peer going
-idle — arrives as an **observation**. The gate asks one thing of each:
+Everything attend notices — a colleague's `@you`, a git commit, a peer going idle — arrives as an **observation**. The gate asks one thing of each:
 
 > **Was this *authored* to communicate?**
 
@@ -43,17 +39,10 @@ stateDiagram-v2
     class EventLane external
 ```
 
-- **Yes → message lane.** A person or agent *chose* to say this. It is a unit
-  of work routed to a recipient, and a dropped one means the work silently
-  never happens. It must be **delivered, once, and survive a brief absence.**
-- **No → event lane.** The world moved. Useful, but *noise by design* — the
-  whole threshold / refractory / governor stack exists to **suppress** most of
-  it so a session is only woken for something that actually matters.
+- **Yes → message lane.** A person or agent *chose* to say this. It is a unit of work routed to a recipient, and a dropped one means the work silently never happens. It must be **delivered, once, and survive a brief absence.**
+- **No → event lane.** The world moved. Useful, but *noise by design* — the whole threshold / refractory / governor stack exists to **suppress** most of it so a session is only woken for something that actually matters.
 
-In the code the lane is chosen per sensor, not per observation: everything
-the `peers` sensor emits rides the message lane, including a peer appearing
-or going idle, and the keepwarm wake rides it too. Splitting peer presence
-onto the event lane is an open ADR-136 follow-up.
+In the code the lane is chosen per sensor, not per observation. Peer messages pass through no sensor: the attend mod's drain delivers them. The `peers` sensor reports only presence, a peer appearing or going idle, and rides the event lane. A sensor file of your own that carries words a person wrote declares the message lane and names their author.
 
 ## What each lane does with what it's handed
 
@@ -120,28 +109,23 @@ Both lanes timestamp everything — they just *use* time in opposite directions:
 
 | | Message lane | Event lane |
 |---|---|---|
-| **Uses time to** | stamp & **digest** | decay & **drop** |
-| **On a burst** | coalesce into *"12 new messages: 3 to you, 9 on #open"* | suppress the noise, surface the one that moved |
+| **Uses time to** | stamp & **batch** | decay & **drop** |
+| **On a burst** | coalesce into one delivered turn | suppress the noise, surface the one that moved |
 | **On absence** | hold durably until you return | age out — you didn't miss much |
 | **Pull surface** | `attend message inbox` — the full chronological ledger | none needed; it was noise |
 | **Failure that matters** | a dropped message = work that never happens | a dropped event = a wake-up you didn't need |
 
-The office analogy from [[04.001.E]]: workers talking is the message lane —
-durable conversation. The phone ringing and faxes arriving is the event lane —
-interrupts you can queue or ignore. The fax in your tray waits for *you*; it
-is not cleared on a timer.
+The office analogy from [[04.001.E]]: workers talking is the message lane — durable conversation. The phone ringing and faxes arriving is the event lane — interrupts you can queue or ignore. The fax in your tray waits for *you*; it is not cleared on a timer.
 
 ## Where this shows up in the scenarios
 
-- [[04.003.E]] and [[04.006.E]] lean on the **message-lane** half — durable
-  trays, threading, and the re-entry digest that turns a crowd's 17 messages
-  into one turn.
-- [[04.004.E]] is the sharpest case: a session heads-down in a long workflow
-  is exactly when wall-clock messages pile up, and the durable tray plus digest
-  is what lets it stay deep *and* lose nothing.
-- [[04.007.E]] raises the stakes — when the *human* addresses an agent and it
-  silently never arrives, their mental model is now wrong. The human surface is
-  the least forgiving consumer of the message lane's "delivered, once" promise.
+- [[04.003.E]] and [[04.006.E]] lean on the **message-lane** half — durable trays, threading, and the re-entry batch that turns a crowd's 17 messages into one turn.
+- [[04.004.E]] is the sharpest case: a session heads-down in a long workflow is exactly when wall-clock messages pile up, and the durable tray plus batch is what lets it stay deep *and* lose nothing.
+- [[04.007.E]] raises the stakes — when the *human* addresses an agent and it silently never arrives, their mental model is now wrong. The human surface is the least forgiving consumer of the message lane's "delivered, once" promise.
 
 The gate is the quiet machinery that makes all of those true: classify once,
 then let each lane do the one job it's good at.
+
+## References
+
+- ADR-416: peer messages delivered by the mod's drain, and the peers sensor's presence reports on the event lane.

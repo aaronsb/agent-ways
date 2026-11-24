@@ -1,8 +1,8 @@
 # Keepwarm — holding the prompt cache across idle time
 
-Claude Code caches a session's prompt on the one-hour cache tier. Each request reads the cached prefix and restarts the hour. A request that arrives after the hour has lapsed writes the whole prefix again at the cache-write rate: on a 200k-token session that is dollars, against cents for a warm turn. Keepwarm is an attend sensor that, while armed, wakes an idle session once at 50 idle minutes so the next request reads the cache instead of rewriting it (ADR-182).
+Claude Code caches a session's prompt on the one-hour cache tier. Each request reads the cached prefix and restarts the hour. A request that arrives after the hour has lapsed writes the whole prefix again at the cache-write rate: on a 200k-token session that is dollars, against cents for a warm turn. Keepwarm, while armed, wakes an idle session once at 50 idle minutes so the next request reads the cache instead of rewriting it.
 
-The wake is an ordinary Monitor notification. Claude Code turns it into a turn over the full context, and that request reads the cache and restarts the hour.
+The attend mod drives the wake ([`mod.md`](mod.md)). On its poll it runs `attend keepwarm check`, which judges the session and prints a `keepwarm:` line when a wake is due, and the mod submits that line as a turn. The turn runs over the full context, and its request reads the cache and restarts the hour. A session without the mod gets no wake.
 
 ## When to arm it
 
@@ -15,9 +15,9 @@ attend keepwarm off         # disarm
 attend keepwarm status      # the card below; also what bare `attend keepwarm` prints
 ```
 
-These verbs act on the Claude session that runs them, so run them from inside the session (the agent's Bash tool, or `!` in the prompt). Outside a session they print `keepwarm: no Claude session owns this process, nothing to warm` and exit 1. The sensor itself runs inside `attend run`, so attend must be running under Monitor for anything to wake. In a session the attend mod hosts, the mod runs the same judgment with `attend keepwarm check` instead ([`mod.md`](mod.md)), and where autocompact is off it keeps the session warm with no arming at all (the keepalive policy, below).
+These verbs act on the Claude session that runs them, so run them from inside the session (the agent's Bash tool, or `!` in the prompt). Outside a session they print `keepwarm: no Claude session owns this process, nothing to warm` and exit 1. An armed window wakes a listening session only; where autocompact is off, the mod keeps the session warm with no arming at all (the keepalive policy, below).
 
-**Auto-arm.** When the sensor sees a paid cold write (below) on a context of at least 50k tokens, it arms three hours on its own if no window already covers them. A session that has paid one rewrite has shown it comes back, and the second rewrite is not paid that day.
+**Auto-arm.** When `attend keepwarm check` sees a paid cold write (below) on a context of at least 50k tokens, it arms three hours on its own if no window already covers them. A session that has paid one rewrite has shown it comes back, and the second rewrite is not paid that day.
 
 ## The keepalive policy
 
@@ -32,7 +32,7 @@ In an interactive Claude Code session that runs the attend mod and has autocompa
 - **The wrap.** The turn's first line gives the reason (`wrap: 7h30m since the operator's last prompt and 8 keepalives, the most this session allows.`), and its body asks the agent to run `wrap_skill` (the wrap skill with `stay` by default), ask nothing, land nothing and start nothing, and says what follows: nothing, the keepalives after the wrap, or the compaction. `wrap` routes the final reply: `transcript` (the default) leaves it there; `file` has the mod write it to `wrap_file`; `send` has the mod send it over attend to `wrap_to` (empty for the operator's own member id, a session name, a project path or `#channel`) as one message opening with a `handoff:` line, written to `wrap_file` instead when attend refuses the send. `wrap_file` must name `{session}` in its file name (so `{state}/wrap/{session}/notes.md` falls back) and resolve under `{state}/wrap/` with no `.` or `..` and through no symlink, since a project's checked-in config can set it; anything else goes to `{state}/wrap/<session>.md`, and the card names the refusal. `wrap_to` `#open` is refused, since it reaches every listening session, and the reply goes to the operator. Only the turn the wrap's own text started is routed, and its reply is the answer of the turn's first step that ended it, so a peer message or a notification that continues the turn is not taken for the handoff. attend writes the file (`attend keepwarm wrapped file --path <file> --save`, the reply on stdin), checking the path again and renaming a temp file over it. A wrap turn that ends other than with an answer is written nowhere, and one that never starts, or never answers before the cache lapses, is recorded unfinished. `after_wrap: compact` compacts the conversation with the focus of the wrap's closing `/compact` line, once the wrap has answered or after `after_wrap_keepalives` more keepalives.
 - **Armed windows.** `attend keepwarm on` overrides the count and the windows while its window is open, so no wrap is sent; `attend keepwarm off` stops the policy until the operator's next prompt. A paid cold write arms nothing where the policy runs.
 - **Autocompact.** The mod reads `isAutoCompactEnabled` from the session's usage breakdown before each check and again just before it submits a keepalive or a wrap, falling back to `autoCompactEnabled` in the merged settings, where only an explicit `false` is off. A gate it cannot read counts as on. With autocompact on the policy does not run: a listening session keeps ADR-182's armed windows, and a dormant one runs nothing, not even at a prompt.
-- **Failing closed.** Only an explicit `enabled: true` runs the policy. Settings ways cannot answer leave it off, and the card says `off: the mods.attend settings could not be read`. A sensor's own three-hour arm after a paid cold write is marked in the arm file, and the policy ignores it. Two processes on one session id take turns under a lock, so the wrap is decided once, and the Monitor-hosted sensor keeps the policy's marks when it writes the ledger.
+- **Failing closed.** Only an explicit `enabled: true` runs the policy. Settings ways cannot answer leave it off, and the card says `off: the mods.attend settings could not be read`. Keepwarm's own three-hour arm after a paid cold write is marked in the arm file, and the policy ignores it. Two processes on one session id take turns under a lock, so the wrap is decided once.
 
 The keys sit under `mods.attend.keepalive` in the ways config and are set per project with `ways settings set <key> <value> --project <dir>` or in attend-chat's ☰ Settings ([`mod.md`](mod.md#configuration)), where `""` or `[]` in the entry dialog writes an empty text or list that overrides a lower layer.
 
@@ -52,19 +52,19 @@ The keys sit under `mods.attend.keepalive` in the ways config and are set per pr
 
 ## What a wake looks like
 
-With a window armed, the context at 50k tokens or more, and 50 minutes since the last assistant response in the transcript, the sensor emits one line:
+With a window armed, the context at 50k tokens or more, and 50 minutes since the last assistant response in the transcript, `attend keepwarm check` prints one line, which the mod submits as the turn:
 
 ```
-[attend sensor=keepwarm priority=medium] keepwarm: 50m idle, the prompt cache lapses in 10m on 182k tokens. Reply with one word and no tools.
+keepwarm: 50m idle, the prompt cache lapses in 10m on 182k tokens. Reply with one word and no tools.
 ```
 
 The idle clock is the session transcript, not attend: any response resets it, whether it answered the user, a peer message, a drained inbox message, a scheduled wakeup, or keepwarm itself. There is one wake per idle stretch.
 
-Keepwarm rides the message lane with the peers sensor, so the action-potential refractory never holds the wake back.
+The wake is not a sensor report, so no governor or refractory holds it back. The mod submits it as soon as the check prints it.
 
 ## The agent's side
 
-A line beginning `keepwarm:` asks for one word and no tools. It is not a prompt to investigate, summarize or check anything. The turn it produces is the whole point, and anything more is billed output. The same sentence is in the three guidance files agents read: the attend skill, the runtime disclosure, and the attend way.
+A line beginning `keepwarm:` asks for one word and no tools. It is not a prompt to investigate, summarize or check anything. The turn it produces is the whole point, and anything more is billed output. The same sentence is in the two guidance files agents read: the attend skill and the attend way.
 
 ## How it stops
 
@@ -90,11 +90,11 @@ stateDiagram-v2
     class Stopped stopped
 ```
 
-The verdict comes from the first response after the wake. A cache read of at least half the previous context means the cache was warm and the window stays armed. Anything less means the cache had already lapsed, so the sensor disarms and records why rather than keep paying for rewrites. What the response wrote does not count, since a real turn landing beside the wake can append a large tool result to a warm prefix.
+The verdict comes from the first response after the wake. A cache read of at least half the previous context means the cache was warm and the window stays armed. Anything less means the cache had already lapsed, so the check disarms and records why rather than keep paying for rewrites. What the response wrote does not count, since a real turn landing beside the wake can append a large tool result to a warm prefix.
 
 ## Status
 
-`attend keepwarm status` reads the transcript through `ways context` and the sensor's ledger:
+`attend keepwarm status` reads the transcript through `ways context` and keepwarm's ledger:
 
 ```
 model       claude-opus-5
@@ -123,7 +123,7 @@ The `keepwarm` line says `armed` and `not armed`, never `on` and `off`: those ar
 
 ## The cost model
 
-A cold write is a response whose cache write is at least half the previous context and whose cache read is under half of it, with the previous context over 20k tokens. The sensor records each one with its price. A large tool result appended to a warm prefix writes a lot but reads the whole prefix, so it does not count.
+A cold write is a response whose cache write is at least half the previous context and whose cache read is under half of it, with the previous context over 20k tokens. The check records each one with its price. A large tool result appended to a warm prefix writes a lot but reads the whole prefix, so it does not count.
 
 Prices are a dated table in `tools/sensor-keepwarm/src/lib.rs`: cache read, one-hour cache write and output per million tokens, by model family, from list prices of September 2026. A model not in the table prices as `n/a`. On a subscription the dollars are a yardstick for the arithmetic, not a bill.
 
@@ -131,20 +131,25 @@ Each wake adds a user line and an assistant line to the transcript, on the order
 
 ## Turning it off
 
-`attend keepwarm off` disarms the current session. To remove the sensor from every session, write `$XDG_CONFIG_HOME/attend/sensors/keepwarm.yaml` (`~/.config/attend/sensors/keepwarm.yaml`), or `.claude/attend/sensors/keepwarm.yaml` for one project:
+`attend keepwarm off` disarms the current session. To turn keepwarm off for every session, set `mods.attend.keepwarm: off` in the ways config, from your own shell:
 
-```yaml
-enabled: false
+```bash
+ways settings set mods.attend.keepwarm off                    # every project
+ways settings set mods.attend.keepwarm off --project <dir>    # one project; its .claude/ways.yaml wins
 ```
 
-`mods.attend.keepwarm: off` in the ways config (a project's `.claude/ways.yaml` wins) does the same for the attend mod: its sessions run no check, the keepalive policy included, so nothing wakes and a paid cold write arms nothing. `mods.attend.keepalive.enabled: false` turns off the policy alone and returns the project to the armed windows. A dormant mod session never gets an armed window's wake; with autocompact off it gets the policy's keepalives.
+With it off, `attend keepwarm check` judges nothing and the attend mod runs no check, the keepalive policy included, so nothing wakes and a paid cold write arms nothing. `mods.attend.keepalive.enabled: false` turns off the policy alone and returns the project to the armed windows. A dormant mod session never gets an armed window's wake; with autocompact off it gets the policy's keepalives.
 
-A disabled sensor neither wakes nor auto-arms. The arm file and the ledger live under `$XDG_CACHE_HOME/attend/keepwarm/`; only the `attend keepwarm` verbs and the sensor read them.
+Before attend 0.36 a shipped `keepwarm.yaml` sensor file switched keepwarm on, and the opt-out was a `keepwarm.yaml` of your own with `enabled: false` under `~/.config/attend/sensors/` or a project's `.claude/attend/sensors/`. Those files switch nothing now. For one release `attend keepwarm check` still reads them as the layers did, the project's file over the user's, and treats an `enabled` that comes to `false` as off, so a session that opted out does not start waking. `attend sensor list`, `attend config lint` and `ways settings lint` name each file and the setting to move to. Set `mods.attend.keepwarm: off` and delete the files; the next release ignores them.
+
+The arm file and the ledger live under `$XDG_CACHE_HOME/attend/keepwarm/`; only the `attend keepwarm` verbs read them.
 
 ## Related
 
-- [`sensors.md`](sensors.md#keepwarm) — the sensor's shipped file beside the others
-- [`delivery.md`](delivery.md) — the message lane keepwarm shares with the peers sensor
-- [`authoring-sensors.md`](authoring-sensors.md) — the fields a `keepwarm.yaml` of your own can set
+- [`delivery.md`](delivery.md) — how the attend mod delivers keepwarm's wake
 - **ADR-182** — the decision
 - **ADR-414** — the keepalive policy
+
+## References
+
+- ADR-182: keepwarm's wake at 50 idle minutes while armed.

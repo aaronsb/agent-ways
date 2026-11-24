@@ -91,7 +91,14 @@ pub fn cli_main() {
     }
 
     match command {
-        Commands::Run { catchup } => cmd::run::cmd_run_with_catchup(catchup),
+        // #1316 grace: remove after the next release.
+        // stdout too: a Monitor that still runs `attend run` turns only
+        // stdout lines into notifications.
+        Commands::Run { .. } => {
+            println!("{RUN_REMOVED}");
+            eprintln!("{RUN_REMOVED}");
+            std::process::exit(2);
+        }
         Commands::Listen { sub, json } => cmd::listen::cmd_listen(sub.unwrap_or(ListenCmd::Status), json),
         Commands::Message { inbox: flags, sub } => match sub {
             None => inbox(InboxArgs { msg_id: None, flags }),
@@ -163,13 +170,19 @@ fn refuse_a_sensor_command() {
 fn acts_as_session(command: &Commands) -> bool {
     !matches!(
         command,
-        Commands::Message { sub: Some(MessageCmd::Cleanup(_)), .. }
+        Commands::Run { .. }
+            | Commands::Message { sub: Some(MessageCmd::Cleanup(_)), .. }
             | Commands::Peer { sub: None | Some(PeerCmd::List(_)), .. }
             | Commands::Channel(ChannelGroup { sub: None | Some(ChannelCmd::List(_)), .. })
             | Commands::Sensor { sub: None | Some(SensorCmd::List(_) | SensorCmd::Permissions) }
             | Commands::Config { .. }
     )
 }
+
+/// What the hidden `attend run` stub says before it exits 2.
+// #1316 grace: remove after the next release.
+const RUN_REMOVED: &str =
+    "attend run was removed: awareness comes through the attend mod; call attend_listen, or run `ways manage mod check attend` if it is not listed";
 
 fn send(a: SendArgs) {
     cmd::send::reject_flag_like("message send", cmd::send::SEND_FLAGS, &a.message, a.json);

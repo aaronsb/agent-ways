@@ -26,7 +26,7 @@ This pattern runs through every layer of the system:
 
 - **Way matching** is a compiled Rust binary doing embedding math. Claude never decides which ways are relevant. The matcher proposes candidates before Claude sees anything, and on the prompt lanes a small hosted model (the relevance judge, [ADR-196](architecture/ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md)) answers yes or no for each one. The judge runs in the ways agent, a per-user daemon, never in Claude's context, and its cost is capped in candidates, input and time. On any failure the matcher's decision stands, and `gate.mode: off` removes it. [The relevance judge](explanation/relevance-judge/relevance-judge-the-model.md) gives the limits.
 - **Event logging** is the `ways` binary appending one JSON line per fire or near-miss to a file, with no inference involved. Claude doesn't record anything manually.
-- **Sensor observation** (the awareness layer) is a background script emitting stdout lines when state transitions are worth surfacing. The heavy lifting of turning raw events into discrete observations happens entirely below Claude's token budget.
+- **Sensor observation** (the awareness layer) is a background process, attend's sensor host, that writes a short report when a state transition is worth surfacing. The heavy lifting of turning raw events into discrete observations happens entirely below Claude's token budget.
 
 Most of what happens in an agent-ways session is happening in cheap substrates. Claude only pays tokens for what requires reasoning, and the cheap substrates prepare the ground so that reasoning is aimed at real problems instead of housekeeping.
 
@@ -54,7 +54,7 @@ flowchart LR
 
     subgraph Del["delivery"]
         direction LR
-        Monitor["Monitor<br/>(async notifications)"]:::delivery
+        Mod["attend mod<br/>(delivers reports and messages as turns)"]:::delivery
         Drain["Stop-hook inbox drain<br/>(turn boundary)"]:::delivery
         Hooks["hooks<br/>(sync injections)"]:::delivery
     end
@@ -64,13 +64,13 @@ flowchart LR
     end
 
     Sensors --> Attend
-    Attend --> Monitor
+    Attend --> Mod
     Attend --> Drain
     Matcher --> Judge
     Judge --> Gate
     Gate --> Hooks
 
-    Monitor --> Claude
+    Mod --> Claude
     Drain --> Claude
     Hooks --> Claude
 
@@ -155,14 +155,15 @@ The pieces described so far are *reactive*: they respond to things Claude is doi
 
 But some things happen *outside* Claude's loop. A background build finishes. A peer Claude Code session modifies a file Claude is editing. Context pressure approaches a critical threshold five turns from now. These are events Claude cannot observe without burning reasoning tokens to check, and that the hook system cannot surface because they do not correspond to Claude's own actions.
 
-The **awareness layer** ([ADR-113](architecture/attend/ADR-113-attend-active-awareness-module.md), [ADR-114](architecture/ways/ADR-114-attend-as-insistent-way-trigger-type.md)) closes this gap. It has two components:
+The **awareness layer** closes this gap. It has three components:
 
-1. **`attend`** — a background Rust binary that observes Claude's session state and environment via small sensor scripts, tracks approaching mechanical consequences using turn-based arithmetic, and emits single-line observations when something is worth surfacing.
-2. **`Monitor`** — Claude Code's async-notification tool that delivers background-script stdout as notifications in Claude's chat.
+1. **The sensor host** — a background `attend` process that observes Claude's session state and environment through its sensors, tracks approaching mechanical consequences using arithmetic, and writes a one-line report into attend's signal store when something is worth surfacing.
+2. **The signal store** — a directory of small files that holds those reports beside the messages peers and people send.
+3. **The attend mod** — a Claude Code plugin that runs inside the session. It decides whether the session listens, starts the sensor host as its own child when it does, and delivers what the store holds for the session.
 
-Claude invokes `Monitor` with `attend` as the command at session start. `attend` runs for the session's lifetime, writing observations to stdout as they become worth emitting. Each line becomes a notification Claude reads asynchronously between turns. When the session ends, `Monitor` terminates `attend`, which flushes state to disk so the next session can restore it.
+The mod is the only path. The host runs as long as the session listens and checkpoints its state every 30 seconds, so a host started again for the same session, after a reload or a `/clear`, continues where the last one stopped. A session without the mod has no host and gets no reports.
 
-Peer messages have a second path. While Claude is working, a Stop hook drains pending messages at the end of each turn (`attend message inbox --drain`, [ADR-172](architecture/attend/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md)). While Claude is idle, the `Monitor` poller wakes it. Both record what was delivered in one shared set, so a message arrives once.
+Delivery has two conduits. While Claude is working, a Stop hook drains what is pending at the end of each turn (`attend message inbox --drain`). While Claude is idle, the mod's poll wakes it for a message addressed to it. A sensor report never wakes an idle session: it arrives at the end of the turn in progress, with the next delivery that does wake it, or with the operator's next prompt. Both conduits record what was delivered in one shared set, so a report or a message arrives once.
 
 The awareness layer honors substrate separation rigorously:
 
@@ -172,8 +173,8 @@ The awareness layer honors substrate separation rigorously:
 
 Two delivery paths compose cleanly:
 
-- **`Monitor` notification only** — default for most observations. Claude reads the one-line note, integrates it, acts or dismisses. No ways involvement.
-- **`Monitor` notification + affordance → `ways show attend/<signal>`** — for high-salience observations. `attend` formats the notification with an explicit `ways show` command Claude can invoke if deeper guidance is warranted. If Claude invokes it, the ways system shows that way's body.
+- **Report only** — default for most observations. Claude reads the one-line report, integrates it, acts or dismisses. No ways involvement.
+- **Report + affordance → `ways show attend/<signal>`** — for high-salience observations. The sensor writes the report with an explicit `ways show` command Claude can invoke if deeper guidance is warranted. If Claude invokes it, the ways system shows that way's body.
 
 Claude retains agency at every step. `attend` suggests; Claude decides. The awareness layer informs, never overrides.
 
@@ -182,12 +183,12 @@ The signal flow through the awareness layer looks like this:
 ```mermaid
 sequenceDiagram
     participant S as sensor
-    participant A as attend
-    participant M as Monitor
+    participant A as sensor host
+    participant M as attend mod
     participant C as Claude
     participant W as ways system
 
-    Note over S,W: turn N — attend running, Claude in a conversation
+    Note over S,W: turn N — the session listens, Claude in a conversation
 
     S->>A: state transition detected
     A->>A: compute salience, check consequence model
@@ -196,13 +197,13 @@ sequenceDiagram
         A->>A: hold in deferred intent store (silent)
         Note right of A: most observations end here
     else peripheral (informational)
-        A->>M: stdout: short declarative line
-        M-->>C: notification delivered async
+        A->>M: report written to the store
+        M-->>C: delivered at the turn's end or the next turn
         C->>C: read, integrate, continue
         Note right of C: no tokens spent on<br/>ways invocation
     else high-salience (insistent or critical)
-        A->>M: stdout: line + affordance
-        M-->>C: notification delivered async
+        A->>M: report + affordance written to the store
+        M-->>C: delivered at the turn's end or the next turn
         C->>C: read, recognize stakes, decide to engage
         C->>W: ways show attend/<signal>
         W->>W: render the way, record the fire
@@ -211,7 +212,7 @@ sequenceDiagram
     end
 ```
 
-The three alternative branches — silent, peripheral, high-salience-with-affordance — are what makes the awareness layer honest about its cost. The overwhelming majority of sensor events fall into the first branch and cost nothing. Some become one-line peripheral notifications. Only a small minority of genuinely important events pay the full cost of a ways invocation.
+The three alternative branches — silent, peripheral, high-salience-with-affordance — are what makes the awareness layer honest about its cost. The overwhelming majority of sensor events fall into the first branch and cost nothing. Some become one-line peripheral reports. Only a small minority of genuinely important events pay the full cost of a ways invocation.
 
 ## The composed loop
 
@@ -225,9 +226,9 @@ flowchart TB
 
     Start((session<br/>start))
 
-    W["<b>Wake</b><br/>core ways injected<br/>memory seed checked<br/>attend state restored"]:::cheap
+    W["<b>Wake</b><br/>core ways injected<br/>memory seed checked<br/>sensor host started"]:::cheap
     P["<b>Perception</b><br/>sensors observe<br/>environment + self"]:::cheap
-    D["<b>Delivery</b><br/>Monitor delivers<br/>async notifications<br/>hooks deliver<br/>sync injections"]:::cheap
+    D["<b>Delivery</b><br/>attend mod delivers<br/>reports and messages<br/>hooks deliver<br/>sync injections"]:::cheap
     At["<b>Attention</b><br/>relevance judge<br/>refire gate<br/>salience scoring"]:::mixed
     R["<b>Reasoning</b><br/>Claude integrates<br/>observations +<br/>guidance"]:::expensive
     Ac["<b>Action</b><br/>tools, edits,<br/>responses"]:::expensive
@@ -251,9 +252,9 @@ flowchart TB
 
 Stage by stage:
 
-- **Wake.** A new session begins. SessionStart hooks inject the core ways, and `ways init` checks the memory seed. `attend` is invoked via `Monitor` at session start and restores its prior state from disk. Claude reads the orientation context and begins working.
-- **Perception.** `attend` runs its sensors in the background, watching Claude's context state, workspace files, peer sessions, and approaching consequences. Most observations are silent; only state transitions worth surfacing reach stdout.
-- **Delivery.** `Monitor` delivers `attend`'s stdout lines as asynchronous notifications, and a Stop hook drains pending peer messages at the turn boundary. Hooks deliver synchronous way injections at event boundaries (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, etc.). All of them land on Claude's attention surface.
+- **Wake.** A new session begins. SessionStart hooks inject the core ways, and `ways init` checks the memory seed. In a project set to listen, the attend mod starts listening and starts the sensor host; any other session listens once the agent calls `attend_listen`. Claude reads the orientation context and begins working.
+- **Perception.** The sensor host runs its sensors in the background, watching Claude's context state, workspace files, peer sessions, and approaching consequences. Most observations are silent; only state transitions worth surfacing are written to the signal store.
+- **Delivery.** The attend mod wakes an idle session for a peer message, and a Stop hook drains pending messages and sensor reports at the turn boundary. Hooks deliver synchronous way injections at event boundaries (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, etc.). All of them land on Claude's attention surface.
 - **Attention.** On the prompt lanes the relevance judge drops candidates that do not fit the turn. The refire gate ([ADR-126](architecture/ways/ADR-126-window-relative-refire.md)) holds back ways disclosed too recently for this agent. Fresh signals get full weight. Deterministic code and one bounded judge call decide what reaches Claude's reasoning.
 - **Reasoning.** Claude integrates observations and guidance into its working model and decides what to do.
 - **Action.** Claude acts — edits files, runs tools, responds to the user.
@@ -318,3 +319,11 @@ Ordered roughly by how specific the topic is to your interest:
 3. [architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md](architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md)
 
 Everything else is there when you need it.
+
+## References
+
+- [ADR-113](architecture/attend/ADR-113-attend-active-awareness-module.md): the awareness layer.
+- [ADR-114](architecture/ways/ADR-114-attend-as-insistent-way-trigger-type.md): attend as a way trigger.
+- [ADR-172](architecture/attend/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md): the Stop-hook drain at the end of each turn.
+- [ADR-406](architecture/attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md): the attend mod.
+- [ADR-416](architecture/attend/ADR-416-awareness-reaches-claude-code-only-through-the-attend-mod-whose-sensor-host-writes-system-signals-to-the-store.md): the mod as the only path, and the sensor host it starts.

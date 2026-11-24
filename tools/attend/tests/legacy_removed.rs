@@ -9,7 +9,9 @@
 //! message body; the binary must refuse instead. `attend focus` was a
 //! deprecated alias of the channel verbs and must not parse. The flat verbs
 //! ADR-413 item 5 kept as aliases for one release are gone too (#982): each
-//! is a usage error and writes nothing.
+//! is a usage error and writes nothing. `attend run`, the Monitor loop, is
+//! gone too (#1316): awareness reaches a session only through the attend
+//! mod, and for one release the usage error says so.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -139,6 +141,28 @@ fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
     let ctl_err = String::from_utf8_lossy(&ctl.stderr);
     assert!(ctl_err.contains("no prior inbound"), "stderr: {ctl_err}");
     assert!(!ctl_err.contains("is not a flag"), "stderr: {ctl_err}");
+}
+
+/// `attend run`, with `--catchup` or anything else after it, exits 2 and
+/// writes nothing. For one release a hidden stub says where awareness went,
+/// on stdout, which is what a Monitor turns into a notification, and on
+/// stderr, so a leftover run that re-executes into this binary tells its
+/// Monitor; it is not in the help.
+// #1316 grace: the message goes with the stub after the next release.
+#[test]
+fn attend_run_is_a_usage_error_that_says_where_awareness_went() {
+    const SAID: &str = "attend run was removed: awareness comes through the attend mod; call attend_listen, or run `ways manage mod check attend` if it is not listed";
+    for args in [&["run"][..], &["run", "--catchup"][..], &["run", "--anything", "else"][..]] {
+        let (out, home) = attend("run", args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {err}");
+        assert_eq!(err.trim_end(), SAID, "{args:?}");
+        // A Monitor reads stdout alone, so the line goes there as well.
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), SAID, "{args:?}: the line reaches a Monitor");
+        assert_eq!(signals_written(&home), 0, "nothing may be written");
+    }
+    let (help, _h) = attend("help", &["--help"]);
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("\n  run "), "run is hidden from the help");
 }
 
 #[test]

@@ -475,9 +475,9 @@ clean:
 # the shell assembles it from $$p when it runs.
 purge-attend-state: ATTEND_CACHE = $(or $(filter /%,$(XDG_CACHE_HOME)),$(HOME)/.cache)/attend
 purge-attend-state:
-	@p=attend; if pgrep -f "$$p run" >/dev/null 2>&1; then \
+	@p=attend; if pgrep -f "$$p sensor host" >/dev/null 2>&1; then \
 		echo ""; \
-		echo "WARNING: an '$$p run' is running."; \
+		echo "WARNING: an '$$p sensor host' is running."; \
 		echo "         Purging cached state under a live attend leaves it"; \
 		echo "         operating on stale in-memory views. Stop your"; \
 		echo "         attend processes first, then re-run this target."; \

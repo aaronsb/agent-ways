@@ -9,7 +9,7 @@
 //! session receives, against its seen-set. It marks nothing read. Its only
 //! writes are the ones `attend listen status` makes too: an enrollment this
 //! Claude Code process made under its id before `/clear` moves to the
-//! current id, and an opt-out whose `attend run` has exited is applied.
+//! current id.
 //!
 //! When a message that would wake the session waits, it also reports
 //! whether the session's prompt cache has lapsed, which holds that message

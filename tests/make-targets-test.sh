@@ -119,10 +119,10 @@ none=$(make -s -C "$ROOT" dev-restore APP_DIR="$APP" XDG_BIN="$WORK/empty-xdg" C
 check "dev-restore fails when it repoints nothing" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
 check "and says so" "yes" "$(has "$none" "no link repointed")"
 
-# purge-attend-state refuses while an `attend run` is live. Its pgrep must not
+# purge-attend-state refuses while an `attend sensor host` is live. Its pgrep must not
 # match its own recipe, whose command line holds the pattern. The fake pgrep
 # runs the real one and keeps only the matches in this test's process tree,
-# so an `attend run` elsewhere on the machine decides nothing here. It
+# so a sensor host elsewhere on the machine decides nothing here. It
 # leaves itself out, as the real pgrep does: its own arguments hold the
 # pattern.
 REAL_PGREP=$(command -v pgrep)
@@ -144,13 +144,13 @@ chmod +x "$WORK/purgebin/pgrep"
 purge() { PATH="$WORK/purgebin:$PATH" XDG_CACHE_HOME="$WORK/purge-cache" make -s -C "$ROOT" purge-attend-state >/dev/null 2>&1; }
 mkdir -p "$WORK/purge-cache/attend/signals"
 purge
-check "purge-attend-state proceeds with no attend run" "0" "$?"
+check "purge-attend-state proceeds with no sensor host" "0" "$?"
 check "and wipes the attend cache" "no" "$([[ -e $WORK/purge-cache/attend ]] && echo yes || echo no)"
 mkdir -p "$WORK/purge-cache/attend/signals"
-(exec -a "attend run" sleep 30) &
+(exec -a "attend sensor host" sleep 30) &
 live=$!
 purge
-check "purge-attend-state refuses while an attend run is live" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
+check "purge-attend-state refuses while a sensor host is live" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
 check "and keeps the attend cache" "yes" "$([[ -e $WORK/purge-cache/attend ]] && echo yes || echo no)"
 kill "$live" 2>/dev/null
 wait "$live" 2>/dev/null

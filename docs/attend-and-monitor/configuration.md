@@ -36,7 +36,7 @@ attend config lint      # the findings in attend's two files; exit 3 with any
 
 Every write goes through the one settings writer: it takes a lock beside the file, changes only the keys it sets, keeps every comment and the order of the rest, and renames a temporary file into place. `attend config tune --apply` and `ways settings set` leave the same bytes.
 
-A value of the wrong type or out of range is a finding, never clamped. A section with a finding is ignored in that file, so its keys resolve from the layers beneath, ending at the defaults. A switch fails closed: a `cleanup` whose `enabled` holds anything but `true` in a section with a finding reads as off. A file that does not parse sets nothing; `cleanup` is off in its scope until its syntax is fixed by hand. Each finding is one line on stderr of `attend run` and `attend config show`, naming the file, line and section.
+A value of the wrong type or out of range is a finding, never clamped. A section with a finding is ignored in that file, so its keys resolve from the layers beneath, ending at the defaults. A switch fails closed: a `cleanup` whose `enabled` holds anything but `true` in a section with a finding reads as off. A file that does not parse sets nothing; `cleanup` is off in its scope until its syntax is fixed by hand. Each finding is one line on stderr of `attend config show` and of the sensor host, whose stderr goes to the attend mod's debug log, naming the file, line and section.
 
 `attend config init` creates the user-scope file with fully commented defaults, and never overwrites one that exists.
 
@@ -56,7 +56,6 @@ engagement:
   step_multiplier: 1.25      # per-disclosure threshold elevation past burst_threshold
   absolute_refractory: 60    # seconds of complete suppression after burst
   decay_per_minute: 0.1      # rate at which elevated threshold returns to baseline
-  peer_activity_window: 900  # sliding window for per-peer engagement boost
 
 # Background cleanup of the signals base
 cleanup:
@@ -67,7 +66,7 @@ cleanup:
 project_sensors: []
 ```
 
-The `governor` block governs the event lane. The message lane (`peers`, `keepwarm`) uses a fixed permissive governor with no keys (see [`delivery.md`](delivery.md#the-monitor-line)).
+The `governor` block governs the event lane. A sensor whose file declares the message lane uses a fixed permissive governor with no keys (see [`loop.md`](loop.md#disclosure-and-the-governor)).
 
 ## Section reference
 
@@ -89,7 +88,7 @@ The action potential model parameters. Governs per-sensor refractory behavior. S
 - **`step_multiplier`** (float, default 1.25): contributes to the peak refractory multiplier as `peak_multiplier = 1.0 + step_multiplier`. At the default, the peak multiplier is 2.25 — the effective threshold just after a burst is 2.25× the base threshold.
 - **`absolute_refractory`** (seconds, default 60): complete suppression after a burst. No events fire during this window regardless of magnitude. Directly mapped to `Curve::ActionPotential::absolute_refractory` in ticks (= seconds for attend).
 - **`decay_per_minute`** (float, default 0.1): exponential decay rate for the relative-refractory multiplier. At load time attend converts this to `multiplier_half_life = ln(0.5) / ln(1 - decay_per_minute) × 60` seconds. At `0.1`, the half-life is ≈ 395 s (~6.6 min); at `0.0256` (typical tune output), ≈ 1611 s (~27 min).
-- **`peer_activity_window`** (seconds, default 900): sliding window used by `sensor-peers` for the per-peer engagement boost. This *is* still tick-windowed — sensor-peers implements its own count-in-window logic rather than going through the shared curve engine, because the per-peer boost is a different shape than per-sensor refractory.
+- **`peer_activity_window`** is retired. It sized the peers sensor's per-peer boost on message lines, which went when that sensor stopped reading messages. A file that still sets it gets a finding, `retired with the peers sensor's message scanning and is ignored; delete it`, and the value is ignored. `ways settings fix attend.engagement` removes it and keeps the section's other values.
 
 > **`burst_window`.** Pre-ADR-123 configs carried a `burst_window` key. It is an unknown key now: the `engagement` section it sits in falls back to the layers beneath, and `ways settings fix attend.engagement` removes it.
 
@@ -102,7 +101,7 @@ The action potential model parameters. Governs per-sensor refractory behavior. S
 | `absolute_refractory` | `absolute_refractory` (seconds)                    |
 | `decay_per_minute`    | `multiplier_half_life = ln(0.5)/ln(1-rate) × 60`   |
 
-**Auto-tuning.** Run `attend config tune` to derive these from real session history. See [`engagement.md`](engagement.md#tuning-with-attend-tune) for how tuning works and how the linear-derived `decay_per_minute` relates to the engine's exponential half-life.
+**Auto-tuning.** Run `attend config tune` to derive these from real session history. See [`engagement.md`](engagement.md#tuning-with-attend-config-tune) for how tuning works and how the linear-derived `decay_per_minute` relates to the engine's exponential half-life.
 
 ### `cleanup`
 
@@ -111,7 +110,7 @@ Background signal-file cleanup. Prevents the signals base from accumulating inde
 Reaping is by **project liveness** (ADR-136), not by age: a signal is removed when the project that owns it is gone, mirroring Claude Code's notion of a live project. A project-tray signal belongs to the recipient's project; a `#open` or channel signal belongs to the sender's. There is no age cutoff and no `retention` dial. See [`signals.md`](signals.md#the-full-lifecycle).
 
 - **`enabled`** (bool, default true): master switch. If false, auto-cleanup is skipped and you must run `attend message cleanup` manually to reclaim space.
-- **`interval`** (seconds, default 600): how often the auto-sweep runs inside `attend run`. At this interval the loop scans the signals base and reaps signals whose owning project is no longer live.
+- **`interval`** (seconds, default 600): how often the auto-sweep runs inside each sensor host ([`loop.md`](loop.md)). At this interval the loop scans the signals base and reaps signals whose owning project is no longer live. Without a listening session no host runs, so the sweep waits for `attend message cleanup` or the next host.
 
 The sweep also removes empty encoded-cwd project subdirectories left as shells after their signals are reaped. Reserved names (`_broadcast`, `@groups`, anything starting with `_` or `@`) are never removed.
 
@@ -134,7 +133,7 @@ project_sensors:
 
 ### Sensors
 
-Each sensor is a file under `attend/sensors/` in the user and project layers, not a section of these files. The `sensors:` section these files once held, its `+name:` and `-name:` prefixes and its inline `script:` sensors are retired with no reader. `ways settings lint`, `attend config lint` and `attend run` report each of their keys with the sensor file to write and the field to set there ([`authoring-sensors.md`](authoring-sensors.md#the-retired-forms)).
+Each sensor is a file under `attend/sensors/` in the user and project layers, not a section of these files. The `sensors:` section these files once held, its `+name:` and `-name:` prefixes and its inline `script:` sensors are retired with no reader. `ways settings lint`, `attend config lint` and the sensor host's log report each of their keys with the sensor file to write and the field to set there ([`authoring-sensors.md`](authoring-sensors.md#the-retired-forms)).
 
 ## Overlay semantics
 
@@ -169,11 +168,10 @@ $ attend sensor permissions
   Sensor          Requires       Status
   ──────────────────────────────────────
   context         Read           granted
-  disclosure      Bash(ways:*)   granted
   git             Bash(git:*)    granted
-  keepwarm        Bash(ways:*)   granted
   peers           Read           granted
   processes       Bash(ps:*)     granted
+  ways-update     Bash(ways:*)   granted
 
   All permissions granted.
 ```

@@ -97,38 +97,6 @@ fn a_member_with_a_lapsed_cache_is_not_woken_and_reads_it_next_turn() {
     assert_eq!(bodies(&d), ["news for the room"], "{d}");
 }
 
-/// Under `attend run`, the Monitor poller prints an unaddressed channel post,
-/// which wakes the session.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_monitor_poller_wakes_a_member_for_a_channel_post() {
-    let f = Fixture::new("chwake-monitor");
-    f.ok(&["channel", "join", "room"]);
-    let run = f.run();
-    run.wait_for("the startup line", Duration::from_secs(30), |r| r.output().contains("you are"));
-    signal(&f, "@room", "x-1-1", "claude:x|p|/tmp/p|to:#room|news for the room");
-    run.wait_for("the channel post", Duration::from_secs(30), |r| r.output().contains("news for the room"));
-}
-
-/// Under `attend run` the cache gate holds the channel post on a lapsed
-/// cache; once the cache is warm, it prints.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_monitor_poller_holds_a_channel_post_on_a_lapsed_cache() {
-    let f = Fixture::new("chwake-monitor-cold");
-    f.ok(&["channel", "join", "room"]);
-    f.last_turn(Some(61 * MIN));
-    let run = f.run();
-    run.wait_for("the startup line", Duration::from_secs(30), |r| r.output().contains("you are"));
-    signal(&f, "@room", "x-1-1", "claude:x|p|/tmp/p|to:#room|news for the room");
-    // Three polls at the fixture's one-second interval.
-    std::thread::sleep(Duration::from_secs(3));
-    assert!(!run.output().contains("news for the room"), "a cold member is not woken: {}", run.output());
-    assert_eq!(unread(&f), 1, "and the post stays unread");
-    f.last_turn(Some(Duration::ZERO));
-    run.wait_for("the post once warm", Duration::from_secs(30), |r| r.output().contains("news for the room"));
-}
-
 /// After `/clear`, a post the session wrote in its channel under its earlier
 /// id is still its own, so the wake drain does not wake it for it.
 #[test]
@@ -140,46 +108,4 @@ fn the_sessions_post_under_its_pre_clear_id_does_not_wake_it() {
     signal(&f, "@room", "own-1-1", &format!("claude:{old}|p|/tmp/p|to:#room|my post before the clear"));
     let d = wake_drain(&f);
     assert_eq!(bodies(&d), Vec::<String>::new(), "{d}");
-}
-
-/// Under `attend run`, after `/clear` hands the run over to the new id, a
-/// post the session wrote in its channel under its earlier id prints
-/// nothing, while another member's post prints.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_monitor_poller_is_not_woken_by_its_post_under_a_pre_clear_id() {
-    let f = Fixture::new("chwake-monitor-own-clear");
-    let old = f.sid.clone();
-    f.ok(&["channel", "join", "room"]);
-    let run = f.run();
-    run.wait_for("the startup line", Duration::from_secs(30), |r| r.output().contains("you are"));
-    f.last_turn_of("sess-chwake-monitor-new", Some(Duration::ZERO));
-    f.set_session_id("sess-chwake-monitor-new");
-    run.wait_for("the hand-over", Duration::from_secs(30), |r| r.output().contains("session id changed"));
-    signal(&f, "@room", "own-1-1", &format!("claude:{old}|p|/tmp/p|to:#room|my post before the clear"));
-    signal(&f, "@room", "x-1-2", "claude:x|p|/tmp/p|to:#room|a member's post");
-    run.wait_for("the member's post", Duration::from_secs(30), |r| r.output().contains("a member's post"));
-    assert!(!run.output().contains("my post before the clear"), "{}", run.output());
-}
-
-/// A `/clear` whose hand-over cannot restart the run ends it, so no poller
-/// is left reading under the old id: the session's post under its new id
-/// prints nothing.
-#[cfg(all(unix, feature = "sensor-peers"))]
-#[test]
-fn a_failed_hand_over_ends_the_run_before_it_reads_under_the_old_id() {
-    let f = Fixture::new("chwake-rekey-fail");
-    f.ok(&["channel", "join", "room"]);
-    let bin = f.home.join("attend-copy");
-    std::fs::copy(env!("CARGO_BIN_EXE_attend"), &bin).unwrap();
-    let mut run = f.run_from(&bin, &[]);
-    run.wait_for("the startup line", Duration::from_secs(30), |r| r.output().contains("you are"));
-    std::fs::remove_file(&bin).unwrap();
-    f.set_session_id("sess-chwake-rekey-new");
-    f.last_turn_of("sess-chwake-rekey-new", Some(Duration::ZERO));
-    run.wait_for("the failed hand-over", Duration::from_secs(30), |r| r.output().contains("could not restart itself"));
-    signal(&f, "@room", "own-1-1", "claude:sess-chwake-rekey-new|p|/tmp/p|to:#room|my post after the clear");
-    std::thread::sleep(Duration::from_secs(3));
-    assert!(run.exited(), "the run ended");
-    assert!(!run.output().contains("my post after the clear"), "{}", run.output());
 }

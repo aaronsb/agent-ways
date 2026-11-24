@@ -677,8 +677,7 @@ pub fn identify_sender(session_id: Option<String>) -> (String, &'static str) {
 /// five base-36 characters: FNV-1a (32-bit) over the id's UTF-16 code units,
 /// the last five digits. The attend mod's `shortId` (plugins/attend/hooks/
 /// lib.ts) computes the same handle, so a line the mod formats and a line
-/// the drain formats name a message alike (ADR-406 item 5), and the
-/// Monitor line of the peers sensor carries it too (ADR-412).
+/// the drain formats name a message alike.
 pub fn short_id(id: &str) -> String {
     let mut h: u32 = 0x811c_9dc5;
     for unit in id.encode_utf16() {

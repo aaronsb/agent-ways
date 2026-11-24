@@ -23,7 +23,7 @@ fn fixture() -> PathBuf {
     d
 }
 
-/// A session record naming this test process: every attend run from here
+/// A session record naming this test process: every attend started from here
 /// resolves to [`SESSION`], whose ancestry includes this pid.
 fn become_session(home: &Path) {
     let pid = std::process::id();

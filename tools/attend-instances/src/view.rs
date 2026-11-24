@@ -4,11 +4,11 @@
 
 //! One sender display form for every attend conduit.
 //!
-//! A message reaches a session over two conduits (ADR-172): the
-//! Monitor-hosted `peers` sensor and the Stop-hook drain. Both render
-//! the sender through this module, so one message wears one name on
-//! both — `Nickname-instance (project)` — instead of a path on one
-//! and a persona on the other (issue #534). The canonical id stays the
+//! A message reaches a session through the drain, which the attend mod
+//! polls and the Stop hook runs, and a person reads it in
+//! attend-chat. Each renders the sender through this module, so one
+//! message wears one name everywhere — `Nickname-instance (project)` —
+//! instead of a path in one place and a persona in another (issue #534). The canonical id stays the
 //! wire `from` field (`claude:<session-id>`, ADR-171); this module is
 //! presentation over that key, never a substitute for it.
 //!
@@ -44,8 +44,8 @@ pub use crate::SnapshotCache;
 /// through showing the raw `from` value, colored off its own hash.
 ///
 /// A terminal caller passes `agent_theme::painter()`, which is plain when
-/// stdout is not a terminal. Machine-carried text (the Monitor event line,
-/// the ADR-172 drain injection) passes `Painter::plain()`, so it is
+/// stdout is not a terminal. Machine-carried text (the drain's turn-end
+/// injection) passes `Painter::plain()`, so it is
 /// escape-free whatever the environment says (#388).
 ///
 /// Scope derivation deliberately differs from `attend-chat::chip::chip_for`:

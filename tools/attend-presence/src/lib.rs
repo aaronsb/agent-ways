@@ -7,8 +7,7 @@
 //!
 //! - [`session`]: the canonical identity tuple `(sessionId ∩ origin_path)`
 //!   (issue #378, ADR-171).
-//! - [`heartbeat`]: the per-session liveness file (ADR-129) and the
-//!   duplicate-attend lock.
+//! - [`heartbeat`]: the per-session liveness file.
 //! - [`alive`]: the one predicate for "is this member live", and [`gone`]
 //!   for "has this session gone for good".
 //! - [`enrollment`]: whether a session enrolled in attend (#720).

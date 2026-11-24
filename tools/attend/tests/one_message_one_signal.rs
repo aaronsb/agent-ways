@@ -4,8 +4,8 @@
 
 //! One message is one signal, whatever its length (ADR-412). `attend message send`
 //! writes it whole, and every conduit delivers it whole under its one id:
-//! the Stop-hook drain, the attend mod's format, and the Monitor line of
-//! `attend run`. Signals an older peer sent as numbered `(i/n)` parts still
+//! the Stop-hook drain and the attend mod's format. Signals an older peer
+//! sent as numbered `(i/n)` parts still
 //! read, in order, as the messages they are.
 
 mod common;
@@ -135,31 +135,6 @@ fn the_drain_delivers_a_long_message_whole_under_one_handle() {
     assert_eq!(lines[0].matches(" ~").count(), 1, "one handle: {text}");
 }
 
-/// The Monitor line of `attend run` carries the message whole, on one line,
-/// with its handle ahead of the body, so a reply to it threads to the
-/// message.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_monitor_line_carries_a_long_message_whole_with_its_handle() {
-    let f = Fixture::new("one-signal-run");
-    let body = long_body();
-    let id = "peer-sess-1791000000000000001-0";
-    // Fresh when the first scan finds it, so the cold start delivers it, and
-    // in the project tray, so it wakes the session (ADR-406 item 2).
-    put_from_peer(&f, &f.project_tray(), id, &body);
-    let run = f.run();
-    run.wait_for("the message", Duration::from_secs(30), |r| r.output().contains("END-OF-MESSAGE"));
-    let out = run.output();
-    let lines: Vec<&str> = out.lines().filter(|l| l.contains("message from")).collect();
-    assert_eq!(lines.len(), 1, "one line: {out}");
-    let line = lines[0];
-    assert!(line.contains(&body), "whole: {line}");
-    assert!(!line.contains("(1/"), "no part counter: {line}");
-    let handle = attend::verbs::inbox::short_id(id);
-    let (head, _) = line.split_once("Sentence 00").unwrap();
-    assert!(head.contains(&format!("~{handle}")), "the handle leads the body: {line}");
-}
-
 /// Numbered parts an older peer sent still read, in order, each as the
 /// signal it is, through the inbox and the drain.
 #[test]
@@ -264,34 +239,4 @@ fn an_oversize_signal_file_is_skipped_with_a_note() {
     assert!(stderr.contains("skipped peer-sess-1791000000000000001-0.signal") && stderr.contains("read limit"), "{stderr}");
     let again = f.attend(&["message", "inbox", "--drain", "--format", "plain"]);
     assert!(!String::from_utf8_lossy(&again.stderr).contains("skipped"), "noted once");
-}
-
-/// Under `attend run`, numbered parts an older peer sent come out as three
-/// lines in send order, each its own message.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn legacy_numbered_parts_come_out_in_order_on_the_monitor_line() {
-    let f = Fixture::new("one-signal-legacy-run");
-    // In the project tray, so the parts wake the session (ADR-406 item 2).
-    let dir = f.signals().join(f.project_tray());
-    std::fs::create_dir_all(&dir).unwrap();
-    let mtime = std::time::SystemTime::now() - Duration::from_secs(2);
-    let parts = [
-        ("old-peer-1791000000000000001-0", "(1/3) the first third"),
-        ("old-peer-1791000000000000002-0", "(2/3) the second third"),
-        ("old-peer-1791000000000000003-0", "(3/3) the last third"),
-    ];
-    for (id, body) in parts.iter().rev() {
-        let path = dir.join(format!("{id}.signal"));
-        std::fs::write(&path, format!("claude:old-peer|p|/tmp/p|{body}\n")).unwrap();
-        std::fs::File::options().write(true).open(&path).unwrap().set_modified(mtime).unwrap();
-    }
-    let run = f.run();
-    run.wait_for("the last part", Duration::from_secs(30), |r| r.output().contains("the last third"));
-    let out = run.output();
-    let at: Vec<usize> = parts.iter().map(|(_, b)| out.find(b).unwrap_or_else(|| panic!("{b}: {out}"))).collect();
-    assert!(at.windows(2).all(|w| w[0] < w[1]), "in order: {out}");
-    for (id, _) in parts {
-        assert!(out.contains(&format!("~{}", attend::verbs::inbox::short_id(id))), "each its own handle: {out}");
-    }
 }

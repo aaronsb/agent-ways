@@ -1633,7 +1633,6 @@ version = "0.1.0"
 dependencies = [
  "claude-sessions",
  "jiff",
- "sensor-trait",
  "serde",
  "serde_json",
 ]
@@ -1642,13 +1641,9 @@ dependencies = [
 name = "sensor-peers"
 version = "0.6.0"
 dependencies = [
- "agent-identity",
  "attend-groups",
- "attend-instances",
  "attend-presence",
- "attend-state",
  "claude-sessions",
- "sensor-keepwarm",
  "sensor-trait",
  "serde_json",
  "ways-core",

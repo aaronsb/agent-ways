@@ -5,7 +5,6 @@ This document contains the help content for the `attend` command-line program.
 **Command Overview:**
 
 * [`attend`↴](#attend)
-* [`attend run`↴](#attend-run)
 * [`attend listen`↴](#attend-listen)
 * [`attend listen on`↴](#attend-listen-on)
 * [`attend listen off`↴](#attend-listen-off)
@@ -68,7 +67,6 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 ###### **Subcommands:**
 
-* `run` — Start the sensor loop (use with Monitor for async delivery)
 * `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
 * `message` — Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 * `channel` — Join, leave, list and manage channels and scenes (default: list)
@@ -80,18 +78,6 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 
 
-## `attend run`
-
-Start the sensor loop (use with Monitor for async delivery)
-
-**Usage:** `attend run [OPTIONS]`
-
-###### **Options:**
-
-* `--catchup` — Replay backlog signals on startup before normal cadence
-
-
-
 ## `attend listen`
 
 Turn listening on or off for this session without joining a channel, or show it (default: status)
@@ -100,8 +86,8 @@ Turn listening on or off for this session without joining a channel, or show it 
 
 ###### **Subcommands:**
 
-* `on` — Listen: the drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back. The Stop hook delivers only with `--host mod`, or while an `attend run` is live
-* `off` — Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join, `attend run` or `listen on` listens again
+* `on` — Listen: the drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back. The Stop hook delivers only with `--host mod`
+* `off` — Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join or `listen on` listens again
 * `status` — Print `listening` or `not listening` (default)
 * `beat` — Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
 
@@ -113,13 +99,13 @@ Turn listening on or off for this session without joining a channel, or show it 
 
 ## `attend listen on`
 
-Listen: the drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back. The Stop hook delivers only with `--host mod`, or while an `attend run` is live
+Listen: the drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back. The Stop hook delivers only with `--host mod`
 
 **Usage:** `attend listen on [OPTIONS]`
 
 ###### **Options:**
 
-* `--host <HOST>` — What hosts delivery, when not Monitor or a shell: `mod`, the attend mod, whose agent answers with attend_reply and attend_send. The Stop-hook drain then delivers to the session, in the mod's format and naming those tools
+* `--host <HOST>` — What hosts delivery, when not a shell: `mod`, the attend mod, whose agent answers with attend_reply and attend_send. The Stop-hook drain then delivers to the session, in the mod's format and naming those tools
 
   Possible values:
   - `mod`:
@@ -130,7 +116,7 @@ Listen: the drain delivers to this session. Messages addressed to its project wh
 
 ## `attend listen off`
 
-Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join, `attend run` or `listen on` listens again
+Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join or `listen on` listens again
 
 **Usage:** `attend listen off`
 
@@ -182,7 +168,7 @@ Send, reply to, read, count and delete messages, and tombstone a session (defaul
 
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
-* `--drain` — Atomically deliver pending messages and record their consumption. The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not listening (#720), and in hook format for a session that neither the attend mod enrolled (`attend listen on --host mod`) nor a live `attend run` holds. On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show. A system signal past its expiry is recorded read and never delivered
+* `--drain` — Atomically deliver pending messages and record their consumption. The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not listening (#720), and in hook format for a session the attend mod did not enroll (`attend listen on --host mod`). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show. A system signal past its expiry is recorded read and never delivered
 * `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts and attend's own event-lane notices alone wait for the next turn. Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or a transcript not readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. A session with no turn yet has no cache to lose and is woken. The attend mod polls with it while idle
 * `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
 
@@ -247,7 +233,7 @@ Read pending messages from peers
 
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
-* `--drain` — Atomically deliver pending messages and record their consumption. The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not listening (#720), and in hook format for a session that neither the attend mod enrolled (`attend listen on --host mod`) nor a live `attend run` holds. On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show. A system signal past its expiry is recorded read and never delivered
+* `--drain` — Atomically deliver pending messages and record their consumption. The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not listening (#720), and in hook format for a session the attend mod did not enroll (`attend listen on --host mod`). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show. A system signal past its expiry is recorded read and never delivered
 * `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, a reply to a message it sent, or any post in one of its named channels; then deliver all that is pending. Other `#open` posts and attend's own event-lane notices alone wait for the next turn. Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or a transcript not readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. A session with no turn yet has no cache to lose and is woken. The attend mod polls with it while idle
 * `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
 
@@ -309,7 +295,7 @@ A message is marked when it is in the scope, older than --older-than, older than
 
 Tombstone a session that has exited, so every reader skips its messages
 
-The drain, the mod, `attend message unread`, the Monitor poller and `attend message inbox` all skip what a tombstoned session sent, and the drain records it read, up to when it was tombstoned; what the session sends later, back under --resume, shows. Only an agent's session that this host saw exit is tombstoned: a person's id, a session that may still read the bus, an id such a session had before /clear and this session's own are refused. Its messages stay on disk; `attend message delete --everywhere --from <id>` marks them for deletion (ADR-404 D3e).
+The drain, the mod, `attend message unread` and `attend message inbox` all skip what a tombstoned session sent, and the drain records it read, up to when it was tombstoned; what the session sends later, back under --resume, shows. Only an agent's session that this host saw exit is tombstoned: a person's id, a session that may still read the bus, an id such a session had before /clear and this session's own are refused. Its messages stay on disk; `attend message delete --everywhere --from <id>` marks them for deletion.
 
 **Usage:** `attend message tombstone [OPTIONS] [SESSION-ID]`
 
@@ -510,7 +496,7 @@ List sessions, show this session's identity and the running loops (default: list
 
 * `list` — List active Claude Code sessions and their channels
 * `whoami` — Print this session's canonical bus identity (issue #378)
-* `status` — Show every running `attend run` with the session it serves, signals, and channel state
+* `status` — Show every running sensor host with the session it serves, signals, and channel state
 
 ###### **Options:**
 
@@ -545,7 +531,7 @@ Print this session's canonical bus identity (issue #378)
 
 ## `attend peer status`
 
-Show every running `attend run` with the session it serves, signals, and channel state
+Show every running sensor host with the session it serves, signals, and channel state
 
 **Usage:** `attend peer status [OPTIONS]`
 
@@ -566,7 +552,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `on` — Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
 * `off` — Disarm and forget the window
 * `status` — Cache state, context size, cold price, window left, and this session's cold writes
-* `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
+* `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). The attend mod polls it
 * `reset` — The operator prompted: the keepalive count starts again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
 * `compacted` — Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends (ADR-414 item 6)
@@ -603,7 +589,7 @@ Cache state, context size, cold price, window left, and this session's cold writ
 
 ## `attend keepwarm check`
 
-Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
+Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). The attend mod polls it
 
 **Usage:** `attend keepwarm check [OPTIONS]`
 
@@ -777,7 +763,7 @@ Compare each sensor's `requires:` against settings.json
 
 Run one session's sensors and write what they report to it as system signals
 
-The attend mod starts one host for each listening session and stops it when the session stops listening. The host polls the sensors the files declare for --cwd, except keepwarm and disclosure, and the peers sensor reports sessions starting and leaving but no messages. Each report the governor lets through becomes a signal from `system:<sensor>` addressed to --session, on the sensor's lane, with the expiry its trigger sets; the mod delivers it as it delivers a message. Each signal written prints one line on stdout, `signal <id>`, and nothing else does; logs go to stderr. A changed binary or sensor file re-executes the host in place.
+The attend mod starts one host for each listening session and stops it when the session stops listening. The host polls the sensors the files declare for --cwd; the peers sensor reports sessions starting and leaving but no messages. Each report the governor lets through becomes a signal from `system:<sensor>` addressed to --session, on the sensor's lane, with the expiry its trigger sets; the mod delivers it as it delivers a message. Each signal written prints one line on stdout, `signal <id>`, and nothing else does; logs go to stderr. A changed binary or sensor file re-executes the host in place.
 
 **Usage:** `attend sensor host [OPTIONS] --session <SESSION> --cwd <CWD>`
 
@@ -846,7 +832,7 @@ Survey session history and derive engagement config
 
 ###### **Options:**
 
-* `--apply` — Write the derived absolute_refractory, decay_per_minute and peer_activity_window to the user config, changing nothing else
+* `--apply` — Write the derived absolute_refractory and decay_per_minute to the user config, changing nothing else
 
 
 

@@ -37,7 +37,7 @@ $ attend sensor list
   processes       crate   builtin · user extends active event   30s / 5s   sensor-processes@0.6.0 ~/.config/attend/sensors/processes.yaml
 ```
 
-`Origin` is now `builtin · user extends` and `File` names your file. A running `attend run` sees the change and reloads.
+`Origin` is now `builtin · user extends` and `File` names your file. A running sensor host sees the change within 10 seconds and re-executes itself to load it ([`loop.md`](loop.md#one-iteration)).
 
 ## Step 3 — Send a test through it
 
@@ -66,7 +66,7 @@ mkdir -p .claude/attend/sensors
 printf 'enabled: false\n' > .claude/attend/sensors/git.yaml
 ```
 
-Run from that project, `attend sensor list` shows `git` with `Origin` `project` and `State` `off`, and `attend run` there does not poll it. A project file that changes a `crate` sensor needs no permission. A project's `command` or `mcp` file runs code the repository chose, so it loads only once you list the project in `project_sensors` in `~/.config/attend/config.yaml`.
+Run from that project, `attend sensor list` shows `git` with `Origin` `project` and `State` `off`, and the sensor host of a session there does not poll it. A project file that changes a `crate` sensor needs no permission. A project's `command` or `mcp` file runs code the repository chose, so it loads only once you list the project in `project_sensors` in `~/.config/attend/config.yaml`.
 
 ## Step 5 — Read a mistake
 

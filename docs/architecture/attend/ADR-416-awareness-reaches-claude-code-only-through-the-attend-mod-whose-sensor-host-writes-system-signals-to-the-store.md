@@ -10,6 +10,8 @@ amends:
   - ADR-403#3b-sensor-state-declared-typed-checked
   - ADR-136#Decision
   - ADR-182#Decision
+  - ADR-113#Decision
+  - ADR-122#Decision
 basis:
   - operator: aaronsb
     level: directed
@@ -85,6 +87,15 @@ considered:
   - operator: aaronsb
     said: "Keep it until #1316"
     via: "session 2026-11-23, question tool, #1313 review"
+  - operator: aaronsb
+    said: "#1316+#1317, then release"
+    via: "session 2026-11-23, question tool, #1316 plan"
+  - operator: aaronsb
+    said: "Host registers"
+    via: "session 2026-11-23, question tool, #1316 plan"
+  - operator: aaronsb
+    said: "Delete, use config"
+    via: "session 2026-11-23, question tool, #1316 plan"
 status: accepted
 date: 2026-11-21
 deciders:
@@ -154,9 +165,13 @@ The operator set the direction: awareness is furnished through the mod, and a se
    - An event-lane signal never starts a turn. It reaches the model at the end of the turn in progress through the Stop-hook drain, or with the next waking delivery or the operator's next prompt, whichever comes first. The drain drops it unread once it expires. The expiry is the sensor's decay window, one hour unless the file sets `expires`. The host applies the event lane's salience, refractory period and rate governor before it writes, as `attend run` did before it printed. A message-lane system signal wakes under the same gate as an addressed message.
    - Keepwarm's lane exception goes. Its wake is not a signal: the mod runs `attend keepwarm check` and submits the line itself (ADR-406 item 13, ADR-414). So the shipped `keepwarm.yaml`, which existed only for `attend run`, and the `lane_exception` field are removed.
 
+     > Amended 2026-11-23 (#1316): the shipped `keepwarm.yaml` was also the switch `attend keepwarm check` looked for, so its removal moves the switch to the config key `mods.attend.keepwarm`, which the mod already read: `check` judges nothing where it is `off`. The compiled keepwarm sensor and its entry among the crate sensors go with the file, since nothing runs them. The documented opt-out was a user's or a project's `keepwarm.yaml` with `enabled: false`. For one release `check` still reads those files as the layers did, the project's over the user's, and treats an `enabled` that comes to `false` as off, so a session that opted out does not start waking; `attend sensor list`, `attend config lint` and `ways settings lint` name each file and the config key to move to. With keepwarm and the peers sensor's messages gone, no compiled sensor has a fixed lane.
+
 5. **What the host runs, and what leaves.** The host keeps git, processes, context, and the presence half of peers: a session appearing or leaving, on the event lane. The peers sensor's message scanning goes, because the drain carries messages. This settles #139's split for Claude Code. The disclosure sensor and `disclosures/messaging.md` go, because the mod's preamble cadence covers what they re-printed (ADR-406 item 4).
 
    Of `tools/attend/src/cmd/run/`, these stay as the host: the sensor slots and their scheduling in `tick_iteration`, the disclosure governor (`governor.rs`), the stamp sweep (`stamps.rs`) and the in-place re-exec on a binary change. These go: the message-lane poller and its flush, `CacheGate`, `reload_plan` and its held lines, the startup banner and its fingerprint, `rekey.rs`, `--catchup`, and the Monitor formatting in `emit/`. In `attend-presence`, a run's enrollment lock and the "held by `attend run`" rules go. A session listens through the mod, or does not listen.
+
+   > Amended 2026-11-23 (#1316, #1108): `attend run` was the only process that registered a session in the instance registry (ADR-129), so the host takes that over. It registers its session's instance slot as it starts and refreshes it with the tick loop's minute touch. A host started with `--moved-from` first moves the old id's slot to the new id, so the session's name keeps its suffix across `/clear`. A listening session with a host therefore shows its suffix, and a session with none shows its bare nickname.
 
 6. **The update check is a shipped command sensor.** No update-specific code goes into attend. The check is a `command` sensor whose argv runs `ways`. attend's trigger logic reads the JSON and decides.
    - **The ways side.** `ways manage update --what-if --json` prints the check as one JSON document, built by `whatif::gather`, the resolver the update itself uses. In JSON mode the release notes are left out, so the check makes no GitHub REST call and needs no token. Its one network step is the `git fetch origin` that `gather` already runs in the app source. A plain `ways status --json` stays offline, which is why the check sits on the update verb and not behind a status flag.
@@ -227,6 +242,10 @@ The operator set the direction: awareness is furnished through the mod, and a se
 6. **Update check.** Add `--json` to `ways manage update --what-if` (`tools/ways-cli/src/cmd/update/`), leaving notes out in that mode. Ship `attend/sensors/ways-update.yaml`. Change the footer in `tools/ways-cli/src/cmd/show/mod.rs` and `metrics.rs`.
 7. **Delete the legacy update hook.** Remove `hooks/check-config-updates.sh`, its SessionStart entry in `settings.json`, its entry in `PROJECTED_FILES` (`tools/ways-cli/src/cmd/manifest.rs`), with the single-file projection kind if nothing else uses it, so repair withdraws the link from existing installs. Remove its fixtures in `tools/ways-cli/src/cmd/reconcile.rs`, `tests/hooks-test.sh` and `tests/installer-report-test.sh`.
 8. **Delete the Monitor path.** Remove the `Run` command in `tools/attend/src/cli.rs` and what item 5 lists from `cmd/run/` and `emit/`. Remove `attend/sensors/keepwarm.yaml`, `disclosure.yaml`, the disclosure sensor and `disclosures/messaging.md`, and the peers sensor's message scanning. Remove the run's enrollment lock and its registration in `attend-presence` and `attend-instances`. Update `tests/make-targets-test.sh`.
+
+   > Amended 2026-11-23 (#1316): removing `keepwarm.yaml` moves keepwarm's switch to `mods.attend.keepwarm`, with the one-release reading of the legacy files that item 4's note describes. The registration in `attend-instances` stays: the host registers its session now (item 5's note). Only the run's enrollment way and lock leave `attend-presence`; a record that still carries the run's lines reads as if it had none.
+
+   > Amended 2026-11-23 (#1316): three things stay for one release, so an install updated under a running 0.35.2 session does not misbehave. `attend run` is a hidden command that writes nothing, prints that awareness comes through the attend mod and to call `attend_listen` or run `ways manage mod check attend`, and exits 2: a leftover run re-executes into it when the binary updates. The observable "`attend run` is not a command" still holds, since a usage error is what it gets. The sensor guard still counts an argv of `attend run` as a host, because a 0.35.2 run predates the sensor marker and its ancestry is the only thing that keeps a command it runs from acting as the session. A user's or a project's `disclosure.yaml` or `keepwarm.yaml` is left out of the catalog and the settings screens instead of reading as invalid, and lint and `attend sensor list` name the removed sensor, and for keepwarm the config key.
 9. **Guidance.** Remove step 2 and the Monitor sections of `skills/attend/SKILL.md`, so that `/attend` calls `attend_listen` or says the mod is not loaded and how to enable it. Remove the "Without the mod" section and the `attend run` lines of `hooks/ways/softwaredev/environment/attend/attend.md` and its `macro.sh`. The synchronized copies drop from three to two. Rewrite or delete the `attend run` pages under `docs/attend-and-monitor/`, `docs/cli/attend.md`, `docs/cognitive-loop.md` and `docs/explanation/attend-messaging/`, and the `Makefile` help line.
 10. **Records.** On acceptance, edit with dated notes: ADR-406 items 2, 9, 11 and 13 and its Consequences, where they keep Monitor; ADR-403 §3, §3a and §3b; ADR-136 item 1's lane sentence; ADR-182's Decision, which describes a sensor under `attend run`.
 
@@ -235,6 +254,8 @@ The operator set the direction: awareness is furnished through the mod, and a se
 - **Turn-end delivery (probe *turn-end*).** The Stop-hook drain stays as the mod's turn-end conduit. It continues the operator's turn with whatever is pending, waking or not, and delivers only to a session the mod enrolled (`--host mod`). Without it, the mod would deliver at a turn's end only what would wake the session, and non-waking `#open` posts and event-lane reports would wait for the next waking delivery. Removing the drain once the mod can continue a turn itself (a `turn.step` hook exists in the 2.1.329 types, unverified for plugins) stays possible later and is not part of this decision.
 
   > Amended 2026-11-23: until #1316 removes `attend run`, the Stop hook also delivers to a session whose `attend run` is live, so Monitor sessions keep turn-end delivery across the release.
+
+  > Amended 2026-11-23: #1316 removed `attend run`, and this bridge with it, before a release carried either. The Stop hook delivers only to a session the mod enrolled, always in the mod's format; the CLI-format renderer and the block form for a Claude Code older than 2.1.163 went too.
 - **Dormant footer (probe *dormant footer*).** The footer shows the version only, in every session, and makes no network call. A dormant session learns of a release when asked, from `ways status` or `ways manage update --what-if`. Running the check in the footer would add a fetch to every session start and a second notice in sessions that go on to listen.
 
 ## Consequences

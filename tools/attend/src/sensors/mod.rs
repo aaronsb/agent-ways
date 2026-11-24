@@ -21,7 +21,6 @@
 
 mod command;
 mod context;
-mod disclosure;
 pub mod eval;
 mod git;
 pub mod hosted;
@@ -30,7 +29,6 @@ pub mod state;
 pub mod writer;
 
 pub use context::ContextSensor;
-pub use disclosure::DisclosureSensor;
 pub use git::GitSensor;
 
 pub use sensor_trait::{Focus, Sensor, SensorSlot};
@@ -41,16 +39,12 @@ pub use sensor_peers::PeerSensor;
 #[cfg(feature = "sensor-processes")]
 pub use sensor_processes::ProcessSensor;
 
-#[cfg(feature = "sensor-keepwarm")]
-pub use sensor_keepwarm::KeepwarmSensor;
-
 use std::time::Duration;
 
 use attend_config::sensors::Loaded;
 use sensor_spec::{Block, Kind, Lane, Severity};
 
 use crate::config::Config;
-use crate::groups::Groups;
 use hosted::{FileSensor, Poll};
 
 /// A sensor's recorded state, as `attend sensor list` and the settings
@@ -322,61 +316,27 @@ fn claim_crates(all: &mut [Hosted]) {
     }
 }
 
-/// Whether this build has the compiled sensor `id` and an enabled file runs
-/// it. It reads the files and builds `id` alone, so no other sensor's state
-/// is read.
-#[cfg_attr(not(feature = "sensor-keepwarm"), allow(dead_code))]
-pub fn crate_enabled(cfg: &Config, project: &str, id: &str) -> bool {
-    let loaded = attend_config::sensors::load(std::path::Path::new(project), &cfg.project_sensors);
-    runs_crate(&loaded, id) && compiled(id).is_some()
-}
-
-/// Whether an enabled file of `loaded` names the compiled sensor `id`.
-#[cfg_attr(not(feature = "sensor-keepwarm"), allow(dead_code))]
-fn runs_crate(loaded: &[Loaded], id: &str) -> bool {
-    loaded.iter().filter(|l| !l.is_refused()).filter_map(|l| l.spec.as_ref()).any(|s| s.enabled && matches!(&s.block, Block::Crate(c) if c.id == id))
-}
-
 /// A compiled sensor's description and source, when this build has it.
 pub fn compiled(id: &str) -> Option<Compiled> {
     let s: Box<dyn Sensor> = match id {
         "context" => Box::new(ContextSensor::new()),
         "git" => Box::new(GitSensor::new()),
-        "disclosure" => Box::new(DisclosureSensor::new()),
         #[cfg(feature = "sensor-peers")]
         "peers" => Box::new(PeerSensor::new()),
         #[cfg(feature = "sensor-processes")]
         "processes" => Box::new(ProcessSensor::new()),
-        #[cfg(feature = "sensor-keepwarm")]
-        "keepwarm" => Box::new(KeepwarmSensor::new(String::new(), std::path::PathBuf::new())),
         _ => return None,
     };
     Some(Compiled { description: s.description().to_string(), source: s.source() })
 }
 
-/// What a running sensor needs beyond its file: the peers sensor reads the
-/// config and the groups, and a recorded sensor keys its store by the
-/// session.
-#[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
+/// What a running sensor needs beyond its file: an mcp sensor reads the
+/// config, and a recorded sensor keys its store by the session.
 pub struct Ctx<'a> {
     pub cfg: &'a Config,
-    pub groups: Option<&'a Groups>,
     /// The session its reports go to; none when the caller has no id.
     pub session: Option<&'a str>,
-    /// Built for the sensor host ([`register_host_sensors`]): the peers
-    /// sensor reports presence alone, since the mod's drain carries
-    /// messages.
-    pub host: bool,
 }
-
-/// The compiled sensors the sensor host does not run. The mod takes
-/// keepwarm's wake from `attend keepwarm check`, and its preamble covers
-/// what the disclosure sensor re-printed.
-///
-/// References:
-/// - ADR-416 items 4 and 5: keepwarm's wake is not a signal, and the
-///   disclosure sensor leaves the host.
-const NOT_HOSTED: &[&str] = &["keepwarm", "disclosure"];
 
 /// The sensor `h` configures, ready to poll, or why it cannot run here.
 pub fn build(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result<Box<dyn Sensor>, String> {
@@ -401,36 +361,14 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
     let inner: Box<dyn Sensor> = match c.id.as_str() {
         "context" => Box::new(ContextSensor::new()),
         "git" => Box::new(GitSensor::new()),
-        "disclosure" => Box::new(DisclosureSensor::new()),
         #[cfg(feature = "sensor-processes")]
         "processes" => Box::new(match c.fields.get("watch").and_then(|w| w.as_sequence()) {
             // A list, even empty, replaces the sensor's own.
             Some(list) => ProcessSensor::with_watch(list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()),
             None => ProcessSensor::new(),
         }),
-        // Pinned to this session's transcript, so a peer session in the same
-        // project is never its idle clock (ADR-182).
-        #[cfg(feature = "sensor-keepwarm")]
-        "keepwarm" => {
-            let ident = attend_presence::session::identity();
-            if !ident.session_resolved {
-                return Err("no resolved session id, so no transcript to read".into());
-            }
-            Box::new(KeepwarmSensor::new(ident.session_id.clone(), crate::util::keepwarm_dir()))
-        }
         #[cfg(feature = "sensor-peers")]
-        "peers" => {
-            let mut p = PeerSensor::new();
-            p.set_presence_only(ctx.host);
-            // Group membership is re-read on every poll, so a focus group
-            // joined or left mid-session counts without a restart (ADR-118).
-            if let Some(groups) = ctx.groups {
-                let groups = groups.clone();
-                p.set_receive_dirs_provider(std::sync::Arc::new(move |origin: &str| groups.receive_dirs(origin)));
-            }
-            p.set_peer_activity_window(ctx.cfg.engagement.peer_activity_window);
-            Box::new(p)
-        }
+        "peers" => Box::new(PeerSensor::new()),
         id => return Err(format!("crate {id} is not compiled into this attend")),
     };
     Ok(FileSensor::new(spec.name.clone(), spec.cadence, inner, project, ctx.session, record))
@@ -466,30 +404,21 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
     s
 }
 
-/// The slots `attend run` polls, and their names, for the session found by
-/// process ancestry.
-pub fn register_sensors(cfg: &Config, focus: &Focus, _catchup: bool, groups: &Groups) -> (Vec<SensorSlot>, Vec<String>) {
-    let ident = attend_presence::session::identity();
-    let ctx = Ctx { cfg, groups: Some(groups), session: ident.session_resolved.then_some(ident.session_id.as_str()), host: false };
-    register(&ctx, focus)
-}
-
 /// The slots the sensor host of `session` polls, and their names: every
-/// sensor `attend run` would poll but keepwarm and disclosure, with the
-/// peers sensor reporting presence alone, on the event lane, since
-/// presence is no one's words.
+/// sensor that runs, with the peers sensor on
+/// the event lane, since presence is no one's words.
 ///
 /// References:
 /// - ADR-416 items 4 and 5: what the host runs, and the lane rule.
 pub fn register_host_sensors(cfg: &Config, focus: &Focus, session: &str) -> (Vec<SensorSlot>, Vec<String>) {
-    let ctx = Ctx { cfg, groups: None, session: Some(session), host: true };
+    let ctx = Ctx { cfg, session: Some(session) };
     register(&ctx, focus)
 }
 
 /// The lane the sensor host runs `h` on, and so the lane `attend sensor
 /// poll` and `fire` deliver it on: its file's, but the event lane for the
-/// peers sensor, which the host runs presence-only, since presence is no
-/// one's words.
+/// peers sensor, which reports presence alone, since presence is no one's
+/// words.
 ///
 /// References:
 /// - ADR-416 item 4: the lane rule.
@@ -520,11 +449,7 @@ fn register(ctx: &Ctx, focus: &Focus) -> (Vec<SensorSlot>, Vec<String>) {
             }
             continue;
         }
-        if ctx.host && h.crate_id().is_some_and(|id| NOT_HOSTED.contains(&id)) {
-            crate::emit::log(&format!("sensor {}: the sensor host does not run it", h.name()));
-            continue;
-        }
-        let lane = if ctx.host { host_lane(&h) } else { h.lane().unwrap_or(Lane::Event) };
+        let lane = host_lane(&h);
         match build(&h, ctx, &focus.working_dir, true) {
             Ok(sensor) => {
                 slots.push(slot(sensor, lane, h.crate_id()));
@@ -543,7 +468,7 @@ pub fn deliverable(text: &str) -> String {
     crate::cmd::inbox::defuse_fence(&one)
 }
 
-/// What decides the sensors `attend run` polls: each user and project
+/// What decides the sensors the sensor host polls: each user and project
 /// sensor file's path, length and modification time, and the trusted
 /// projects of `attend.project_sensors`.
 pub type Stamp = (Vec<(std::path::PathBuf, u64, Option<std::time::SystemTime>)>, Vec<String>);
@@ -612,7 +537,7 @@ mod tests {
             let (krate, version) = c.source.split_once('@').unwrap_or_else(|| panic!("{}: {}", h.name(), c.source));
             assert!(!krate.is_empty() && version.matches('.').count() >= 2, "{}: {}", h.name(), c.source);
         }
-        assert!(compiled_n >= 3, "context, git and disclosure are always compiled");
+        assert!(compiled_n >= 2, "context and git are always compiled");
         let ex = all.iter().find(|h| h.name() == "example-mcp").unwrap();
         assert_eq!(ex.state, State::Off);
     }
@@ -621,10 +546,9 @@ mod tests {
     fn the_lane_comes_from_the_file() {
         let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), "/nonexistent/p", |_| None);
         let lane = |n: &str| all.iter().find(|h| h.name() == n).and_then(Hosted::lane);
-        assert_eq!(lane("peers"), Some(Lane::Message));
-        assert_eq!(lane("keepwarm"), Some(Lane::Message));
+        assert_eq!(lane("peers"), Some(Lane::Event), "the shipped file names no lane");
         assert_eq!(lane("git"), Some(Lane::Event));
-        assert_eq!(lane("chat"), Some(Lane::Message), "the peers crate's lane, under any name");
+        assert_eq!(lane("chat"), Some(Lane::Event), "a crate file with no lane rides the event lane");
         let chat = all.iter().find(|h| h.name() == "chat").unwrap();
         assert_eq!(chat.crate_id(), Some("peers"));
     }
@@ -636,16 +560,7 @@ mod tests {
         let all = catalog_of(loaded(&[("chat", "kind: crate\ncrate: peers\n"), ("peers", "enabled: false\n")]), "/nonexistent/p", |_| None);
         let lane = |n: &str| all.iter().find(|h| h.name() == n).map(host_lane);
         assert_eq!(lane("chat"), Some(Lane::Event), "the peers crate, under any name and whatever its file says");
-        assert_eq!(lane("keepwarm"), Some(Lane::Message));
         assert_eq!(lane("git"), Some(Lane::Event));
-    }
-
-    #[test]
-    fn a_crate_runs_when_an_enabled_file_names_it() {
-        assert!(runs_crate(&loaded(&[]), "keepwarm"));
-        assert!(!runs_crate(&loaded(&[("keepwarm", "enabled: false\n")]), "keepwarm"));
-        assert!(runs_crate(&loaded(&[("keepwarm", "enabled: false\n"), ("wake", "kind: crate\ncrate: keepwarm\n")]), "keepwarm"));
-        assert!(!runs_crate(&loaded(&[]), "nope"));
     }
 
     /// Only a sensor file changes the stamp: a swap file, a lock or any

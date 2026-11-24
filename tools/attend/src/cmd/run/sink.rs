@@ -3,15 +3,11 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! Where the tick loop puts what the governor lets through: a [`Sink`].
-//! `attend run` uses [`Monitor`], which prints Monitor lines on stdout; the
-//! sensor host writes signals (`host.rs`).
-
-use crate::emit;
+//! The sensor host's writes system signals (`host.rs`).
 
 /// One sensor's disclosed lines.
 pub(super) struct Disclosure {
     pub(super) sensor: String,
-    pub(super) priority: &'static str,
     /// The magnitude the sensor accumulated.
     pub(super) magnitude: f64,
     pub(super) message_lane: bool,
@@ -37,18 +33,4 @@ pub(super) trait Sink {
     /// disclosure. A written or cut line spends a session trigger; a failed
     /// one releases it to fire again.
     fn deliver(&mut self, batch: &[Disclosure]) -> Vec<Vec<Delivery>>;
-}
-
-/// `attend run`'s sink: Monitor lines on stdout. A low-priority batch is
-/// logged, not printed: the cut.
-pub(super) struct Monitor;
-
-impl Sink for Monitor {
-    fn deliver(&mut self, batch: &[Disclosure]) -> Vec<Vec<Delivery>> {
-        let lines: Vec<(String, String, Vec<String>)> =
-            batch.iter().map(|d| (d.sensor.clone(), d.priority.to_string(), d.lines.iter().map(|(l, _)| l.clone()).collect())).collect();
-        emit::emit_batch(&lines);
-        let verdict = |d: &Disclosure| if d.priority == "low" { Delivery::Cut } else { Delivery::Written };
-        batch.iter().map(|d| vec![verdict(d); d.lines.len()]).collect()
-    }
 }

@@ -18,52 +18,44 @@ use std::path::{Path, PathBuf};
 
 use agent_settings::schema::LayerScope;
 use agent_settings::Layer;
-use sensor_spec::{Block, Lane, Origin, Problem, SensorSpec, Severity};
+use sensor_spec::{Block, Origin, Problem, SensorSpec, Severity};
 use serde_yaml::Value;
 
 /// The shipped sensor files, by name.
 pub const SHIPPED: &[(&str, &str)] = &[
     ("context", include_str!("../../../attend/sensors/context.yaml")),
-    ("disclosure", include_str!("../../../attend/sensors/disclosure.yaml")),
     ("example-command", include_str!("../../../attend/sensors/example-command.yaml")),
     ("example-mcp", include_str!("../../../attend/sensors/example-mcp.yaml")),
     ("git", include_str!("../../../attend/sensors/git.yaml")),
-    ("keepwarm", include_str!("../../../attend/sensors/keepwarm.yaml")),
     ("peers", include_str!("../../../attend/sensors/peers.yaml")),
     ("processes", include_str!("../../../attend/sensors/processes.yaml")),
     ("ways-update", include_str!("../../../attend/sensors/ways-update.yaml")),
 ];
 
-/// A compiled sensor a `crate` file may name: its own fields, the item
-/// fields that can stand as its author on the message lane, and the lane it
-/// always rides, with why, when its files may not choose one.
+/// A compiled sensor a `crate` file may name: its own fields, and the item
+/// fields that can stand as its author on the message lane.
 #[derive(Debug, Clone, Copy)]
 pub struct Crate {
     pub id: &'static str,
     pub fields: &'static [&'static str],
     pub authors: &'static [&'static str],
-    pub lane: Option<(Lane, &'static str)>,
 }
 
 /// The compiled sensors attend has, whether or not this build includes them.
+/// The peers sensor's `sender` author is deprecated (see [`crate_problems`]).
 pub const CRATES: &[Crate] = &[
-    Crate { id: "context", fields: &[], authors: &[], lane: None },
-    Crate { id: "disclosure", fields: &[], authors: &[], lane: None },
-    Crate { id: "git", fields: &[], authors: &[], lane: None },
-    Crate {
-        id: "keepwarm",
-        fields: &[],
-        authors: &[],
-        lane: Some((Lane::Message, "ADR-182: no refractory or lapsed cache may hold the timed wake")),
-    },
-    Crate {
-        id: "peers",
-        fields: &[],
-        authors: &["sender"],
-        lane: Some((Lane::Message, "it carries what people wrote, which the event lane drops on a lapsed cache")),
-    },
-    Crate { id: "processes", fields: &["watch"], authors: &[], lane: None },
+    Crate { id: "context", fields: &[], authors: &[] },
+    Crate { id: "git", fields: &[], authors: &[] },
+    Crate { id: "peers", fields: &[], authors: &["sender"] },
+    Crate { id: "processes", fields: &["watch"], authors: &[] },
 ];
+
+/// What lint says of `author: sender` on the peers sensor. The sensor read
+/// messages for `attend run` and named each one's sender as its author;
+/// it reports presence alone now, which has no author. The shipped file
+/// dropped the field, and a user's override that still sets it keeps
+/// loading, with this warning, for one release after #1316.
+const SENDER_DEPRECATED: &str = "author: sender is deprecated: the peers sensor reads no messages now, so its items have no sender; delete author and lane: message from this file, which loads with them for one more release";
 
 /// `$XDG_CONFIG_HOME/attend/sensors/`, beside the user config file.
 pub fn user_dir() -> PathBuf {
@@ -73,6 +65,92 @@ pub fn user_dir() -> PathBuf {
 /// A project's sensor files: `<dir>/.claude/attend/sensors/`.
 pub fn project_dir(dir: &Path) -> PathBuf {
     dir.join(".claude").join("attend").join("sensors")
+}
+
+/// The sensors attend shipped before #1316 and no longer has. A user's or a
+/// project's file of one of these names is no sensor of its own: the
+/// catalog and the settings screens leave it out, and lint and `attend
+/// sensor list` say to delete it ([`removed_files`]), where it would read
+/// as invalid with no shipped file under it.
+// #1316 grace: remove after the next release.
+pub const REMOVED: &[&str] = &["disclosure", "keepwarm"];
+
+/// The files the user and the project `dir` keep for a [`REMOVED`] sensor,
+/// by name, the user's before the project's.
+pub fn removed_files(dir: &Path) -> Vec<(&'static str, PathBuf)> {
+    let mut out = Vec::new();
+    for d in [user_dir(), project_dir(dir)] {
+        for name in REMOVED {
+            let p = d.join(format!("{name}.yaml"));
+            if p.is_file() {
+                out.push((*name, p));
+            }
+        }
+    }
+    out
+}
+
+/// The `keepwarm.yaml` files the user and the project `dir` still keep, from
+/// when a shipped keepwarm sensor file switched keepwarm on, and whether
+/// their `enabled` comes to false. The project's file wins over the user's,
+/// as the layers did, and a file that does not set `enabled` leaves it to
+/// the one below. The shipped file is gone, and `mods.attend.keepwarm` is
+/// the switch; `enabled: false` was the documented opt-out, so `attend
+/// keepwarm check` honours it for one release rather than start waking a
+/// session that opted out. `None` when neither file exists.
+// #1316 grace: remove after the next release.
+pub fn legacy_keepwarm(dir: &Path) -> Option<(Vec<PathBuf>, bool)> {
+    let files: Vec<PathBuf> = removed_files(dir).into_iter().filter(|(n, _)| *n == "keepwarm").map(|(_, p)| p).collect();
+    if files.is_empty() {
+        return None;
+    }
+    // The project's file, last in `files`, is read first.
+    let enabled = files
+        .iter()
+        .rev()
+        .find_map(|p| std::fs::read_to_string(p).ok().and_then(|t| serde_yaml::from_str::<Value>(&t).ok()).and_then(|v| v.get("enabled").and_then(Value::as_bool)));
+    Some((files, enabled == Some(false)))
+}
+
+/// What `attend sensor list`, lint and `attend keepwarm check` say of the
+/// legacy `keepwarm.yaml` files ([`legacy_keepwarm`]), naming each.
+pub fn legacy_keepwarm_note(paths: &[PathBuf], off: bool) -> String {
+    let names: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+    let (verb, it) = if names.len() == 1 { ("switches", "the file") } else { ("switch", "the files") };
+    let honoured = if off { "; this release still honours their enabled: false as an opt-out, and the next one will not" } else { "" };
+    format!(
+        "{} no longer {verb} keepwarm: set `ways settings set mods.attend.keepwarm off` (or on) and delete {it}{honoured}",
+        names.join(" and ")
+    )
+}
+
+/// What lint and `attend sensor list` say of a file for a [`REMOVED`]
+/// sensor: a warning naming the removed sensor, and for keepwarm the config
+/// key that replaced it.
+pub fn removed_notes(dir: &Path) -> Vec<(PathBuf, String)> {
+    let keepwarm = legacy_keepwarm(dir);
+    removed_files(dir)
+        .into_iter()
+        .map(|(name, p)| {
+            let note = match (name, &keepwarm) {
+                ("keepwarm", Some((paths, off))) => legacy_keepwarm_note(paths, *off),
+                _ => format!("the {name} sensor was removed; delete this file"),
+            };
+            (p, note)
+        })
+        .collect()
+}
+
+/// [`removed_notes`] as lint lines: `<file>: [attend.sensors.<name>] <name>:
+/// warning: <note>`.
+pub fn removed_lint(dir: &Path) -> Vec<String> {
+    removed_notes(dir)
+        .into_iter()
+        .map(|(p, note)| {
+            let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+            format!("{}: [attend.sensors.{name}] {name}: warning: {note}", p.display())
+        })
+        .collect()
 }
 
 /// Where the app projects the shipped files:
@@ -217,7 +295,16 @@ pub fn from_layers(layers: &[Layer], project: &Path, trusted: &[String]) -> Vec<
         by_name.entry(name.to_string()).or_default().push(Read { origin, path: l.path.clone(), text });
     }
     let trust = is_trusted(project, trusted);
-    by_name.into_iter().filter(|(_, reads)| !only_switches(reads)).map(|(name, reads)| layer(name, reads, trust, project)).collect()
+    by_name
+        .into_iter()
+        .filter(|(name, reads)| !only_switches(reads) && !is_removed(name, reads))
+        .map(|(name, reads)| layer(name, reads, trust, project))
+        .collect()
+}
+
+/// Whether `name` is a [`REMOVED`] sensor that no shipped file defines.
+fn is_removed(name: &str, reads: &[Read]) -> bool {
+    REMOVED.contains(&name) && reads.iter().all(|r| r.origin != Origin::Builtin)
 }
 
 /// Whether every file of a name sets nothing but `enabled`, `probe` or
@@ -343,7 +430,6 @@ fn check(name: String, files: Vec<SensorFile>, docs: &[(Origin, Option<PathBuf>,
     let mut spec = parsed.spec;
     if let Some(s) = &mut spec {
         problems.extend(crate_problems(s));
-        fix_lane(s, doc.get("lane").is_some(), &mut problems);
     }
     let invalid = problems.iter().any(|p| p.severity == Severity::Invalid);
     for problem in problems {
@@ -360,22 +446,6 @@ fn check(name: String, files: Vec<SensorFile>, docs: &[(Origin, Option<PathBuf>,
     }
     let command_from = docs.iter().rev().find(|(_, _, v)| ["argv", "env", "cwd", "server"].iter().any(|k| v.get(*k).is_some())).map(|(o, _, _)| *o);
     Loaded { name, files, spec: if invalid { None } else { spec }, findings, refused: None, command_from }
-}
-
-/// Put a compiled sensor with a fixed lane ([`Crate::lane`]) on that lane,
-/// whatever its files declare, with an error where one declares another.
-fn fix_lane(s: &mut SensorSpec, declared: bool, problems: &mut Vec<Problem>) {
-    let Block::Crate(c) = &s.block else { return };
-    let Some(Crate { id, lane: Some((lane, why)), .. }) = CRATES.iter().find(|k| k.id == c.id).copied() else { return };
-    problems.retain(|p| p.at != "lane");
-    if declared && s.declared_lane != lane {
-        let message = format!("the {id} sensor rides the {} lane: {why}; lane: {} is ignored", lane.as_str(), s.declared_lane.as_str());
-        problems.push(Problem { at: "lane".into(), message, severity: Severity::Error });
-    }
-    s.declared_lane = lane;
-    if s.lane() != lane {
-        s.fixed_lane = Some(why.to_string());
-    }
 }
 
 /// A crate file's checks against the compiled sensor it names.
@@ -398,6 +468,8 @@ fn crate_problems(s: &SensorSpec) -> Vec<Problem> {
     if let Some(a) = &s.author {
         if !known.authors.contains(&a.as_str()) {
             out.push(bad("author", format!("the {} sensor has no item field {a}", c.id)));
+        } else if c.id == "peers" && a == "sender" {
+            out.push(Problem { at: "author".into(), message: SENDER_DEPRECATED.into(), severity: Severity::Warning });
         }
     }
     out
@@ -449,7 +521,9 @@ pub fn layers(project: Option<&Path>) -> Vec<Layer> {
             && l.get(&["sensors".into(), name.into()]).and_then(Value::as_mapping).is_some_and(|m| m.keys().all(|k| k.as_str() == Some("enabled")))
     };
     let switches: Vec<String> = out.iter().map(|(n, _)| n.clone()).filter(|n| out.iter().filter(|(m, _)| m == n).all(|(_, l)| switch(l, n))).collect();
-    let mut out: Vec<Layer> = out.into_iter().filter(|(n, _)| !switches.contains(n)).map(|(_, l)| l).collect();
+    // A file for a removed sensor is no layer: lint names it ([`removed_lint`]).
+    let gone = |n: &str| REMOVED.contains(&n) && !SHIPPED.iter().any(|(s, _)| *s == n);
+    let mut out: Vec<Layer> = out.into_iter().filter(|(n, _)| !switches.contains(n) && !gone(n)).map(|(_, l)| l).collect();
     let trusted = trusted_projects();
     for loaded in from_layers(&out, project.unwrap_or(Path::new("")), &trusted) {
         mark(&mut out, &loaded);
@@ -579,7 +653,9 @@ pub fn trusted_projects() -> Vec<String> {
 /// Every finding in the sensor files for `project`, one line each:
 /// `<file>:<line>: [attend.sensors.<name>] <field>: <message>`.
 pub fn lint(project: &Path) -> Vec<String> {
-    load(project, &trusted_projects()).iter().flat_map(lint_lines).collect()
+    let mut out: Vec<String> = load(project, &trusted_projects()).iter().flat_map(lint_lines).collect();
+    out.extend(removed_lint(project));
+    out
 }
 
 /// [`lint`]'s lines for one sensor.
@@ -660,12 +736,12 @@ mod tests {
         assert_eq!(s.lane(), sensor_spec::Lane::Event);
         let lines = lint_lines(&l);
         let want = format!(
-            "{}:3: [attend.sensors.git] lane_exception: error: lane_exception is removed from the sensor spec and is ignored; delete it. peers and keepwarm keep the message lane without it",
+            "{}:3: [attend.sensors.git] lane_exception: error: lane_exception is removed from the sensor spec and is ignored; delete it",
             path.display()
         );
         assert!(lines.contains(&want), "{lines:#?}");
         assert!(l.findings.iter().any(|f| f.problem.at == "lane" && f.problem.severity == Severity::Error), "the author rule still holds: {:?}", l.findings);
-        let l = layer("wake".into(), vec![read(Origin::Builtin, "kind: crate\ncrate: keepwarm\nlane: message\nlane_exception: ADR-182\n")], false, Path::new("/p"));
+        let l = layer("wake".into(), vec![read(Origin::Builtin, "kind: crate\ncrate: git\nlane_exception: ADR-182\n")], false, Path::new("/p"));
         assert_eq!(l.findings.iter().map(|f| (f.problem.at.as_str(), f.problem.severity)).collect::<Vec<_>>(), [("lane_exception", Severity::Error)]);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -801,20 +877,49 @@ mod tests {
         assert_eq!(l.item().origin, agent_settings::item::Origin::User, "the refused project file is not merged");
     }
 
-    /// peers and keepwarm keep the message lane under any file name, and a
-    /// file that declares another lane for them is ignored with an error.
+    /// No compiled sensor has a fixed lane: the shipped peers file rides
+    /// the event lane, and a user's override that still carries the
+    /// `lane: message` and `author: sender` the file shipped with before
+    /// #1316 loads, with a deprecation warning on the author and nothing
+    /// else. An author the sensor never had stays invalid.
     #[test]
-    fn the_peers_and_keepwarm_crates_keep_the_message_lane_whatever_their_files_say() {
+    fn a_peers_override_naming_the_old_sender_author_loads_with_a_deprecation_warning() {
         let shipped = |n: &str| read(Origin::Builtin, SHIPPED.iter().find(|(m, _)| *m == n).unwrap().1);
-        let l = layer("peers".into(), vec![shipped("peers"), read(Origin::Project, "lane: event\n")], false, Path::new("/p"));
-        assert_eq!(l.spec.as_ref().map(|s| s.lane()), Some(sensor_spec::Lane::Message));
-        assert!(l.findings.iter().any(|f| f.problem.at == "lane" && f.problem.severity == Severity::Error && f.problem.message.contains("lane: event is ignored")), "{:?}", l.findings);
-        for (name, id) in [("chat", "peers"), ("wake", "keepwarm")] {
-            let l = layer(name.into(), vec![read(Origin::User, &format!("kind: crate\ncrate: {id}\n"))], false, Path::new("/p"));
-            assert_eq!(l.spec.as_ref().map(|s| s.lane()), Some(sensor_spec::Lane::Message), "{name}");
-            assert!(l.findings.is_empty(), "{name}: {:?}", l.findings);
-        }
-        assert!(layer("peers".into(), vec![shipped("peers")], false, Path::new("/p")).findings.is_empty());
+        let l = layer("peers".into(), vec![shipped("peers")], false, Path::new("/p"));
+        assert!(l.findings.is_empty(), "{:?}", l.findings);
+        assert_eq!(l.spec.as_ref().map(|s| s.lane()), Some(sensor_spec::Lane::Event));
+        let l = layer("peers".into(), vec![shipped("peers"), read(Origin::User, "lane: message\nauthor: sender\n")], false, Path::new("/p"));
+        let found: Vec<(&str, Severity)> = l.findings.iter().map(|f| (f.problem.at.as_str(), f.problem.severity)).collect();
+        assert_eq!(found, [("author", Severity::Warning)], "{:?}", l.findings);
+        assert!(l.findings[0].problem.message.starts_with("author: sender is deprecated"), "{:?}", l.findings);
+        assert!(l.spec.is_some(), "the override still loads");
+        let l = layer("peers".into(), vec![shipped("peers"), read(Origin::User, "lane: message\nauthor: who\n")], false, Path::new("/p"));
+        assert!(l.is_invalid(), "{:?}", l.findings);
+    }
+
+    /// A user's or a project's file for a removed shipped sensor is no
+    /// sensor, whatever it sets, so it reads as nothing rather than as
+    /// invalid; lint names it instead ([`removed_lint`]).
+    // #1316 grace: remove after the next release.
+    #[test]
+    fn a_file_for_a_removed_sensor_is_left_out() {
+        let layers = [
+            file_layer("disclosure", Origin::User, None, "interval: 90\n"),
+            file_layer("keepwarm", Origin::Project, None, "interval: 90\nenabled: false\n"),
+            file_layer("git", Origin::Builtin, None, SHIPPED.iter().find(|(n, _)| *n == "git").unwrap().1),
+        ];
+        let loaded = from_layers(&layers, Path::new("/p"), &[]);
+        let names: Vec<&str> = loaded.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["git"]);
+    }
+
+    /// The keepwarm crate is gone: a file that names it names no compiled
+    /// sensor.
+    #[test]
+    fn a_keepwarm_crate_file_names_no_compiled_sensor() {
+        let l = layer("keepwarm".into(), vec![read(Origin::User, "kind: crate\ncrate: keepwarm\n")], false, Path::new("/p"));
+        assert!(l.is_invalid(), "{:?}", l.findings);
+        assert!(l.findings.iter().any(|f| f.problem.at == "crate" && f.problem.message.starts_with("names no compiled sensor")), "{:?}", l.findings);
     }
 
     #[test]

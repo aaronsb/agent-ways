@@ -7,7 +7,7 @@
 //! mod keeps it.
 //!
 //! The host polls the sensors the files declare for the session's
-//! directory through the same tick loop as `attend run`: scheduling,
+//! directory through the tick loop: scheduling,
 //! intervals and decay, the event lane's salience, refractory and governor,
 //! the checkpoint, the stamp sweep and the re-exec on a changed binary or
 //! sensor file. What the governor lets through becomes a system signal in
@@ -17,11 +17,16 @@
 //!
 //! It has no message poller, no wake gate, no banner and no rekey: the
 //! mod's drain delivers what it writes, the mod spawns a new host after a
-//! `/clear`, and it does not run the keepwarm or disclosure sensors. The
+//! `/clear`, and it does not run the keepwarm sensor. The
 //! peers sensor reports presence alone. With `--moved-from` the stores and
 //! the session memory of the id the session had before `/clear` carry
 //! over, so a trigger kept for the session that fired under the old id
 //! stays spent.
+//!
+//! The host holds the session's instance slot, the suffix of the name
+//! peers see it by, and refreshes it every minute. With `--moved-from` the
+//! old id's slot moves to the new id before the host registers, so the
+//! name stays the same across `/clear`.
 //!
 //! TERM, HUP or INT ends the host at its next look, within a second: it
 //! returns, and the sensors it drops end their MCP servers. A host killed
@@ -30,8 +35,9 @@
 //!
 //! References:
 //! - ADR-416 items 2 to 5: the host, its stdout, the store as transport,
-//!   the system sender and what the host keeps of `attend run`.
+//!   the system sender and what the host runs.
 //! - ADR-416 item 8: stores keyed by session, carried by a session's move.
+//! - ADR-129: the instance slot and its suffix.
 
 use std::collections::BinaryHeap;
 use std::io::Write;
@@ -74,7 +80,7 @@ fn end_on_signals() {
 
 /// The host's sink: each line a system signal, and a cue on stdout. An
 /// event-lane batch under the cut ([`crate::sensors::writer::EVENT_CUT`]) is
-/// logged and not written, as `attend run` logged it and did not print it.
+/// logged and not written.
 struct Signals {
     writer: Writer,
     /// A cue met a closed stdout: the mod stopped reading, and the host
@@ -155,6 +161,8 @@ pub(crate) fn cmd_host(a: &HostArgs) {
         let moved = sensors::hosted::move_stores(old, &session);
         emit::log(&format!("moved {moved} sensor store(s) from {old}"));
     }
+    let registry = attend_instances::Registry::new();
+    register(&registry, &focus.working_dir, &session, moved_from);
 
     let swept = sensors::sweep_mcp_servers(&focus.working_dir);
     if swept > 0 {
@@ -194,10 +202,8 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     let mut msg_governor = DisclosureGovernor::new_permissive(Duration::from_secs(3), 30, Duration::from_secs(60));
     let mut queue: BinaryHeap<ScheduledSensor> = slots.iter().enumerate().map(|(index, s)| ScheduledSensor { fire_at: s.next_fire, index }).collect();
     let mut last_checkpoint = Instant::now();
-    let mut peers_checkpointed_once = false;
     let mut last_instance_touch = Instant::now();
     let mut last_cleanup: Option<Instant> = None;
-    let registry = attend_instances::Registry::new();
     let mut sink = Signals { writer, closed: false };
 
     let self_exe = std::env::current_exe().ok();
@@ -231,22 +237,25 @@ pub(crate) fn cmd_host(a: &HostArgs) {
         if next > now {
             std::thread::sleep(next - now);
         }
+        // A signal that came during the sleep ends the host before it polls
+        // again, so it writes nothing more for a session that moved on.
+        if STOP.load(Ordering::Relaxed) {
+            emit::log("asked to end by a signal; the sensor host exits");
+            return;
+        }
         tick::tick_iteration(&mut TickState {
             slots: &mut slots,
             queue: &mut queue,
             governor: &mut governor,
             msg_governor: &mut msg_governor,
             last_checkpoint: &mut last_checkpoint,
-            peers_checkpointed_once: &mut peers_checkpointed_once,
             last_instance_touch: &mut last_instance_touch,
-            register_instances: false,
             last_cleanup: &mut last_cleanup,
             state_store: &state_store,
             instance_registry: &registry,
             focus: &focus,
             heartbeat_id: &session,
             cfg: &cfg,
-            cache_gate: None,
             sink: &mut sink,
         });
         if sink.closed {
@@ -270,6 +279,25 @@ fn parent_id() -> u32 {
 /// parent's id alone answers.
 fn is_gone(parent: Option<u32>) -> bool {
     parent.is_some_and(|pid| !attend_presence::process::is_running(pid))
+}
+
+/// Take or keep session `session`'s instance slot in `cwd`, the suffix of
+/// its name (`Chaucer-alpha`). After `/clear` the slot of the id the
+/// session had before moves to the new id first, so the name does not
+/// change; registering first would allocate the new id a slot of its own.
+/// The tick loop refreshes it every minute ([`attend_instances::Registry::keep`]),
+/// which takes a new slot should it have been collected and leaves an
+/// alias row alone.
+fn register(registry: &attend_instances::Registry, cwd: &str, session: &str, moved_from: Option<&str>) {
+    if let Some(old) = moved_from {
+        if let Err(e) = registry.rename(cwd, old, session) {
+            emit::log(&format!("instance slot of {old} not moved ({e})"));
+        }
+    }
+    match registry.register(cwd, session) {
+        Ok(instance) => emit::log(&format!("instance: {instance}")),
+        Err(e) => emit::log(&format!("instance registry unavailable ({e}); the session's name has no suffix")),
+    }
 }
 
 /// The session's checkpoint, with the session memory of the id it had

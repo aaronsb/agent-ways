@@ -188,6 +188,23 @@ impl Registry {
         gc_age: Duration,
         now: u64,
     ) -> io::Result<String> {
+        self.upsert(cwd, session_id, gc_age, now, false).map(Option::unwrap_or_default)
+    }
+
+    /// The periodic refresh of `session_id`'s slot in `cwd`, which a sensor
+    /// host runs every minute: [`register`](Self::register), except that a
+    /// row that is an alias stays an alias and nothing is written. After
+    /// `/clear` the new host renames the old id's slot to the new id
+    /// ([`rename`](Self::rename)); the old host, still running until the mod
+    /// ends it, must not then take a fresh slot for the old id and undo the
+    /// rename. Returns the instance held, or `None` for an alias.
+    pub fn keep(&self, cwd: &str, session_id: &str) -> io::Result<Option<String>> {
+        self.upsert(cwd, session_id, DEFAULT_GC_AGE, agent_fmt::when::now_secs(), true)
+    }
+
+    /// [`register_with_age`](Self::register_with_age) and [`keep`](Self::keep):
+    /// with `alias_stays`, an alias row under `session_id` is left alone.
+    fn upsert(&self, cwd: &str, session_id: &str, gc_age: Duration, now: u64, alias_stays: bool) -> io::Result<Option<String>> {
         fs::create_dir_all(&self.base_dir)?;
         let path = self.path_for(cwd);
 
@@ -206,6 +223,9 @@ impl Registry {
         // register/touch on this cwd can be mid-write.
         let content = fs::read_to_string(&path).unwrap_or_default();
         let mut map = parse_registry(&content);
+        if alias_stays && map.get(session_id).is_some_and(|e| !e.is_slot()) {
+            return Ok(None);
+        }
 
         // GC: drop any entry whose `last_seen` is older than gc_age,
         // *unless* it is our own session — we never evict ourselves
@@ -223,7 +243,7 @@ impl Registry {
             write_registry(&path, &map)?;
             drop(lock_file);
             self.evict_elsewhere(cwd, session_id);
-            return Ok(instance);
+            return Ok(Some(instance));
         }
 
         let instance = allocate(&mut map, session_id, now);
@@ -238,7 +258,7 @@ impl Registry {
         // a failed eviction is exactly the pre-existing GC-bounded
         // staleness, never worse.
         self.evict_elsewhere(cwd, session_id);
-        Ok(instance)
+        Ok(Some(instance))
     }
 
     /// Move `old`'s slot in `cwd` to `new`, for a session whose id changed
@@ -246,7 +266,7 @@ impl Registry {
     /// name, or keeps its own when it already holds a slot. `old` stays as
     /// an alias of `new` with `new`'s instance until GC, so the messages it
     /// sent read as the live session's name. Does nothing when `old` holds
-    /// no slot: only `attend run` registers. Returns `new`'s instance when
+    /// no slot: only a sensor host registers. Returns `new`'s instance when
     /// it has one.
     pub fn rename(&self, cwd: &str, old: &str, new: &str) -> io::Result<Option<String>> {
         fs::create_dir_all(&self.base_dir)?;
@@ -861,6 +881,24 @@ sess-a:
             // No old slot: nothing is registered for the new id.
             assert_eq!(reg.rename("/x", "gone", "sess-d").unwrap(), None);
             assert!(!reg.snapshot("/x").contains_key("sess-d"));
+        });
+    }
+
+    /// A dying old host's minute refresh after `/clear` leaves the old id an
+    /// alias of the new one, where `register` would take it a fresh slot.
+    /// `keep` refreshes a slot, and allocates for an id with no row.
+    #[test]
+    fn keep_leaves_an_alias_an_alias() {
+        with_registry(|reg| {
+            reg.register("/x", "a").unwrap();
+            reg.register("/x", "b").unwrap();
+            reg.rename("/x", "b", "c").unwrap();
+            assert_eq!(reg.keep("/x", "b").unwrap(), None);
+            let snap = reg.snapshot("/x");
+            assert_eq!(snap["b"].alias_of.as_deref(), Some("c"), "b is still an alias");
+            assert_eq!(reg.successor("/x", "b").as_deref(), Some("c"));
+            assert_eq!(reg.keep("/x", "c").unwrap().as_deref(), Some("beta"), "the slot is refreshed");
+            assert_eq!(reg.keep("/x", "d").unwrap().as_deref(), Some("gamma"), "an id with no row is allocated");
         });
     }
 

@@ -48,6 +48,8 @@ The design note at `docs/architecture/attend/ADR-400-attend-messaging-disclosure
 
 ## Decision
 
+> Amended 2026-11-23 by ADR-416 (#1316): the disclosure sensor, its shipped file and its `messaging.md` reheat are removed. The attend mod's preamble cadence covers what it re-printed, and the messaging guidance lives in two synchronized copies, the `/attend` primer and the attend way.
+
 Attend gains a new workspace crate, `sensor-disclosure`, implementing `sensor_trait::Sensor`. The sensor's signal is **token distance since last disclosure for each registered component**, rather than environmental change. Its shape is otherwise ordinary: poll returns observations, the accumulator aggregates, the engagement and governor machinery from ADR-117 and ADR-119 apply unchanged, and each observation becomes one stdout line wrapped by `emit::emit_batch`.
 
 **The sensor is a sensor in the ordinary sense of the word.** It is not a new architectural layer, not an emit-pipeline stage, not a framework extension. This framing is load-bearing: no new cross-sensor coupling, no new trait, no pre-emit hook. The disclosure batches alongside peer-message arrivals *emergently* — when both sensors are ready to disclose in the same governor window, the existing batch assembly puts them in one `emit_batch` call and Monitor groups them into one notification via its 200ms batching window. When timing does not align, the disclosure sensor fires standalone at its own tick. Either outcome delivers the teaching to Claude.

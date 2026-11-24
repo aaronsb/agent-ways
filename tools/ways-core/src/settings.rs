@@ -402,7 +402,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("true"),
         scope: Scope::Machine,
         doc: "Whether `ways manage repair` installs the attend mod in Claude Code.",
-        long: "Read per target, from the user file and the target's own file; a project cannot set it. false and a repair uninstall the mod and remove the agent-ways marketplace where no other mod of ours is installed or wanted, and the mod lists nothing where it is still loaded; /attend then falls back to Monitor (ADR-406 item 11).",
+        long: "Read per target, from the user file and the target's own file; a project cannot set it. false and a repair uninstall the mod and remove the agent-ways marketplace where no other mod of ours is installed or wanted, and the mod lists nothing where it is still loaded; /attend then says the mod is not loaded and how to enable it.",
         ..BASE
     },
     KeySpec {

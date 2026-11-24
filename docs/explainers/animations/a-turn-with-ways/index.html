@@ -108,10 +108,10 @@ const BEATS = [
   [58, 66, 'Subagents get their own', 'Dispatching a subagent: its task is matched against ways scoped to subagents, and SubagentStart injects them. The subagent keeps its own fire record.'],
   [66, 72, 'The turn ends', 'Stop: Claude’s reply is recorded for the next prompt’s matching, and the attend drain checks for peer messages. None are pending, so the turn ends.'],
   [72, 82, 'Re-disclosure', 'As the window fills, a fired way decays. After its refire fraction (0.15 of the window here) a new match re-injects it to course-correct.'],
-  [82, 90, 'Many sessions, one bus', 'attend runs under Monitor in each session. Sensors watch context, git, peers and processes, and surface only what is worth a notification.'],
+  [82, 90, 'Many sessions, one bus', 'The attend mod listens in each session and starts its sensor host. Sensors watch context, git, peers and processes, and surface only what is worth a report.'],
   [90, 98, 'A busy session hears at the boundary', 'Session A sends a message. Session B is mid-turn, so its Stop hook delivers the message at the turn boundary and B’s turn continues with it.'],
-  [98, 108, 'The person is on the bus too', 'In attend-chat the person reads the same messages and writes to the sessions. An idle session is woken by its Monitor line.'],
-  [108, 120, 'Two kinds of delivery', 'Ways: guidance at the moment of action, through hooks. Attend: awareness between turns, through Monitor and the turn boundary.'],
+  [98, 108, 'The person is on the bus too', 'In attend-chat the person reads the same messages and writes to the sessions. An idle session is woken by its attend mod.'],
+  [108, 120, 'Two kinds of delivery', 'Ways: guidance at the moment of action, through hooks. Attend: awareness between turns, through the attend mod and the turn boundary.'],
 ];
 const DURATION = BEATS[BEATS.length - 1][1];
 
@@ -340,10 +340,10 @@ function sessionPanel(x, name, dir) {
   box(gg, x, 170, 560, 420);
   txt(gg, x + 24, 210, name, { size: 24, weight: 600 });
   txt(gg, x + 24, 236, dir, { size: 15, font: MONO, fill: C.muted });
-  const mon = pill(gg, x + 24, 256, 290, 'Monitor · attend run', { h: 34, size: 15, stroke: '#92400e', color: C.amber });
+  const mon = pill(gg, x + 24, 256, 290, 'attend mod · sensor host', { h: 34, size: 15, stroke: '#92400e', color: C.amber });
   // Offsets sized to each label, since Monoid sets wide.
-  const SENSOR_X = [0, 100, 160, 240, 360];
-  const sensors = ['context', 'git', 'peers', 'processes', 'keepwarm'].map((s, i) => {
+  const SENSOR_X = [0, 100, 160, 240];
+  const sensors = ['context', 'git', 'peers', 'processes'].map((s, i) => {
     const sx = x + 34 + SENSOR_X[i];
     const dot = el('circle', { cx: sx, cy: 326, r: 8, fill: C.dim }, gg);
     txt(gg, sx + 14, 332, s, { size: 13, font: MONO, fill: C.muted });
@@ -374,7 +374,7 @@ txt(bus, 960, 690, 'the attend bus · project trays, _broadcast, @channels', { s
 const lanes = g(MV);
 txt(lanes, 60, 780, 'DELIVERY', { size: 15, font: MONO, fill: C.muted });
 const laneBusy = txt(lanes, 60, 820, 'busy session → Stop hook drains at the turn boundary', { size: 20, font: MONO, fill: C.text });
-const laneIdle = txt(lanes, 60, 860, 'idle session → the peers sensor’s Monitor line wakes it', { size: 20, font: MONO, fill: C.text });
+const laneIdle = txt(lanes, 60, 860, 'idle session → the attend mod’s poll wakes it', { size: 20, font: MONO, fill: C.text });
 const laneSeen = txt(lanes, 60, 900, 'both record delivery in one seen-set: at most once per session', { size: 20, font: MONO, fill: C.muted });
 const packets = g(MV);
 function packet(color, path, a, b) {
@@ -410,7 +410,7 @@ function endCol(x, color, head, lines) {
   return gg;
 }
 const end1 = endCol(60, C.em, 'ways', ['guidance at the moment of action', 'hooks: SessionStart, prompt, tools, Stop', 'keyword + semantic lanes, one rule', 'an optional yes/no judge, outside', 'stamped per agent, re-disclosed later']);
-const end2 = endCol(680, C.amber, 'attend', ['awareness between turns', 'sensors under Monitor in each session', 'messages are not lost to a busy turn', 'Stop-hook drain when busy', 'Monitor line when idle']);
+const end2 = endCol(680, C.amber, 'attend', ['awareness between turns', 'a sensor host in each session', 'messages are not lost to a busy turn', 'Stop-hook drain when busy', 'the attend mod’s poll when idle']);
 const end3 = endCol(1300, C.human, 'the person', ['on the same bus as the sessions', 'attend-chat to read and write', 'steers by prompt, or by message', 'each session hears a message at most once', '']);
 
 // ── render one frame ─────────────────────────────────────────────────────────
@@ -555,14 +555,14 @@ function render(t) {
   set(sA.state, { fill: t < 91 ? C.em : C.muted });
   const bBusy = t < 96.5;
   const bCont = t >= 96.5 && t < 99.5;
-  sB.state.textContent = bBusy ? 'turn running · editing the form' : bCont ? 'turn continues with A’s message' : (t >= 103.2 && t < 106.5 ? 'woken by its Monitor line' : 'idle');
+  sB.state.textContent = bBusy ? 'turn running · editing the form' : bCont ? 'turn continues with A’s message' : (t >= 103.2 && t < 106.5 ? 'woken by its attend mod' : 'idle');
   set(sB.state, { fill: bBusy || bCont ? C.em : (t >= 103.2 && t < 106.5 ? C.amber : C.muted) });
   sA.line1.textContent = t >= 90.5 ? '$ attend message send "api auth change is pushed"' : '';
   sA.line3.textContent = t >= 106.8 ? 'peers: B (web): on it, rebasing now' : '';
   set(sA.line3, { fill: C.amber });
   sB.line1.textContent = t >= 93.5 && t < 96.5 ? 'queued: B is mid-turn' : (t >= 96.5 ? '[attend] 1 peer message at the turn boundary' : '');
   sB.line2.textContent = t >= 96.5 ? 'A (api): api auth change is pushed' : '';
-  // The wake: the peers sensor's Monitor line, then B's reply.
+  // The wake: the attend mod's poll, then B's reply.
   sB.line3.textContent = t >= 103.2 ? 'peers: message from you: rebase on A’s change' : '';
   set(sB.line3, { fill: C.amber });
   sB.line4.textContent = t >= 104 ? '$ attend message reply "on it, rebasing now"' : '';

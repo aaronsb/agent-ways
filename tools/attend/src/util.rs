@@ -85,7 +85,7 @@ pub(crate) fn own_origin_cwd() -> String {
 
 /// When session `ident` is not enrolled but its Claude Code process enrolled
 /// under an earlier id (`/clear` gives the process a new one), move that
-/// enrollment here with its seen-set and channels, as `attend run` would.
+/// enrollment here with its seen-set and channels.
 /// Returns whether `ident` is enrolled afterwards. The process key costs a
 /// `ps` off Linux, so it is computed only when some enrollment was ever
 /// recorded under a process key.
@@ -100,12 +100,11 @@ pub(crate) fn adopt_previous_enrollment(ident: &Session) -> bool {
         .and_then(|key| enrollment::previous_id(&key, &ident.session_id));
     let Some(old) = previous else { return false };
     attend_membership::move_session(&attend_membership::Bus::here(), &old, &ident.session_id, &ident.origin_path);
-    // The record moved with any pending opt-out; this applies it.
     enrollment::is_enrolled(&ident.session_id)
 }
 
-/// Enroll session `ident` by `source`: `attend listen on`, a channel join,
-/// or `attend run`. A session that was not listening before has its cold
+/// Enroll session `ident` by `source`: `attend listen on`, or a channel
+/// join. A session that was not listening before has its cold
 /// start reopened (`StateStore::reopen_cold_start`), and its enrollment
 /// record notes when it started listening. Whichever way it listens again,
 /// the next conduit delivers what was addressed to its project since its
@@ -123,12 +122,6 @@ pub(crate) fn enroll_as(
     host: Option<attend_presence::enrollment::Host>,
 ) -> std::io::Result<bool> {
     enroll_with(ident, |sid| attend_presence::enrollment::enroll(sid, source, host))
-}
-
-/// [`enroll_as`] for the `attend run` that took the session's lock at
-/// `since` ([`attend_presence::enrollment::enroll_run`]).
-pub(crate) fn enroll_run(ident: &Session, since: u64) -> std::io::Result<bool> {
-    enroll_with(ident, |sid| attend_presence::enrollment::enroll_run(sid, since))
 }
 
 fn enroll_with(ident: &Session, write: impl FnOnce(&str) -> std::io::Result<()>) -> std::io::Result<bool> {
@@ -239,8 +232,8 @@ pub(crate) fn join_display(nickname: &str, instance: Option<&str>) -> String {
 
 /// After this session's channels changed: a session in no channel any more
 /// withdraws the enrollment a join or an add gave it
-/// ([`attend_membership::release`]). One that also turned listening on or
-/// ran `attend run` stays enrolled through that.
+/// ([`attend_membership::release`]). One that also turned listening on
+/// stays enrolled through that.
 pub(crate) fn settle_channel_enrollment(ident: &Session) {
     if ident.resolved() {
         attend_membership::release(&attend_membership::Bus::here(), &ident.session_id);

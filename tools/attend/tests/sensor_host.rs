@@ -14,88 +14,12 @@
 mod common;
 
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
+use std::path::Path;
+use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use common::Fixture;
+use common::{Fixture, Host};
 use serde_json::Value;
-
-/// A running `attend sensor host`, or the wrapper that runs one, its
-/// stdout and stderr in files. It leads its own process group, which drop
-/// ends.
-struct Host {
-    child: Child,
-    out: PathBuf,
-    err: PathBuf,
-}
-
-impl Host {
-    fn start(f: &Fixture, session: &str, extra: &[&str]) -> Host {
-        let n = std::fs::read_dir(&f.home).map(|d| d.count()).unwrap_or(0);
-        let (out, err) = (f.home.join(format!("host-{n}.out")), f.home.join(format!("host-{n}.err")));
-        let child = f
-            .command()
-            .args(["sensor", "host", "--session", session, "--cwd", &f.origin])
-            .args(extra)
-            .process_group(0)
-            .stdout(Stdio::from(std::fs::File::create(&out).unwrap()))
-            .stderr(Stdio::from(std::fs::File::create(&err).unwrap()))
-            .spawn()
-            .unwrap();
-        Host { child, out, err }
-    }
-
-    fn stdout(&self) -> String {
-        std::fs::read_to_string(&self.out).unwrap_or_default()
-    }
-
-    fn stderr(&self) -> String {
-        std::fs::read_to_string(&self.err).unwrap_or_default()
-    }
-
-    fn wait_for(&self, what: &str, limit: Duration, done: impl Fn() -> bool) {
-        let start = Instant::now();
-        while start.elapsed() < limit {
-            if done() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        panic!("timed out waiting for {what}; the host logged:\n{}", self.stderr());
-    }
-
-    /// End it at once, as a crash or `kill -9` would.
-    fn kill(mut self) {
-        self.child.kill().ok();
-        self.child.wait().ok();
-    }
-}
-
-impl Drop for Host {
-    /// SIGTERM to the child's process group, so a host under a wrapper
-    /// ends with it: `timeout` would forward a TERM, but a shell that waits
-    /// on the host does not. A SIGKILL to the wrapper alone would leave the
-    /// host running until it noticed its parent gone. SIGKILL follows when
-    /// the child has not exited within five seconds.
-    fn drop(&mut self) {
-        if !matches!(self.child.try_wait(), Ok(None)) {
-            return;
-        }
-        // SAFETY: kill(2) on the process group the child leads. The child
-        // is not reaped yet, so its pid still names that group.
-        unsafe { libc::kill(-(self.child.id() as libc::pid_t), libc::SIGTERM) };
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {
-            if !matches!(self.child.try_wait(), Ok(None)) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        self.child.kill().ok();
-        self.child.wait().ok();
-    }
-}
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
@@ -199,9 +123,8 @@ fn the_host_writes_a_trigger_as_a_system_signal_and_cues_each_write() {
 /// checkpoint.
 const CHECKPOINTED: &str = "a session trigger is spent; checkpointed";
 
-/// An event-lane batch under the cut of 3.0 is logged and not written, as
-/// `attend run` logged it and did not print it; one at the cut is written,
-/// and a message-lane line, which has no cut, is written whatever its
+/// An event-lane batch under the cut of 3.0 is logged and not written, one
+/// at the cut is written, and a message-lane line, which has no cut, is written whatever its
 /// magnitude. A test fire under the cut writes nothing either.
 #[test]
 fn an_event_batch_under_the_cut_writes_no_signal() {
@@ -259,44 +182,6 @@ fn a_line_the_governor_holds_is_cut_once_and_not_offered_again() {
     assert_eq!(log.matches("low: under the event lane's cut (1.0 of 3.0), not written: low is up").count(), 1, "{log}");
     let low_after = polls(&f, "low") - low_before;
     assert!(low_after <= 6, "low polled {low_after} times while high polled ten: its interval did not back off");
-}
-
-/// `attend run`'s stderr, which holds its log and its quiet events.
-fn run_err(f: &Fixture) -> String {
-    std::fs::read_to_string(f.home.join("run.err")).unwrap_or_default()
-}
-
-/// Under `attend run` a session line under the cut is logged once as a
-/// quiet event and spent, as on main: Monitor never prints it, and later
-/// polls offer nothing.
-#[test]
-fn attend_run_logs_a_low_session_line_once() {
-    let f = quiet("run-low");
-    beacon_at(&f, "low", 1, "memory: session");
-    let run = f.run();
-    run.wait_for("six polls of low", Duration::from_secs(30), |_| polls(&f, "low") >= 6);
-    drop(run);
-    assert_eq!(run_err(&f).matches("quiet (low): low is up").count(), 1, "{}", run_err(&f));
-    assert!(!std::fs::read_to_string(f.home.join(format!("run-{}.out", f.sid))).unwrap_or_default().contains("low is up"));
-}
-
-/// Under `attend run` a session line the cache gate drops is not offered
-/// again while the cache stays lapsed, so nothing churns; once the cache is
-/// warm the trigger fires again and its line goes out, once.
-#[test]
-fn attend_run_offers_a_gated_session_line_again_once_the_cache_is_warm() {
-    let f = quiet("run-gated");
-    f.last_turn(Some(Duration::from_secs(61 * 60)));
-    beacon(&f, "beacon", "memory: session");
-    let run = f.run();
-    run.wait_for("eight polls on a lapsed cache", Duration::from_secs(30), |_| polls(&f, "beacon") >= 8);
-    assert_eq!(run_err(&f).matches("beacon: dropped 1 event(s), the prompt cache has lapsed").count(), 1, "{}", run_err(&f));
-    assert!(!run.output().contains("beacon is up"), "{}", run.output());
-    f.last_turn(Some(Duration::ZERO));
-    run.wait_for("the line once the cache is warm", Duration::from_secs(30), |r| r.output().contains("beacon is up"));
-    let after = polls(&f, "beacon");
-    run.wait_for("four more polls", Duration::from_secs(30), |_| polls(&f, "beacon") >= after + 4);
-    assert_eq!(run.output().matches("beacon is up").count(), 1, "{}", run.output());
 }
 
 /// A trigger kept for the session is spent when its line is written, and
@@ -381,6 +266,51 @@ fn without_moved_from_a_new_id_fires_once_of_its_own() {
     let new = Host::start(&f, "sess-new", &[]);
     new.wait_for("the new id's signal", Duration::from_secs(20), || from(&f, "beacon").len() == 2);
     assert!(from(&f, "beacon").iter().any(|(_, t)| t.contains("|to:sess-new|")));
+}
+
+/// The name `attend peer whoami --display` prints for the fixture's
+/// session.
+fn display_name(f: &Fixture) -> String {
+    f.ok(&["peer", "whoami", "--display"]).trim().to_string()
+}
+
+/// The instance `sid` holds in the fixture's project, from the registry.
+fn instance(f: &Fixture, sid: &str) -> Option<String> {
+    attend_instances::Registry::with_base(f.cache().join("instances")).lookup(&f.origin, sid)
+}
+
+/// The host takes the session's instance slot as it starts, so its name
+/// carries a suffix: nothing else registers a listening session (#1108).
+#[test]
+fn a_host_registers_the_session_and_whoami_shows_its_suffix() {
+    let f = quiet("host-register");
+    let bare = display_name(&f);
+    assert!(!bare.contains('-'), "no suffix before a host runs: {bare}");
+    let host = Host::start(&f, &f.sid, &[]);
+    host.wait_for("the instance slot", Duration::from_secs(20), || instance(&f, &f.sid).is_some());
+    assert_eq!(instance(&f, &f.sid).as_deref(), Some("alpha"));
+    assert_eq!(display_name(&f), format!("{bare}-alpha"));
+}
+
+/// After `/clear` the host started with `--moved-from` moves the old id's
+/// slot to the new id before it registers, so the suffix stays. A second
+/// session holds alpha, so the old id holds beta, and a new id registering
+/// on its own would take gamma.
+#[test]
+fn a_host_with_moved_from_keeps_the_old_suffix() {
+    let f = quiet("host-rename");
+    let other = Host::start(&f, "sess-other", &[]);
+    other.wait_for("the other session's slot", Duration::from_secs(20), || instance(&f, "sess-other").is_some());
+    let old = Host::start(&f, "sess-old", &[]);
+    old.wait_for("the old id's slot", Duration::from_secs(20), || instance(&f, "sess-old").is_some());
+    assert_eq!(instance(&f, "sess-old").as_deref(), Some("beta"));
+    drop(old);
+    f.set_session_id("sess-new");
+    let bare = display_name(&f);
+    let new = Host::start(&f, "sess-new", &["--moved-from", "sess-old"]);
+    new.wait_for("the new id's slot", Duration::from_secs(20), || instance(&f, "sess-new").is_some());
+    assert_eq!(instance(&f, "sess-new").as_deref(), Some("beta"), "the new id keeps the old suffix");
+    assert_eq!(display_name(&f), format!("{bare}-beta"));
 }
 
 /// A command the host runs does not act as the session: its `attend

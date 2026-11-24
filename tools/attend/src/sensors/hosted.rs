@@ -23,7 +23,7 @@
 //! The file carries its format. A file of another format, such as one
 //! written before stores were keyed by session, or one whose sensor,
 //! project and session are not the key asked for, reads as no store, and
-//! the sensor starts from a baseline. When `attend run` registers its
+//! the sensor starts from a baseline. When the sensor host registers its
 //! sensors, [`sweep`] removes the files of an older format and every store
 //! past the retention limit. It leaves a newer format alone, so a newer
 //! attend on the same machine keeps its stores.
@@ -720,10 +720,6 @@ impl Sensor for FileSensor {
 
     fn dropped(&mut self, description: &str) {
         self.release(description);
-    }
-
-    fn waits_on(&self, description: &str) -> bool {
-        self.awaits(description)
     }
 
     fn take_spent(&mut self) -> bool {

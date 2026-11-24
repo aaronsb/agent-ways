@@ -347,27 +347,6 @@ fn unread_counts_only_what_the_session_reads() {
     assert_eq!(u["unread"], 1, "{u}");
 }
 
-/// Under `attend run` (Monitor), a line wakes the session, so the poller
-/// prints a message only once something addressed to the session is pending.
-/// An `#open` post alone stays unread; it goes out with the next one that
-/// wakes.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_monitor_poller_wakes_only_for_an_addressed_message() {
-    let f = Fixture::new("addr-monitor-wake");
-    let run = f.run();
-    run.wait_for("the startup line", std::time::Duration::from_secs(30), |r| r.output().contains("you are"));
-    signal(&f, "_broadcast", "x-1-1", "claude:x|p|/tmp/p|to:*|chatter on open");
-    // Three polls at the fixture's one-second interval.
-    std::thread::sleep(std::time::Duration::from_secs(3));
-    assert!(!run.output().contains("chatter on open"), "an #open post wakes no one: {}", run.output());
-    let u: serde_json::Value = serde_json::from_str(&f.ok(&["message", "unread", "--json"])).unwrap();
-    assert_eq!(u["unread"], 1, "and stays unread: {u}");
-    signal(&f, &f.project_tray(), "x-1-2", &format!("claude:x|p|/tmp/p|to:{}|for you", f.sid));
-    run.wait_for("the direct message", std::time::Duration::from_secs(30), |r| r.output().contains("for you"));
-    assert!(run.output().contains("chatter on open"), "what was pending goes with it: {}", run.output());
-}
-
 /// `attend message reply` with no `re`, as `attend_reply` sends it when the agent
 /// gives no handle, answers the newest message the drain delivered by the
 /// same rule: a person gets a direct message, a live session gets one in
@@ -519,43 +498,6 @@ fn the_inbox_names_attends_notice_as_attend() {
     assert_eq!(text.lines().next(), Some("From: attend (ways-update)"), "{text}");
     let table = f.ok(&["message", "inbox"]);
     assert!(table.contains("[project] attend (ways-update)\n"), "{table}");
-}
-
-/// Under `attend run` the peers sensor delivers beta's direct message and a
-/// newer notice from attend; a reply with no `re` goes to beta. The notice
-/// rides the message lane, since an event-lane one never wakes the poller.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_monitor_poller_leaves_attends_notice_out_of_the_reply_target() {
-    let f = Fixture::new("addr-system-monitor");
-    let _beta = Peer::start(&f, "beta-sess", "proj");
-    let run = f.run();
-    run.wait_for("the startup line", Duration::from_secs(30), |r| r.output().contains("you are"));
-    let tray = f.project_tray();
-    signal(&f, &tray, "beta-sess-1-1", &format!("claude:beta-sess|proj|{}|to:{}|alpha, a question", f.origin, f.sid));
-    run.wait_for("beta's message", Duration::from_secs(30), |r| r.output().contains("alpha, a question"));
-    signal(&f, &tray, "git-1-2", &format!("system:git|proj|{}|from_kind:system|from_id:git|to:{}|lane:message|branch switched to main", f.origin, f.sid));
-    run.wait_for("attend's notice", Duration::from_secs(30), |r| r.output().contains("message from attend (git)"));
-
-    let out = f.attend(&["message", "reply", "--json", "--", "an answer"]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!((sent["re"].as_str(), sent["to"].as_str()), (Some("beta-sess-1-1"), Some("beta-sess")));
-}
-
-/// Under `attend run`, beta's direct message in the shared tray stays off
-/// alpha's Monitor line, even in the poll where alpha's own wakes it.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn the_monitor_poller_leaves_a_siblings_direct_message_unread() {
-    let f = Fixture::new("addr-monitor-filter");
-    let run = f.run();
-    run.wait_for("the startup line", std::time::Duration::from_secs(30), |r| r.output().contains("you are"));
-    let tray = f.project_tray();
-    signal(&f, &tray, "x-1-1", "claude:x|p|/tmp/p|to:beta-sess|FOR-BETA");
-    signal(&f, &tray, "x-1-2", &format!("claude:x|p|/tmp/p|to:{}|FOR-ALPHA", f.sid));
-    run.wait_for("alpha's message", std::time::Duration::from_secs(30), |r| r.output().contains("FOR-ALPHA"));
-    assert!(!run.output().contains("FOR-BETA"), "{}", run.output());
 }
 
 // ── channel posts addressed to someone (PR #974 review, O2) ──────────────

@@ -14,8 +14,8 @@
 //!
 //! The move of a session's state to its new id after `/clear`
 //! ([`move_session`]) lives here too: attend runs it when the session next
-//! drains or starts `attend run`, and an add runs it for the session it
-//! adds, before it enrolls the new id.
+//! drains or listens, and an add runs it for the session it adds, before
+//! it enrolls the new id.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -432,8 +432,8 @@ impl Pending {
 
 /// After `member` lost a channel: once it is in no channel, the enrollment
 /// a join or an add gave it is withdrawn, as leaving its last channel
-/// withdraws it. One that also turned listening on or ran `attend run`
-/// stays enrolled through that. The check and the withdrawal run under the
+/// withdraws it. One that also turned listening on stays enrolled through
+/// that. The check and the withdrawal run under the
 /// channels lock, so an add landing at the same time keeps its enrollment.
 /// A bus that waits a bounded time for the lock tries once more when it is
 /// busy. Returns false when it was busy both times, and nothing was

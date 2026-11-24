@@ -404,66 +404,54 @@ attend_macro() {  # scope listen-json channels-json enabled-plugins [unread-json
     FIX="$FIX" WAYS_SCOPE="$1" CLAUDE_AGENT_ID="${AGENT_ID:-}" WAYS_ENABLED_PLUGINS="$4" PATH="$ATTEND_SHIMS:$SYSBIN" \
         "$BASH_BIN" "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1
 }
-listen() {  # listening host run_live
-    printf '{"session_id":"s1","resolved":true,"listening":%s,"via":[],"host":%s,"run_live":%s}' "$1" "$2" "$3"
+listen() {  # listening host
+    printf '{"session_id":"s1","resolved":true,"listening":%s,"via":[],"host":%s}' "$1" "$2"
 }
 MOD_ON=$'other@x\nattend@agent-ways'
-START_MOD='call `attend_listen` when that tool is listed; otherwise start `Monitor: attend run`'
-START_MON='start `Monitor: attend run`'
+START_MOD='call `attend_listen` when that tool is listed; without it the attend mod is not loaded, nothing reaches this session, and the attend CLI works by hand'
+START_OFF='note that the attend mod is not enabled here, so nothing reaches this session and the attend CLI works by hand; `ways manage mod install attend --commit` installs the mod for the next session'
 DEPLOY='[{"name":"deploy","pinned":false}]'
 check "attend macro: listening through the mod" \
-    $'**Status**: listening through the attend mod. Send with `attend_send` and `attend_reply`; do not start Monitor.\n**Channels**: this session hears project, #open, #deploy' \
-    "$(attend_macro agent "$(listen true '"mod"' false)" "$DEPLOY" "$MOD_ON")"
-check "attend macro: attend run under Monitor" \
-    $'**Status**: `attend run` is live under Monitor for this session.\n**Channels**: this session hears project, #open' \
-    "$(attend_macro agent "$(listen true null true)" '[]' '')"
-check "attend macro: attend run beside a listening mod" \
-    $'**Status**: listening through the attend mod, and `attend run` is also live under Monitor. ADR-406 item 9 says not to run both: the mod is enough, so the Monitor can stop.\n**Channels**: this session hears project, #open' \
-    "$(attend_macro agent "$(listen true '"mod"' true)" '[]' "$MOD_ON")"
-check "attend macro: turn end only, attend plugin enabled" \
-    "**Status**: listening at the end of each turn only; nothing wakes an idle session. For that, $START_MOD."$'\n**Channels**: this session hears project, #open' \
-    "$(attend_macro agent "$(listen true null false)" '[]' "$MOD_ON")"
-check "attend macro: turn end only, no plugins enabled" \
-    "**Status**: listening at the end of each turn only; nothing wakes an idle session. For that, $START_MON."$'\n**Channels**: this session hears project, #open' \
-    "$(attend_macro agent "$(listen true null false)" '[]' '')"
-check "attend macro: turn end only, attend from another marketplace" \
-    "**Status**: listening at the end of each turn only; nothing wakes an idle session. For that, $START_MON."$'\n**Channels**: this session hears project, #open' \
-    "$(attend_macro agent "$(listen true null false)" '[]' 'attend@elsewhere')"
+    $'**Status**: listening through the attend mod. Send with `attend_send` and `attend_reply`.\n**Channels**: this session hears project, #open, #deploy' \
+    "$(attend_macro agent "$(listen true '"mod"')" "$DEPLOY" "$MOD_ON")"
+check "attend macro: listening without the mod, attend plugin enabled" \
+    "**Status**: listening without the attend mod, so nothing is delivered to this session. For delivery, $START_MOD." \
+    "$(attend_macro agent "$(listen true null)" '[]' "$MOD_ON")"
+check "attend macro: listening without the mod, no plugins enabled" \
+    "**Status**: listening without the attend mod, so nothing is delivered to this session. For delivery, $START_OFF."$'\n**Unread**: 4 for this session' \
+    "$(attend_macro agent "$(listen true null)" '[]' '' '{"unread":4}')"
+check "attend macro: listening without the mod, attend from another marketplace" \
+    "**Status**: listening without the attend mod, so nothing is delivered to this session. For delivery, $START_OFF."$'\n**Channels**: this session joined #deploy; nothing is delivered until the attend mod listens for it' \
+    "$(attend_macro agent "$(listen true null)" "$DEPLOY" 'attend@elsewhere')"
 check "attend macro: not listening, attend plugin enabled" \
     "**Status**: not listening. If the user asks to use attend, $START_MOD."$'\n**Unread**: 3 for this session' \
-    "$(attend_macro agent "$(listen false null false)" '[]' "$MOD_ON" '{"unread":3,"held_back":0,"listening":false,"rooms":[]}')"
+    "$(attend_macro agent "$(listen false null)" '[]' "$MOD_ON" '{"unread":3,"held_back":0,"listening":false,"rooms":[]}')"
 check "attend macro: not listening, no attend plugin" \
-    "**Status**: not listening. If the user asks to use attend, $START_MON."$'\n**Channels**: this session joined #deploy; nothing is delivered until it listens' \
-    "$(attend_macro agent "$(listen false null false)" "$DEPLOY" '' '{"unread":0}')"
+    "**Status**: not listening. If the user asks to use attend, $START_OFF."$'\n**Channels**: this session joined #deploy; nothing is delivered until the attend mod listens for it' \
+    "$(attend_macro agent "$(listen false null)" "$DEPLOY" '' '{"unread":0}')"
 check "attend macro: a failing unread adds nothing" \
     "**Status**: not listening. If the user asks to use attend, $START_MOD." \
-    "$(attend_macro agent "$(listen false null false)" '[]' "$MOD_ON")"
-# Under a subagent the state is the parent's, reported with no action.
+    "$(attend_macro agent "$(listen false null)" '[]' "$MOD_ON")"
+
 check "attend macro: subagent, parent listening through the mod" \
     $'**Status**: the parent session is listening through the attend mod.\n**Channels**: the parent session hears project, #open, #deploy' \
-    "$(attend_macro subagent "$(listen true '"mod"' false)" "$DEPLOY" "$MOD_ON")"
-check "attend macro: subagent, parent run beside the mod" \
-    $'**Status**: the parent session is listening through the attend mod, and its `attend run` is also live under Monitor.\n**Channels**: the parent session hears project, #open' \
-    "$(attend_macro subagent "$(listen true '"mod"' true)" '[]' "$MOD_ON")"
-check "attend macro: subagent, parent run under Monitor" \
-    $'**Status**: the parent session\'s `attend run` is live under Monitor.\n**Channels**: the parent session hears project, #open' \
-    "$(attend_macro subagent "$(listen true null true)" '[]' '')"
-check "attend macro: subagent, parent at turn end only" \
-    $'**Status**: the parent session is listening at the end of each turn only.\n**Channels**: the parent session hears project, #open' \
-    "$(attend_macro subagent "$(listen true null false)" '[]' "$MOD_ON")"
+    "$(attend_macro subagent "$(listen true '"mod"')" "$DEPLOY" "$MOD_ON")"
+check "attend macro: subagent, parent listening without the mod" \
+    $'**Status**: the parent session listens without the attend mod, so nothing is delivered to it.' \
+    "$(attend_macro subagent "$(listen true null)" '[]' "$MOD_ON")"
 check "attend macro: subagent, parent not listening" \
     $'**Status**: the parent session is not listening. Listening is the head agent\'s call.\n**Unread**: 2 for the parent session' \
-    "$(attend_macro subagent "$(listen false null false)" '[]' "$MOD_ON" '{"unread":2}')"
+    "$(attend_macro subagent "$(listen false null)" '[]' "$MOD_ON" '{"unread":2}')"
 # A subagent's own tool call reaches the macro as WAYS_SCOPE=agent with its
 # CLAUDE_AGENT_ID set: still the parent's state, still no action.
 check "attend macro: a subagent's own call, parent not listening" \
     $'**Status**: the parent session is not listening. Listening is the head agent\'s call.' \
-    "$(AGENT_ID=a123 attend_macro agent "$(listen false null false)" '[]' "$MOD_ON")"
+    "$(AGENT_ID=a123 attend_macro agent "$(listen false null)" '[]' "$MOD_ON")"
 check "attend macro: a subagent's own call, parent listening through the mod" \
     $'**Status**: the parent session is listening through the attend mod.\n**Channels**: the parent session hears project, #open' \
-    "$(AGENT_ID=a123 attend_macro agent "$(listen true '"mod"' false)" '[]' "$MOD_ON")"
+    "$(AGENT_ID=a123 attend_macro agent "$(listen true '"mod"')" '[]' "$MOD_ON")"
 check "attend macro: says nothing for an unresolved session" "" \
-    "$(attend_macro agent '{"session_id":"x","resolved":false,"listening":false,"via":[],"host":null,"run_live":false}' '[]' "$MOD_ON")"
+    "$(attend_macro agent '{"session_id":"x","resolved":false,"listening":false,"via":[],"host":null}' '[]' "$MOD_ON")"
 check "attend macro: says nothing when listen status fails" "" "$(attend_macro agent '' '[]' "$MOD_ON")"
 # The hint takes --commit only from a ways that has it (ADR-511); a release
 # from before the flag, or no ways at all, gets the bare form.

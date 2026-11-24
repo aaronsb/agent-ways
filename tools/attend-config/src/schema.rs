@@ -92,6 +92,7 @@ const SECTIONS: &[SectionSpec] = &[
 const RETIRED: &[(&str, &str)] = &[
     ("signals", "`signals:` was retired with liveness reaping (#141) and is ignored; delete it"),
     ("sensors", "`sensors:` was retired by ADR-403 and is ignored; each sensor is a file under attend/sensors/"),
+    ("engagement.peer_activity_window", "retired with the peers sensor's message scanning and is ignored; delete it"),
 ];
 
 /// Where the sensor file for `name` goes, for a file at `scope`.
@@ -235,14 +236,6 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "attend.engagement.peer_activity_window",
-        section: "attend.engagement",
-        path: &["engagement", "peer_activity_window"],
-        default: DefaultValue::Yaml("900"),
-        doc: "Seconds of the window the peers sensor counts each peer's activity in.",
-        ..BASE
-    },
-    KeySpec {
         name: "attend.cleanup.enabled",
         section: "attend.cleanup",
         path: &["cleanup", "enabled"],
@@ -251,7 +244,7 @@ const KEYS: &[KeySpec] = &[
         // A switch fails closed (ADR-503 addendum): anything but true is off,
         // so a bad value never starts a sweep that deletes files.
         fail_closed: Some(closed_off),
-        doc: "Whether `attend run` sweeps away the signals of projects that are gone.",
+        doc: "Whether the sensor host sweeps away the signals of projects that are gone.",
         long: "Off, signals stay until `attend message cleanup` is run by hand.",
         ..BASE
     },
@@ -385,7 +378,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Choice(&["event", "message"]),
         default: DefaultValue::Yaml("event"),
         doc: "The lane the sensor's notifications ride (ADR-403 §3a).",
-        long: "message is for authored communication and needs an author field naming who composed each item; without one the sensor runs on the event lane, and lint says why. The peers and keepwarm crate sensors always ride the message lane.",
+        long: "message is for authored communication and needs an author field naming who composed each item; without one the sensor runs on the event lane, and lint says why.",
         ..SENSOR
     },
     KeySpec {

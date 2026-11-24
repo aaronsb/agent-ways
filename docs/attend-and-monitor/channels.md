@@ -10,7 +10,7 @@ A channel is a named message scope that sessions join and leave while they run. 
 | a channel | `@<name>/` | the channel's members | `attend message send --channel <name> "…"` |
 | a project | the project's tray | the sessions in that project | `attend message send --to <path> "…"` |
 
-`#open` is the base channel. Every session with attend running is in it, and it cannot be joined, left or dissolved. A send with no flag goes there. In attend-chat the same scopes are `#name`, `@Name` and the foreground tab (see [`tui.md`](tui.md#addressing)).
+`#open` is the base channel. Every listening session is in it, and it cannot be joined, left or dissolved. A send with no flag goes there. In attend-chat the same scopes are `#name`, `@Name` and the foreground tab (see [`tui.md`](tui.md#addressing)).
 
 A send to a channel with no live member other than the sender fails with `error: no live peers in channel '<name>'`, so a message is never left in a room nobody reads.
 
@@ -62,11 +62,11 @@ Membership is self-reported: a session adds and removes itself, and nothing veri
 
 ## Stale members
 
-A member is live while its heartbeat in attend's cache is fresh (90 seconds, ADR-129), or while it listens and the Claude Code process it enrolled in runs on this host. `attend run` touches a session's heartbeat on every tick, the Stop-hook drain at every turn end, the attend mod every 30 seconds through `attend listen beat`, and attend-chat touches the human's while it is open. `attend channel` prunes members that are not live, and removes any unpinned channel that pruning empties. It also removes an `@<name>/` directory that `_groups.yaml` has no entry for, once the directory is older than a grace window.
+A member is live while its heartbeat in attend's cache is fresh (90 seconds), or while it listens and the Claude Code process it enrolled in runs on this host. Every drain touches a session's heartbeat, the mod's poll and the Stop-hook drain at every turn end included, the attend mod touches it every 30 seconds through `attend listen beat`, and attend-chat touches the human's while it is open. `attend channel` prunes members that are not live, and removes any unpinned channel that pruning empties. It also removes an `@<name>/` directory that `_groups.yaml` has no entry for, once the directory is older than a grace window.
 
 ## How joined channels are read
 
-The peers sensor reads `_groups.yaml` on every poll, so a join or leave takes effect on the next scan without restarting `attend run`. Each poll scans the session's project tray, `_broadcast/`, and every joined `@<name>/`. The Stop-hook drain scans the same set. Channel messages are authored messages: they ride the message lane, with no refractory or salience gate (ADR-136). See [`delivery.md`](delivery.md).
+Every drain reads `_groups.yaml`, so a join or leave takes effect on the next drain. Each drain, whether the attend mod's poll or the Stop-hook drain, scans the session's project tray, `_broadcast/`, and every joined `@<name>/`. Channel messages are authored messages: they ride the message lane, with no refractory or salience gate. See [`delivery.md`](delivery.md).
 
 Leaving stops the scan of that directory. The signals stay on disk for the remaining members, unless the leave empties an unpinned channel, which removes the directory.
 
@@ -79,3 +79,8 @@ Leaving stops the scan of that directory. The signals stay on disk for the remai
 - **ADR-170** — the shared `attend-groups` crate and human membership
 - **ADR-173** — the channel vocabulary and chat verbs
 - `tools/attend-groups/src/lib.rs` — `Groups::join`, `leave`, `kick`, `pin`, `unpin`, `dissolve`, `cleanup_stale_with`
+
+## References
+
+- ADR-129: the 90-second heartbeat that decides whether a member is live.
+- ADR-136: channel messages ride the message lane.

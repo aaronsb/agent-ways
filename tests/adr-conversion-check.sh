@@ -36,6 +36,9 @@ live = root / 'docs/architecture'
 
 # Bodies edited on purpose after conversion: number -> reason.
 BODY_EDITED = {
+    '113': 'dated notes on the delivery primitive and the Lifecycle record that #1316 removed attend run under Monitor, per ADR-416',
+    '122': 'a dated note in the Decision records that #1316 removed the disclosure sensor, per ADR-416',
+    '129': 'a dated note on the Render bullet records that a name is shown for a listening session that runs a sensor host, per ADR-416',
     '136': 'a dated note on item 1 records that event-lane reports reach a session as system signals through the mod, per ADR-416',
     '182': 'dated notes on items 2 and 7 record that the mod submits the keepwarm wake and that the runtime disclosure is removed, per ADR-416',
     '178': 'a dated note in the Decision records two sections that left core.md for the SessionStart hook cap (#634), per ADR-313',

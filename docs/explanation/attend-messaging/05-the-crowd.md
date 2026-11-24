@@ -10,10 +10,8 @@ aliases: []
 
 # Scenario — the crowd
 
-Two Claudes feel like talking. **Five** feel like a standup that never ends — if
-everyone stays on `#open`, every message hits every session and the channel
-becomes the noise the event lane was built to suppress. The crowd is where
-**channels** and the **digest** stop being optional.
+Two Claudes feel like talking. **Five** feel like a standup that never ends — if everyone stays on `#open`, every message hits every session and the channel becomes the noise the event lane was built to suppress. The crowd is where
+**channels** and the **batched delivery** stop being optional.
 
 ## Convene loud, then split into channels
 
@@ -40,33 +38,18 @@ The pattern is **convene-then-split**:
 
 1. Someone calls it on `#open` — the commons, where everyone is. *"Big refactor;
    let's split by area."*
-2. Sessions **join channels** (`attend channel join backend`) and scope their
-   chatter to that channel (`attend message send --channel backend "…"`). The `#backend`
-   traffic no longer wakes the frontend session.
-3. Genuinely cross-cutting news goes **back to `#open`** — "migration's ready for
-   everyone." Convening on the commons and working in channels is the same move
-   humans make in a busy office.
+2. Sessions **join channels** (`attend channel join backend`) and scope their chatter to that channel (`attend message send --channel backend "…"`). The `#backend` traffic no longer wakes the frontend session.
+3. Genuinely cross-cutting news goes **back to `#open`** — "migration's ready for everyone." Convening on the commons and working in channels is the same move humans make in a busy office.
 
-Channels are workspace plumbing, not a new traffic class: a `#group` message
-is still *authored*, so it rides the durable message lane. The channel only changes
-*who's addressed*, not *whether it's delivered*.
+Channels are workspace plumbing, not a new traffic class: a `#group` message is still *authored*, so it rides the durable message lane. The channel only changes *who's addressed*, not *whether it's delivered*.
 
 ## Two scale failures the design heads off
 
-- **Sending into an empty channel.** A `#backend` message when no one else is
-  in the channel would sit unread while the sender assumes delivery. attend
-  **rejects** it with `error: no live peers in channel 'backend'` instead of
-  silently succeeding. (`#open` is exempt: it always reaches everyone.)
-- **Drowning the returnee.** A session heads-down for 20 minutes comes back to a
-  crowd that produced *17 messages*. Replaying 17 turns would bury it; the
-  **re-entry digest** collapses them — *"17 new messages: 5 to you, 12 on #open
-  (newest 2m ago, over 21m)"* — into one turn, detail on demand via `attend message inbox`.
-  Without the digest, the message lane wouldn't survive a crowd; with it, scale
-  is just a bigger number in the summary.
+- **Sending into an empty channel.** A `#backend` message when no one else is in the channel would sit unread while the sender assumes delivery. attend
+  **rejects** it with `error: no live peers in channel 'backend'` instead of silently succeeding. (`#open` is exempt: it always reaches everyone.)
+- **Drowning the returnee.** A session heads-down for 20 minutes comes back to a crowd that produced *17 messages*. Replaying 17 turns would bury it; the
+  **re-entry batch** delivers them as one turn, and the Stop-hook drain lists ten and counts the rest, detail on demand via `attend message inbox`. Without the batch, the message lane wouldn't survive a crowd; with it, scale is just a bigger count.
 
 ## The point
 
-Conversation that's delightful at two participants is *noise* at five unless it
-can **partition** (channels) and **coalesce** (the digest). The crowd is the
-stress test that proves the message lane needs both — and that `#open` must stay
-the always-reaches-everyone commons the convening pattern depends on.
+Conversation that's delightful at two participants is *noise* at five unless it can **partition** (channels) and **coalesce** (the batch). The crowd is the stress test that proves the message lane needs both — and that `#open` must stay the always-reaches-everyone commons the convening pattern depends on.

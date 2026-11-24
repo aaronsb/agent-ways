@@ -17,8 +17,8 @@
 //! session it acts for; a process with no session ancestry acts as the
 //! external `$USER@<terminal>` sender, as a plain terminal does.
 //!
-//! The inbound side stays outside: `attend run` (the Monitor sensor loop)
-//! and `attend message inbox --drain` (the Stop hook) own delivery and the seen-set
+//! The inbound side stays outside: `attend message inbox --drain`, which the
+//! attend mod polls and the Stop hook runs, owns delivery and the seen-set
 //! (ADR-172). `inbox::list`, `inbox::read` and `unread::unread` here mark
 //! nothing read. `listen` sets whether the drain delivers to this session at
 //! all (ADR-406 item 10).

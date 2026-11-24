@@ -4,8 +4,8 @@
 
 //! The Stop-hook drain delivers only to a session enrolled in attend (#720).
 //!
-//! A session is enrolled when it ran `attend run` (it holds a slot in its
-//! project's instance registry) or joined a channel. For any other session
+//! A session is enrolled when it ran `attend listen on` or joined a
+//! channel. For any other session
 //! the drain is a silent no-op: it delivers nothing, from any tray, and
 //! writes nothing, so the session does not look alive to peers or to
 //! `/purge`.
@@ -122,29 +122,4 @@ fn a_session_in_a_channel_drains_every_tray_as_before() {
     assert!(state_file(&home, "joined").exists());
     assert!(drain(&home, "plain").contains("no pending messages"));
     std::fs::remove_dir_all(&home).ok();
-}
-
-#[test]
-fn a_session_that_ran_attend_drains_every_tray_as_before() {
-    // `attend run` enrolls the session; once it has stopped, the drain is
-    // the conduit and delivers everything the session receives.
-    let f = common::Fixture::new("drain-ran");
-    {
-        let run = f.run();
-        run.wait_for("enrollment by attend run", std::time::Duration::from_secs(20), |_| {
-            f.marker(&f.sid).exists()
-        });
-    }
-    let tray = f.project_tray();
-    f.put("_broadcast", "other-1-open-msg", "open-msg", std::time::Duration::ZERO);
-    f.put(&tray, "other-1-project-msg", "project-msg", std::time::Duration::ZERO);
-    f.put("@side", "other-1-channel-msg", "channel-msg", std::time::Duration::ZERO);
-
-    let plain = f.drain("plain");
-    // Not in `@side`, so the channel tray is not read.
-    for body in ["open-msg", "project-msg"] {
-        assert!(plain.contains(body), "missing {body}: {plain}");
-    }
-    assert!(!plain.contains("channel-msg"), "{plain}");
-    assert!(f.heartbeat(&f.sid).exists());
 }

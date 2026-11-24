@@ -248,6 +248,17 @@ fn mod_setting_line(settings: Option<&str>) -> String {
     format!("mod setting mods.attend.keepwarm {value}{from}{effect}")
 }
 
+/// Whether the effective `mods.attend` settings, as
+/// `ways settings list mods.attend --json --effective` prints them, set
+/// `mods.attend.keepwarm` to `off`. Settings ways could not give read as on,
+/// as the attend mod reads them (plugins/attend/hooks/lib.ts).
+fn keepwarm_setting_off(settings: Option<&str>) -> bool {
+    settings
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|doc| doc.get("keys")?.get("mods.attend.keepwarm")?.get("value")?.as_str().map(|v| v == "off"))
+        .unwrap_or(false)
+}
+
 /// What `check --json` prints when nothing was judged: why, and when to ask
 /// again.
 fn nothing(reason: &str, next_at: Option<u64>) -> serde_json::Value {
@@ -349,6 +360,14 @@ fn prune_stale(dir: &Path, sid: &str, now: u64) {
 /// either way, so a polling host reads stdout alone. Why nothing printed
 /// goes to stderr. With `--policy` the keepalive policy judges (ADR-414);
 /// with `--json` the decision prints as one object, whatever it is.
+///
+/// It judges nothing where `mods.attend.keepwarm` is `off`, the switch the
+/// attend mod reads too. A `keepwarm.yaml` that sets `enabled: false`, the
+/// opt-out from when a shipped sensor file switched keepwarm on, is
+/// honoured as `off` for one release ([`attend_config::sensors::legacy_keepwarm`]).
+///
+/// References:
+/// - ADR-182, amendment of 2026-11-23: the config key is the switch.
 fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheckArgs) {
     let quiet = |reason: &str, next_at: Option<u64>| {
         if args.json {
@@ -361,16 +380,16 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         return quiet("no Claude session owns this process, nothing to warm", None);
     }
     let sid = ident.session_id.as_str();
-    // Under `attend run` the sensor holds the state and wakes the session;
-    // a second judge would wake it twice.
-    if attend_presence::heartbeat::run_is_live(sid) {
-        return quiet("an attend run holds this session; its sensor keeps the cache warm", None);
-    }
-    let cfg = crate::config::Config::load(&ident.origin_path);
-    if !crate::sensors::crate_enabled(&cfg, &ident.origin_path, "keepwarm") {
-        return quiet("no sensor file runs the keepwarm sensor", None);
-    }
     let now = sensor_trait::epoch_secs();
+    let dir = keepwarm_dir();
+    let settings = policy_settings(&dir, sid, &ident.origin_path, now);
+    if keepwarm_setting_off(settings.as_deref()) {
+        return quiet("mods.attend.keepwarm is off", None);
+    }
+    // #1316 grace: remove after the next release.
+    if let Some((paths, true)) = attend_config::sensors::legacy_keepwarm(std::path::Path::new(&ident.origin_path)) {
+        return quiet(&attend_config::sensors::legacy_keepwarm_note(&paths, true), None);
+    }
     if !args.policy {
         let line = check_once(sid, &keepwarm_dir(), &ident.origin_path, now);
         if args.json {
@@ -385,9 +404,8 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         return;
     }
 
-    let dir = keepwarm_dir();
     let gate = Gate::parse(&args.autocompact);
-    let mut pcfg = Config::from_settings(policy_settings(&dir, sid, &ident.origin_path, now).as_deref());
+    let mut pcfg = Config::from_settings(settings.as_deref());
     let names = |list: &Vec<String>| list.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
     pcfg.session_skills = match (&args.skills, args.skills_unread) {
         (_, true) => SessionSkills::Unread,

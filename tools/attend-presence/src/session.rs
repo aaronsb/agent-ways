@@ -14,8 +14,8 @@
 //! > UID from Claude Code's session record, paired with the *session
 //! > record's* cwd, never the process cwd.
 //!
-//! Why not process cwd: a shell `cd` that leaks into an `attend run`
-//! launch (or any subcommand) would otherwise put the session on the
+//! Why not process cwd: a shell `cd` that leaks into an attend
+//! subcommand would otherwise put the session on the
 //! bus as a different persona than its project — the "multiple
 //! personalities" failure #378 documents. The session record is the
 //! stable half of the tuple; process cwd is only ever a fallback for
@@ -364,8 +364,8 @@ pub fn marker_value(pid: u32) -> String {
 /// `command` sensor's child, an `mcp` sensor's server, and the `git` the
 /// git sensor runs, which a repository's configuration, such as
 /// `core.fsmonitor`, can make run other programs. The `ways` the context
-/// and disclosure sensors run is marked too, for uniformity with the git
-/// sensor beside them, though `ways context` runs nothing a repository
+/// sensor runs is marked too, for uniformity with the git sensor beside
+/// it, though `ways context` runs nothing a repository
 /// chooses. The processes sensor's `ps` and keepwarm's `ways` are fixed
 /// programs and are not marked. Call it after the environment is cleared or
 /// filtered and after the sensor file's own variables are added, so
@@ -416,7 +416,8 @@ fn runs_attend(pid: u32) -> bool {
 
 /// Whether `pid` runs an attend sensor host: its command line starts one
 /// ([`is_sensor_host_argv`]), or its executable file is named `attend` and
-/// its arguments are `run` or `sensor host`, whatever it calls itself.
+/// its arguments are `sensor host` (or a leftover `run`, [`host_args`]),
+/// whatever it calls itself.
 pub fn is_sensor_host(pid: u32) -> bool {
     let Some(args) = crate::process::argv(pid) else { return false };
     is_sensor_host_argv(&args) || (crate::process::exe_name(pid).is_some_and(|n| is_attend(&n)) && host_args(args.get(1..).unwrap_or_default()))
@@ -455,7 +456,7 @@ pub fn launches_argv(args: &[String], own: &[String]) -> bool {
 
 /// Whether `args` start an attend sensor host: an argument naming a
 /// program `attend`, first or after an interpreter such as `sh`, followed
-/// by `run` or by `sensor host`.
+/// by `sensor host`, or by a leftover `run` ([`host_args`]).
 pub fn is_sensor_host_argv(args: &[String]) -> bool {
     args.iter().position(|a| is_attend(a.rsplit(['/', '\\']).next().unwrap_or_default())).is_some_and(|i| host_args(&args[i + 1..]))
 }
@@ -464,9 +465,13 @@ fn is_attend(name: &str) -> bool {
     name.strip_suffix(".exe").unwrap_or(name) == "attend"
 }
 
-/// Whether the arguments after the program name a host: `run`, or
-/// `sensor host`.
+/// Whether the arguments after the program name a host: `sensor host`, or
+/// `run`. `attend run` is gone (#1316), but an `attend run` an older attend
+/// started can still be running when the binary updates, and it predates
+/// the sensor marker, so its ancestry is the only thing that keeps a
+/// command its sensors run from acting as the session.
 fn host_args(rest: &[String]) -> bool {
+    // #1316 grace: remove `run` after the next release.
     rest.first().map(String::as_str) == Some("run") || rest.get(..2).is_some_and(|r| r == ["sensor", "host"])
 }
 
@@ -639,14 +644,16 @@ mod tests {
     #[test]
     fn a_sensor_host_is_named_by_its_argv() {
         let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(is_sensor_host_argv(&args(&["attend", "run"])));
-        assert!(is_sensor_host_argv(&args(&["/home/u/.local/bin/attend", "run", "--catchup"])));
         assert!(is_sensor_host_argv(&args(&["attend", "sensor", "host", "--session", "s"])));
+        assert!(is_sensor_host_argv(&args(&["/home/u/.local/bin/attend", "sensor", "host", "--session", "s"])));
+        // #1316 grace: an older attend's leftover run still counts as a host.
+        assert!(is_sensor_host_argv(&args(&["attend", "run"])), "a leftover attend run is a host for one release");
+        assert!(is_sensor_host_argv(&args(&["/home/u/.local/bin/attend", "run", "--catchup"])));
         assert!(!is_sensor_host_argv(&args(&["attend", "sensor", "poll", "git"])));
         assert!(!is_sensor_host_argv(&args(&["attend", "message", "send", "run"])));
         assert!(!is_sensor_host_argv(&args(&["attend-chat", "run"])));
-        assert!(!is_sensor_host_argv(&args(&["sh", "-c", "attend run"])));
-        assert!(is_sensor_host_argv(&args(&["sh", "/home/u/bin/attend", "run"])), "a host run through an interpreter");
+        assert!(!is_sensor_host_argv(&args(&["sh", "-c", "attend sensor host"])));
+        assert!(is_sensor_host_argv(&args(&["sh", "/home/u/bin/attend", "sensor", "host"])), "a host run through an interpreter");
         assert!(!is_sensor_host_argv(&args(&["grep", "attend", "run.log"])));
     }
 

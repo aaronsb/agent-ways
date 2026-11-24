@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! `status`: every running `attend run` with the session it serves,
+//! `status`: every running sensor host with the session it serves,
 //! pending signal counts, keepwarm and channel state.
 
 use crate::util::{count_signals, current_session, groups_for, Session};
@@ -10,25 +10,25 @@ use crate::verbs::peers::JoinedChannel;
 use serde::Serialize;
 use std::path::PathBuf;
 
-/// An `attend run` process on this machine. `ps` lists every one, one per
-/// session that runs attend, so each names the session it serves.
+/// An `attend sensor host` process on this machine. The attend mod starts
+/// one for each listening session, so each names the session it serves.
 #[derive(Debug, Clone, Serialize)]
 pub struct Instance {
     pub pid: u32,
-    /// The session this run serves, from its Claude Code session record;
+    /// The session this host serves, from its Claude Code session record;
     /// `None` when no record names it.
     pub session_id: Option<String>,
     /// That session's display name. With no origin readable, the session
     /// id's first eight characters stand in rather than a guessed name.
     pub name: Option<String>,
-    /// The run serves the session asking.
+    /// The host serves the session asking.
     pub this_session: bool,
-    /// Another run serves the same session. The session lock (ADR-129)
-    /// allows one, so a second is worth flagging.
+    /// Another host serves the same session. The mod keeps one per
+    /// session, so a second is worth flagging.
     pub duplicate: bool,
-    /// No session record names the run and it was reparented to init or a
-    /// subreaper: a leftover run, safe to stop. A missing record alone
-    /// proves nothing, so an unowned run with a live parent stays false.
+    /// No session record names the host and it was reparented to init or a
+    /// subreaper: a leftover host, safe to stop. A missing record alone
+    /// proves nothing, so an unowned host with a live parent stays false.
     pub reparented: bool,
 }
 
@@ -66,7 +66,7 @@ pub fn status() -> Status {
     }
 }
 
-/// Every `attend run` in the process table but this process, each with the
+/// Every sensor host in the process table but this process, each with the
 /// session it serves.
 fn running_instances(me: &Session) -> Vec<Instance> {
     let Ok(out) = std::process::Command::new("ps").args(["-ww", "-eo", "pid=,args="]).output() else {
@@ -78,7 +78,7 @@ fn running_instances(me: &Session) -> Vec<Instance> {
         .filter_map(|line| {
             let (pid, args) = line.trim().split_once(char::is_whitespace)?;
             let pid = pid.parse::<u32>().ok()?;
-            (pid != own_pid && is_attend_run(args)).then_some(pid)
+            (pid != own_pid && is_sensor_host(args)).then_some(pid)
         })
         .collect();
     let owners: Vec<Option<(String, String)>> = pids
@@ -118,13 +118,13 @@ fn running_instances(me: &Session) -> Vec<Instance> {
         .collect()
 }
 
-/// Whether `args`, a `ps` command line, is an `attend run` process: the
-/// program's basename is `attend` and its first argument is `run`. A shell
-/// wrapper or an editor whose line merely mentions "attend run" is not.
-fn is_attend_run(args: &str) -> bool {
-    let mut words = args.split_whitespace();
-    let program = words.next().unwrap_or("");
-    std::path::Path::new(program).file_name().is_some_and(|n| n == "attend") && words.next() == Some("run")
+/// Whether `args`, a `ps` command line, is an `attend sensor host` process:
+/// a program named `attend`, first or after an interpreter, followed by
+/// `sensor host` ([`attend_presence::session::is_sensor_host_argv`]). A
+/// shell wrapper or an editor whose line merely mentions it is not.
+fn is_sensor_host(args: &str) -> bool {
+    let words: Vec<String> = args.split_whitespace().map(str::to_string).collect();
+    attend_presence::session::is_sensor_host_argv(&words)
 }
 
 /// Whether `pid` was orphaned: its parent is init or a subreaper (the
@@ -180,17 +180,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_attend_program_running_run_is_an_instance() {
-        assert!(is_attend_run("attend run"));
-        assert!(is_attend_run("/home/u/.local/bin/attend run --catchup"));
-        assert!(!is_attend_run("/bin/zsh -c eval 'attend run'"));
-        assert!(!is_attend_run("nvim notes-about-attend run"));
-        assert!(!is_attend_run("attend-chat run"));
-        assert!(!is_attend_run("attend peer status"));
-        assert!(!is_attend_run(""));
+    fn only_the_attend_program_running_a_sensor_host_is_an_instance() {
+        assert!(is_sensor_host("attend sensor host --session s --cwd /p"));
+        assert!(is_sensor_host("/home/u/.local/bin/attend sensor host --session s --cwd /p --parent 7"));
+        assert!(!is_sensor_host("/bin/zsh -c eval 'attend sensor host'"));
+        assert!(!is_sensor_host("nvim notes-about-attend sensor host"));
+        assert!(!is_sensor_host("attend-chat sensor host"));
+        // #1316 grace: a leftover run from an older attend shows as a host.
+        assert!(is_sensor_host("attend run"), "a leftover attend run is listed for one release");
+        assert!(!is_sensor_host("attend peer status"));
+        assert!(!is_sensor_host(""));
     }
 
-    /// A run whose parent is alive and is no subreaper is not leftover.
+    /// A host whose parent is alive and is no subreaper is not leftover.
     #[test]
     fn a_run_with_a_live_parent_is_not_reparented() {
         assert!(!reparented(std::process::id()));

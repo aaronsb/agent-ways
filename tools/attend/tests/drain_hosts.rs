@@ -5,20 +5,18 @@
 //! What the Stop-hook drain prints, by host, through the CLI as the hook
 //! runs it.
 //!
-//! The Stop hook delivers to a session the attend mod turned on (`attend
-//! listen on --host mod`) and to one whose `attend run` is live, as the
-//! Stop hook's `additionalContext`, which Claude Code shows once as `Stop
-//! hook feedback`; a `decision: block` showed each delivery a second time
-//! as a hook error. A mod host gets the mod's own format, with its tools
-//! and short `~id` handles that `attend message reply --re` takes; a
-//! session under `attend run` gets the CLI's format and its `attend message
-//! reply` hint. Any other session gets nothing from it.
+//! The Stop hook delivers only to a session the attend mod turned on
+//! (`attend listen on --host mod`), as the Stop hook's `additionalContext`,
+//! which Claude Code shows once as `Stop hook feedback`; a `decision:
+//! block` showed each delivery a second time as a hook error. It speaks
+//! the mod's own format, with its tools and short `~id` handles that
+//! `attend message reply --re` takes. Any other session gets nothing from
+//! it.
 //!
 //! References:
 //! - ADR-406 items 5, 9 and 10: the mod's delivery format and handles.
-//! - ADR-416, turn-end settlement and its amendment of 2026-11-23: the Stop
-//!   hook delivers to a session the mod enrolled, and to one with a live
-//!   `attend run` until #1316.
+//! - ADR-416, turn-end settlement: the Stop hook delivers to a session the
+//!   mod enrolled.
 
 mod common;
 use common::Fixture;
@@ -53,55 +51,6 @@ fn a_delivery_is_context_not_a_block_and_only_for_the_mod() {
     f.ok(&["listen", "on", "--host", "mod"]);
     let text = delivered_text(&f.drain_hook_with("{}"));
     assert!(text.contains("hello from a peer"), "{text}");
-}
-
-/// Under a live `attend run` the Stop hook still delivers, in the CLI's
-/// format, a post the Monitor line leaves for the next turn. Once the run
-/// has ended, a session the mod did not enroll gets nothing from it.
-// `attend run` scans the rooms only with the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn a_live_attend_run_keeps_the_turn_end_delivery() {
-    let f = Fixture::new("drain-host-run");
-    let run = f.run();
-    run.wait_for("the startup line", std::time::Duration::from_secs(30), |r| r.output().contains("you are"));
-    // An #open post naming no one does not wake the session, so the Monitor
-    // line leaves it for the turn's end.
-    put_from_peer(&f, "_broadcast", "peer-sess-1-1", None, "hello from a peer");
-    let text = delivered_text(&f.drain_hook_with("{}"));
-    assert!(text.contains("hello from a peer"), "{text}");
-    assert!(text.contains("id peer-sess-1-1"), "the CLI's format: {text}");
-    assert!(text.contains("attend message reply \"...\" auto-threads"), "{text}");
-    assert!(!text.contains("attend_reply"), "{text}");
-    let silence = text.find("Silence is a valid reply").unwrap_or_else(|| panic!("{text}"));
-    assert!(silence < text.find("hello from a peer").unwrap(), "{text}");
-    drop(run);
-    put_from_peer(&f, "_broadcast", "peer-sess-1-2", None, "after the run");
-    assert_eq!(f.drain_hook_with("{}"), "", "no run, no mod: nothing at the turn's end");
-}
-
-/// A Claude Code older than 2.1.163 ignores a Stop hook's additionalContext,
-/// and the drain has marked the messages read by then, so for such a
-/// session, by its record's `version`, the drain uses the block form. Only
-/// a session under `attend run` can be that old: the mod needs 2.1.296.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn an_old_claude_code_gets_the_block_form() {
-    let f = Fixture::new("drain-host-old");
-    let pid = std::process::id();
-    let record = f.home.join(".claude").join("sessions").join(format!("{pid}.json"));
-    std::fs::write(
-        &record,
-        format!(r#"{{"pid":{pid},"sessionId":"{}","cwd":"{}","version":"2.1.100"}}"#, f.sid, f.origin),
-    )
-    .unwrap();
-    let run = f.run();
-    run.wait_for("the startup line", std::time::Duration::from_secs(30), |r| r.output().contains("you are"));
-    put_from_peer(&f, "_broadcast", "peer-sess-1-1", None, "to an old host");
-    let out = f.drain_hook_with("{}");
-    let doc: Value = serde_json::from_str(&out).unwrap_or_else(|e| panic!("{e}: {out}"));
-    assert_eq!(doc["decision"], "block", "{out}");
-    assert!(doc["reason"].as_str().unwrap().contains("to an old host"), "{out}");
 }
 
 /// Findings 2 and 3: in a mod host the drain names the mod's tools and

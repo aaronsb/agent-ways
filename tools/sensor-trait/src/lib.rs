@@ -138,18 +138,10 @@ pub trait Sensor: Send {
     fn delivered(&mut self, _description: &str) {}
 
     /// The line `description` of an earlier poll was dropped on its way: by
-    /// the refractory, the cache gate or a failed write. A trigger the sensor
+    /// the refractory or a failed write. A trigger the sensor
     /// keeps for the session that offered it fires again on the next poll
     /// that meets it. Default: nothing.
     fn dropped(&mut self, _description: &str) {}
-
-    /// Whether a trigger the sensor keeps for the session waits on the line
-    /// `description` of an earlier poll, so that [`Sensor::dropped`] for it
-    /// would let the trigger fire again. A loop that holds a dropped line
-    /// back keeps only the lines this names. Default: none.
-    fn waits_on(&self, _description: &str) -> bool {
-        false
-    }
 
     /// Whether a trigger this sensor keeps for the session became spent
     /// since the last call, because its lines were [`Sensor::delivered`].
@@ -250,7 +242,7 @@ impl DeltaAccumulator {
     }
 
     /// Drain events as individual lines for paged emission.
-    /// Each event becomes its own notification line via Monitor.
+    /// Each event becomes its own line the host writes as a signal.
     pub fn drain_events(&self) -> Vec<String> {
         self.unique_events()
     }
@@ -470,11 +462,6 @@ impl SensorSlot {
         self.sensor.name()
     }
 
-    /// Whether the slot runs the compiled sensor `id`.
-    pub fn is_crate(&self, id: &str) -> bool {
-        self.crate_id.as_deref() == Some(id)
-    }
-
     pub fn description(&self) -> &str {
         self.sensor.description()
     }
@@ -499,7 +486,7 @@ impl SensorSlot {
 /// and parses the leading digit run as a u64. Returns `None` if the key is
 /// absent, the value is non-numeric, or the run is empty.
 ///
-/// Lives here so attend's context and disclosure sensors and `sensor-peers`
+/// Lives here so attend's context sensor and the other sensor crates
 /// don't each carry their own copy. Good enough for the `ways context --json`
 /// and signal-file formats the sensors consume.
 pub fn extract_json_u64(text: &str, key: &str) -> Option<u64> {

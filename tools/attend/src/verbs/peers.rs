@@ -57,7 +57,7 @@ pub fn peers() -> Peers {
     // Self: identity from our origin path (issue #378) so the name matches
     // what peers see when they render a signal from us, including when the
     // shell's cwd has drifted. The instance suffix comes from the registry
-    // `attend run` writes at startup.
+    // the session's sensor host writes at startup.
     let session = current_session();
     let cwd = session.origin_path.clone();
     let self_sid = session.session_resolved.then(|| session.session_id.clone());

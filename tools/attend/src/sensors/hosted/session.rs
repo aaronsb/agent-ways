@@ -83,9 +83,4 @@ impl FileSensor {
         self.outstanding.retain(|_, lines| !lines.contains(description));
     }
 
-    /// Whether an outstanding trigger offered the line `description`, so
-    /// that dropping it would release the trigger.
-    pub(super) fn awaits(&self, description: &str) -> bool {
-        self.outstanding.values().any(|lines| lines.contains(description))
-    }
 }

@@ -124,7 +124,7 @@ impl Reader {
             if k == "lane_exception" {
                 self.problems.push(Problem {
                     at: k.into(),
-                    message: "lane_exception is removed from the sensor spec and is ignored; delete it. peers and keepwarm keep the message lane without it".into(),
+                    message: "lane_exception is removed from the sensor spec and is ignored; delete it".into(),
                     severity: Severity::Error,
                 });
                 continue;
@@ -154,7 +154,6 @@ impl Reader {
                 cadence: DEFAULTS,
                 declared_lane: Lane::Event,
                 author: None,
-                fixed_lane: None,
                 requires: Vec::new(),
                 triggers: Vec::new(),
                 state: BTreeMap::new(),
@@ -198,7 +197,7 @@ impl Reader {
             Kind::Mcp => Block::Mcp(Box::new(self.mcp(m)?)),
             Kind::Ways => unreachable!("returned above"),
         };
-        Some(SensorSpec { spec, name: stem.to_string(), description, kind, enabled, cadence, declared_lane, author, fixed_lane: None, requires, triggers, state, block })
+        Some(SensorSpec { spec, name: stem.to_string(), description, kind, enabled, cadence, declared_lane, author, requires, triggers, state, block })
     }
 
     fn cadence(&mut self, m: &Mapping) -> Cadence {

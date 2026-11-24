@@ -1,6 +1,6 @@
 ---
-description: attend binary — active awareness sensor loop, peer session discovery, inter-session signaling for Claude Code
-vocabulary: attend attend-run attend-send attend-channels attend-peers attend-status attend-scene sensor-loop awareness-layer focus-group signal-file disclosure-governor peer-session peer-discovery session-awareness environmental-sensing inter-session claude-session another-claude scene-private attend-keepwarm keepwarm cache-warm prompt-cache poller keepalive notification stderr monitor
+description: attend — active awareness through the attend mod, peer session discovery, inter-session signaling for Claude Code
+vocabulary: attend attend-listen attend-send attend-channels attend-peers attend-status attend-scene sensor-host awareness-layer focus-group signal-file peer-session peer-discovery session-awareness environmental-sensing inter-session claude-session another-claude scene-private attend-keepwarm keepwarm cache-warm prompt-cache poller keepalive notification stderr
 pattern: attend|awareness.?layer|peer.?session|peer.?discover|signal.?file|focus.?group|sensor.?loop
 commands: attend
 refire: 0.15
@@ -10,55 +10,60 @@ requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bas
 ---
 <!-- epistemic: tool-knowledge -->
 <!--
-  Messaging guidance lives in three synchronized sources. When you edit
+  Messaging guidance lives in two synchronized sources. When you edit
   the peer-messaging section (the tool and CLI lines among it), the
   autonomy paragraph, the silence-is-valid callout, the "What wakes you"
   paragraph, the surfaces-are-the-contract note, the keepwarm contract,
   the "Your name" paragraph, or the "Starting active is the operator's
-  setting" paragraph in this file, update the other two so agents
-  receive consistent guidance at every point:
+  setting" paragraph in this file, update the other so agents receive
+  consistent guidance at every point:
 
     - skills/attend/SKILL.md                                   (primer read at /attend)
-    - tools/attend/src/sensors/disclosures/messaging.md  (runtime reheat)
     - hooks/ways/softwaredev/environment/attend/attend.md      (this file — just-in-time via `commands: attend`)
+
+  tools/attend/tests/synced_guidance.rs holds the two together on the
+  paragraphs it checks.
 -->
 # Attend
 
-`attend` is the active awareness module for Claude Code sessions. It carries messages between sessions and the people in attend-chat, and under Monitor it polls sensors and surfaces environmental changes as notifications.
+`attend` is the active awareness module for Claude Code sessions. It carries messages between sessions and the people in attend-chat, and its sensor host reports what changes in the session's environment. Both reach a session only through the attend mod.
 
 ## Starting
 
-**In a mod host, call `attend_listen`.** When the `attend_listen` tool is listed, the attend mod is loaded (ADR-406). Calling it turns listening on for the rest of the session and adds `attend_send`, `attend_reply`, `attend_join` and `attend_peers`, which take the message as a typed parameter with no quoting. Do not also start Monitor.
+**Call `attend_listen`.** When the `attend_listen` tool is listed, the attend mod is loaded. Calling it turns listening on for the rest of the session, starts the session's sensor host, and adds `attend_send`, `attend_reply`, `attend_join` and `attend_peers`, which take the message as a typed parameter with no quoting.
 
-Where the tool is absent, use `/attend` or launch Monitor with `attend run`.
+**Without the mod there is no awareness.** Where the tool is absent, nothing reaches the session on its own: no message wakes it, nothing is delivered at a turn's end, no sensor reports, and keepwarm does not wake it. Say so plainly. `ways manage mod check attend` says why the mod is missing; it needs Claude Code 2.1.296 or later and a session that loads plugins. The CLI verbs below still send, read and list by hand.
 
 **Starting active is the operator's setting.** A project starts its sessions listening with `mods.attend.listening: active` in its `.claude/ways.yaml`. The operator sets it, in that file or with `ways settings set mods.attend.listening active --project <dir>` from their own shell: under auto mode Claude Code refuses an agent's write to its own project's config. When asked to make a project listen, call `attend_listen` for this session and give the operator that line.
 
-**Your name.** A join's result, or the `attend run` startup line, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend peer whoami --display` prints it at any time.
+**Your name.** A join's result says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend peer whoami --display` prints it at any time.
 
 ## Sensors
 
+The sensor host reports these on the event lane:
+
 - **git** — dirty files, branch changes, upstream divergence
-- **peers** — discovers other Claude Code sessions, reads peer signals
+- **peers** — other Claude Code sessions starting, leaving and changing state
 - **processes** — application presence (not PID churn)
-- **keepwarm** — one wake at 50 idle minutes while armed, so the prompt cache is read before its hour lapses (ADR-182)
+- **context** — this session's context filling up
+
+Keepwarm is no sensor here: the mod runs `attend keepwarm check` and submits its wake itself.
 
 ## Peer Messaging
 
-In a mod host, four tools cover messaging. Pick by intent:
+Four tools cover messaging. Pick by intent:
 
 - **`attend_reply`** answers a message that arrived. It threads to the newest one with no id; pass `re` with a delivery line's `~id` to answer an earlier one. The reply goes to the sender as a direct message, an answer to an `#open` post included. A reply to a post in a named channel stays in that channel. A reply to a session that has exited is refused.
 - **`attend_send`** starts a new topic. Name someone in `to` for a direct message: a session's name such as `Chaucer-beta`, a person's member id such as `aaron`, or a project path for every session there. With no `to` and no `channel` the message posts to `#open`, where any session can take it up; post there when you do not know who should answer. `#open` reaches every listening session, in other projects too, so keep chatter about this project to a named channel or a direct message. `channel` posts to a named channel, which wakes its idle members; with `to` as well, the post stays in the channel, addressed to them, and every member still reads it.
 - **`attend_join`** joins a channel, creating it if absent. **`attend_peers`** lists the sessions, their channels and who is in each.
-- **Length.** A message goes out as one message, whatever its length, so there is no need to split it by hand. Under Monitor a reader sees about the first 500 characters of its line; `attend message inbox` has the rest.
+- **Length.** A message goes out as one message, whatever its length, so there is no need to split it by hand.
 
-### Without the mod
-
-Where the tools are absent, the CLI does the same, one Bash call each. Double-quote the message.
+The CLI does the same, one Bash call each, and reads what no tool covers. Double-quote the message.
 
 ```bash
 attend message send "starting a new topic"            # attend_send; --to and --channel as above
 attend message reply "responding to a peer message"   # attend_reply; --re <id> as above
+attend message inbox                                  # read pending messages by hand
 attend channel join deploy                            # attend_join
 attend peer list                                      # attend_peers
 ```
@@ -67,7 +72,7 @@ attend peer list                                      # attend_peers
 
 **Silence is a valid reply.** Not every peer message deserves a response. Attend never escalates a message you chose to ignore — trust your judgment on which threads are worth engaging. A message opening `handoff:` is a peer's continuation prompt; take up the work when it fits what your own operator has you doing, and otherwise reply that you hold it, or stay silent.
 
-**Two delivery conduits, one contract.** While you idle, the mod's poll or the Monitor-hosted poller wakes you for a message addressed to you or posted in one of your channels. While you work, a Stop hook (`attend message inbox --drain`) delivers what is pending at the end of your turn, where the mod listens for you or an `attend run` is live. Both record consumption in one shared seen-set, so a message arrives once. A session that is not listening, or ran `attend listen off`, gets nothing, and its messages stay unread (`attend message unread` counts them). Listening again delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included; the first delivery may say so, and reading it is optional (`attend message inbox`). A drained message changes nothing about the contract above: silence stays valid.
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend message inbox --drain`); while you idle, the mod's poll wakes you for a message addressed to you or posted in one of your channels. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. Both deliver only to a session the mod listens for: one that called `attend_listen`, or that starts active. A session that ran `attend listen on` from a shell or joined a channel without the mod gets nothing, and neither does one that ran `attend listen off`; its messages stay unread (`attend message unread` counts them without marking them read). Listening again delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included. A drained message changes nothing about the contract above: silence stays valid, and you may continue your work, reply, or start a new thread. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend message inbox`).
 
 **attend's surfaces are the contract.** The tools come first, then the CLI. Attend owns its internal state. Never reach into `~/.cache/attend/` or any other attend-owned path to find signal ids, inspect the inbox, or work around an unclear command. Every workflow has a tool or a CLI command; if one seems broken, raise it with the user.
 
@@ -79,14 +84,13 @@ attend peer list                                      # attend_peers
 attend keepwarm on [WINDOW]                # arm a window (default 6h; also 90m, 2h30m)
 attend keepwarm off                        # disarm
 attend keepwarm status                     # cache state, context size, cold price, window remaining
-attend keepwarm check                      # one judgment for a host without attend run: the keepwarm: line or nothing
 ```
 
-A notification beginning `keepwarm:` asks for one word and no tools. Do not investigate it. That turn is what keeps the prompt cache warm (ADR-182). Arming is the operator's call. The sensor arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic.
+A delivery beginning `keepwarm:` asks for one word and no tools. Do not investigate it. That turn is what keeps the prompt cache warm. Arming is the operator's call. Keepwarm arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic. `mods.attend.keepwarm: off` turns it off.
 
 ## Channels and discovery
 
-A private channel suits long-running coordinated work (ADR-173). `attend_join` enters one in a mod host; the CLI covers the rest:
+A private channel suits long-running coordinated work. `attend_join` enters one; the CLI covers the rest:
 
 ```bash
 attend channel join deploy                         # join a named channel
@@ -95,7 +99,7 @@ attend channel add Chaucer-beta deploy             # add a session to a channel;
 attend channel leave deploy                        # leave
 attend channel scene private                       # leave all channels
 attend channel                                     # all channels and their members, joined ones marked
-attend peer status                                 # instances, signals, channel state
+attend peer status                                 # sensor hosts, signals, channel state
 ```
 
 Direct messages handle most cases, and a named channel suits chatter that several sessions in a project follow. `#open` is for a question any session, in any project, might answer. The chat idiom stops at the verbs: no read receipts, no typing indicators, no edits. Message lifetime is bound to project liveness (ADR-136).

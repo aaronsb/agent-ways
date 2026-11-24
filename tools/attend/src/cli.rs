@@ -30,15 +30,21 @@ pub(crate) struct Cli {
     pub(crate) command: Option<Commands>,
 }
 
-/// The nine top-level commands (ADR-413 item 1). The one-release aliases of
-/// the old flat verbs (item 5) were removed by issue #982.
+/// The eight top-level commands. The one-release aliases of the old flat
+/// verbs were removed by issue #982, and `run` by #1316: awareness reaches
+/// a session only through the attend mod.
 #[derive(Subcommand)]
 pub(crate) enum Commands {
-    /// Start the sensor loop (use with Monitor for async delivery)
+    /// `attend run` is removed (#1316). It stays as a hidden stub for one
+    /// release, so an `attend run` an older attend started, which
+    /// re-executes into this binary when it updates, or a Monitor that
+    /// starts it again, says where awareness went and exits 2.
+    // #1316 grace: remove after the next release.
+    #[command(hide = true, disable_help_flag = true)]
     Run {
-        /// Replay backlog signals on startup before normal cadence
-        #[arg(long)]
-        catchup: bool,
+        /// Whatever the old command took, `--catchup` included: ignored.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        rest: Vec<String>,
     },
 
     #[command(about = describe::LISTEN)]
@@ -125,15 +131,15 @@ pub(crate) enum MessageCmd {
 
     /// Tombstone a session that has exited, so every reader skips its messages
     ///
-    /// The drain, the mod, `attend message unread`, the Monitor poller and
-    /// `attend message inbox` all skip what a tombstoned session sent, and
+    /// The drain, the mod, `attend message unread` and `attend message
+    /// inbox` all skip what a tombstoned session sent, and
     /// the drain records it read, up to when it was tombstoned; what the
     /// session sends later, back under --resume, shows. Only an agent's
     /// session that this host saw exit is tombstoned: a person's id, a
     /// session that may still read the bus, an id such a session had
     /// before /clear and this session's own are refused. Its messages stay
     /// on disk; `attend message delete --everywhere --from <id>` marks them
-    /// for deletion (ADR-404 D3e).
+    /// for deletion.
     Tombstone(TombstoneArgs),
 }
 
@@ -281,8 +287,8 @@ pub(crate) enum SensorCmd {
     ///
     /// The attend mod starts one host for each listening session and stops
     /// it when the session stops listening. The host polls the sensors the
-    /// files declare for --cwd, except keepwarm and disclosure, and the
-    /// peers sensor reports sessions starting and leaving but no messages.
+    /// files declare for --cwd; the peers sensor reports sessions starting
+    /// and leaving but no messages.
     /// Each report the governor lets through becomes a signal from
     /// `system:<sensor>` addressed to --session, on the sensor's lane, with
     /// the expiry its trigger sets; the mod delivers it as it delivers a
@@ -517,9 +523,8 @@ pub(crate) struct InboxFlags {
     /// Atomically deliver pending messages and record their
     /// consumption. The Stop-hook fast path: a silent no-op
     /// under an unresolved identity or for a session not listening
-    /// (#720), and in hook format for a session that neither the attend
-    /// mod enrolled (`attend listen on --host mod`) nor a live `attend run`
-    /// holds. On a cold start (no
+    /// (#720), and in hook format for a session the attend mod did not
+    /// enroll (`attend listen on --host mod`). On a cold start (no
     /// seen-set) it delivers addressed mail and fresh messages and
     /// counts the older backlog it does not show. A system signal past
     /// its expiry is recorded read and never delivered.
@@ -655,8 +660,8 @@ pub(crate) struct TombstoneArgs {
 
 #[derive(Args)]
 pub(crate) struct TuneArgs {
-    /// Write the derived absolute_refractory, decay_per_minute and
-    /// peer_activity_window to the user config, changing nothing else
+    /// Write the derived absolute_refractory and decay_per_minute to the
+    /// user config, changing nothing else
     #[arg(long)]
     pub(crate) apply: bool,
 }
@@ -674,9 +679,8 @@ pub enum KeepwarmCmd {
     /// Cache state, context size, cold price, window left, and this session's cold writes
     Status,
     /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
-    /// one is due, else nothing (exit 0 either way). For a host that polls
-    /// without `attend run`; prints nothing while an `attend run` holds the
-    /// session, since its sensor wakes it.
+    /// one is due, else nothing (exit 0 either way). The attend mod polls
+    /// it.
     Check(KeepwarmCheckArgs),
     /// The operator prompted: the keepalive count starts again, and a sent
     /// wrap and a stop are cleared. The attend mod runs it for each prompt
@@ -755,9 +759,9 @@ pub enum ListenCmd {
     /// Listen: the drain delivers to this session. Messages addressed to
     /// its project while it was not listening are delivered by the next
     /// drain; older #open and channel backlog is held back. The Stop hook
-    /// delivers only with `--host mod`, or while an `attend run` is live
+    /// delivers only with `--host mod`
     On {
-        /// What hosts delivery, when not Monitor or a shell: `mod`, the
+        /// What hosts delivery, when not a shell: `mod`, the
         /// attend mod, whose agent answers with attend_reply and attend_send.
         /// The Stop-hook drain then delivers to the session, in the mod's
         /// format and naming those tools
@@ -765,8 +769,8 @@ pub enum ListenCmd {
         host: Option<ListenHost>,
     },
     /// Stop listening: the drain delivers nothing and marks nothing read.
-    /// Channel memberships are kept; a later join, `attend run` or
-    /// `listen on` listens again
+    /// Channel memberships are kept; a later join or `listen on` listens
+    /// again
     Off,
     /// Print `listening` or `not listening` (default)
     Status,
@@ -848,13 +852,13 @@ mod tests {
         }
     }
 
-    /// `attend` has the nine groups and nothing else (ADR-413 item 1; the
-    /// item 5 aliases were removed by #982).
+    /// `attend` has the eight groups and nothing else: the old flat verbs'
+    /// aliases were removed by #982, and `run` by #1316.
     #[test]
-    fn help_lists_the_nine_commands() {
+    fn help_lists_the_eight_commands() {
         let cli = Cli::command();
-        let shown: Vec<&str> = cli.get_subcommands().map(|c| c.get_name()).collect();
-        assert_eq!(shown, ["run", "listen", "message", "channel", "peer", "keepwarm", "chat", "sensor", "config"]);
+        let shown: Vec<&str> = cli.get_subcommands().filter(|c| !c.is_hide_set()).map(|c| c.get_name()).collect();
+        assert_eq!(shown, ["listen", "message", "channel", "peer", "keepwarm", "chat", "sensor", "config"]);
     }
 
     /// The help states the limits the code applies.

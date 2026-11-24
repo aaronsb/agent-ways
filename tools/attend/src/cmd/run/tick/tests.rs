@@ -20,17 +20,6 @@ fn build_engagement_returns_action_potential_curve() {
     }
 }
 
-#[test]
-fn a_cold_reload_logs_presence_and_waits_on_anything_else() {
-    assert_eq!(reload_plan(false, &["message from A ~x: hi"]), ReloadPlan::Loud);
-    assert_eq!(reload_plan(true, &[]), ReloadPlan::Quiet);
-    assert_eq!(reload_plan(true, &["peer session started: p [/p] (same project, idle, ctx 3%)"]), ReloadPlan::Quiet);
-    assert_eq!(reload_plan(true, &["peer session exited: p [/p]", "message from A ~x: hi"]), ReloadPlan::Wait);
-    assert_eq!(reload_plan(true, &["2 older messages held back; reading them is optional: attend message inbox"]), ReloadPlan::Wait);
-}
-
-/// A sensor that exports the peers sensor's cold-start mark, under a
-/// name of its file's choosing.
 struct Marked(&'static str);
 impl sensors::Sensor for Marked {
     fn name(&self) -> &str {
@@ -51,21 +40,6 @@ impl sensors::Sensor for Marked {
     fn decay_threshold(&self) -> u32 {
         3
     }
-    fn export_state(&self) -> Vec<(String, String)> {
-        vec![("baselined".into(), "true".into())]
-    }
-}
-
-/// The peers sensor's state is the crate's, whatever its file is named:
-/// a `chat.yaml` running it keeps the mark, and a file named `peers`
-/// running another crate does not.
-#[test]
-fn the_snapshot_keys_the_peers_state_on_the_crate_and_not_the_name() {
-    let peers_as_chat = sensors::slot(Box::new(Marked("chat")), sensor_spec::Lane::Message, Some("peers"));
-    assert!(peers_as_chat.is_crate("peers"));
-    assert!(collect_snapshot(&[peers_as_chat]).baselined);
-    let git_as_peers = sensors::slot(Box::new(Marked("peers")), sensor_spec::Lane::Event, Some("git"));
-    assert!(!collect_snapshot(&[git_as_peers]).baselined);
 }
 
 /// A file sensor named `ways-update` whose session trigger has fired and
@@ -141,32 +115,6 @@ fn a_line_the_refractory_drops_leaves_its_session_trigger_to_fire_again() {
     slot.accumulator.reset();
     slot.poll(&focus);
     assert!(slot.accumulator.events.is_empty(), "spent, it fires no more");
-}
-
-/// A session trigger's line dropped on a lapsed cache is released once
-/// the cache is warm, however many lines of other sensors the cold spell
-/// dropped after it: a compiled sensor's lines release nothing, so the
-/// gate keeps none of them.
-#[test]
-fn a_cold_spell_of_other_lines_does_not_strand_a_session_trigger() {
-    let doc = "kind: command\nargv: [x]\noutput: json\nthreshold: 1\ntriggers: [{name: behind, path: \"$\", on: enters, where: {behind: true}, memory: session, magnitude: 3, description: behind}]\n";
-    let spec = sensor_spec::parse("ways-update", &serde_yaml::from_str(doc).unwrap()).spec.unwrap();
-    let sensor = sensors::hosted::FileSensor::declared(&spec, Box::new(Behind), "/p", None, false);
-    let mut slots = vec![sensors::slot(Box::new(sensor), sensor_spec::Lane::Event, None), sensors::slot(Box::new(Marked("git")), sensor_spec::Lane::Event, Some("git"))];
-    let focus = Focus { description: String::new(), working_dir: "/p".into(), keywords: Vec::new() };
-    let mut gate = CacheGate::default();
-    slots[0].poll(&focus);
-    assert_eq!(slots[0].accumulator.events, ["behind"]);
-    gate.drop_events(&mut slots, 0);
-    for n in 0..300 {
-        slots[1].accumulator.events.push(format!("dirty: file-{n}.rs"));
-        gate.drop_events(&mut slots, 1);
-    }
-    slots[0].poll(&focus);
-    assert!(slots[0].accumulator.events.is_empty(), "held for a warm cache, the trigger waits");
-    gate.release_drops(&mut slots);
-    slots[0].poll(&focus);
-    assert_eq!(slots[0].accumulator.events, ["behind"], "released on a warm cache, the trigger fires again");
 }
 
 #[test]

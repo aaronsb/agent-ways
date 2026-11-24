@@ -191,7 +191,6 @@ pub(crate) struct Drained {
 impl DrainedView for Drained {
     fn when(&self) -> &str { &self.when }
     fn sender(&self) -> &str { &self.sender }
-    fn sender_id(&self) -> &str { &self.sender_id }
     fn scope(&self) -> &str { &self.scope }
     fn id(&self) -> &str { &self.id }
     fn re(&self) -> Option<&str> { self.re.as_deref() }
@@ -234,7 +233,7 @@ fn room_label(room: &Room) -> String {
 /// without delivering; a message a delete marked is passed over unrecorded
 /// (`marks`, ADR-404 D3e). Under
 /// `baselining` (no seen-set yet) the messages from others go through
-/// `attend_state::cold_start`, the rule the peers sensor applies too:
+/// `attend_state::cold_start`:
 /// addressed mail sent since the session's process started and `#open` and
 /// channel messages posted since it started listening are delivered, the
 /// rest is marked without being shown, and the scan reports a note counting
@@ -266,7 +265,7 @@ pub(crate) fn scan_pending(
                 Some(f) if f.ends_with(".signal") => f.to_string(),
                 _ => continue,
             };
-            // The key the peers sensor uses: the signal's filename.
+            // The seen-set key: the signal's filename.
             let key = attend_state::seen_key(&filename);
             if seen.contains(&key) {
                 continue;
@@ -338,8 +337,8 @@ pub(crate) fn scan_pending(
         // Escape-free by construction: the drain's output is
         // hook-injection text (or a pipe), never a styled terminal,
         // so it is drawn plain whatever the environment says (#388).
-        // The label is the same form the peers sensor shows under
-        // Monitor (#534); the wire `from` rides along as the id.
+        // The label is the form every reader shows (#534); the wire
+        // `from` rides along as the id.
         delivered.push(Drained {
             when: agent_fmt::compact_time(f.mtime, std::time::SystemTime::now()),
             mtime: f.mtime,
@@ -370,8 +369,8 @@ pub(crate) fn scan_pending(
 /// format) emit the Stop-hook JSON that continues the ending turn with
 /// them. Every guard degrades to "deliver nothing, mark nothing", which
 /// leaves what is pending for the next delivery: unresolved identity, the
-/// re-entry ceiling, and a `hook` drain in a session neither the attend
-/// mod nor a live `attend run` delivers to. A cold start applies `attend_state::cold_start`,
+/// re-entry ceiling, and a `hook` drain in a session the attend mod did
+/// not enroll. A cold start applies `attend_state::cold_start`,
 /// announces what it held back, and always persists the state file so it
 /// happens exactly once.
 ///
@@ -421,13 +420,10 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // What hosts delivery: the attend mod records itself when it turns
     // listening on, and its agent reads the mod's format and tools.
     let host = attend_presence::enrollment::host(&session_id);
-    // How a delivery continues the turn: by the Claude Code build this
-    // session runs, from its session record.
-    let form = StopForm::for_version(ident.claude_pid.and_then(claude_version).as_deref());
     let base = signals_base();
     let r = crate::groups::Groups::new(&base, &session_id);
 
-    // Liveness: a drain-only session (no Monitor running) must still
+    // Liveness: a drain-only session (no sensor host running) must still
     // look alive to /purge's consumer consult, or the Decision 5
     // protection this PR co-ships would skip exactly the sessions that
     // depend on it (PR #385 review, finding 4).
@@ -439,19 +435,17 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // empty drain (below), so continuations forced by OTHER Stop hooks
     // cannot inflate it across turns.
     let stop_active = hook_mode && stdin_stop_hook_active();
-    // The Stop hook delivers to a session the attend mod enrolled
-    // (`attend listen on --host mod`), whose turn-end conduit it is, and to
-    // one whose `attend run` is live, so a Monitor session keeps its
-    // turn-end delivery until `attend run` is removed. Any other listening
-    // session, one that ran `attend listen on` or joined a channel from a
-    // shell, gets nothing from it and has nothing marked. The hook's
-    // payload is read first, so its writer never meets a closed pipe.
+    // The Stop hook delivers only to a session the attend mod enrolled
+    // (`attend listen on --host mod`), whose turn-end conduit it is. Any
+    // other listening session, one that ran `attend listen on` or joined a
+    // channel from a shell, gets nothing from it and has nothing marked.
+    // The hook's payload is read first, so its writer never meets a closed
+    // pipe.
     //
     // References:
-    // - ADR-416 §1 and its turn-end settlement, with its amendment of
-    //   2026-11-23: no delivery outside the mod, the Stop-hook drain kept
-    //   for the mod, and for a live `attend run` until #1316.
-    if hook_mode && host != Some(Host::Mod) && !attend_presence::heartbeat::run_is_live(&session_id) {
+    // - ADR-416 §1 and its turn-end settlement: no delivery outside the
+    //   mod, and the Stop-hook drain kept for the mod.
+    if hook_mode && host != Some(Host::Mod) {
         return;
     }
     // The ceiling fails closed: a forced continuation that cannot record
@@ -473,10 +467,10 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
 
     let store = attend_state::StateStore::new(Some(session_id.clone()));
 
-    // Cold start = no conduit has applied the cold-start rule yet: no
-    // state file, or one without `baselined` (the peers sensor checkpoints
-    // on its first poll, before it scans messages). Load once; the same
-    // snapshot supplies the seen-set.
+    // Cold start = no drain has applied the cold-start rule yet: no state
+    // file, or one without `baselined` (the sensor host checkpoints its
+    // own state into the same file before any drain runs). Load once; the
+    // same snapshot supplies the seen-set.
     let snapshot = store.load();
     let baselining = !snapshot.as_ref().is_some_and(|s| s.baselined);
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
@@ -514,8 +508,8 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let me = baselining.then(|| crate::util::display_name(&ident));
 
     // A session whose attend mod predates the installed one is told, as the
-    // hook's operator-facing message. Only a mod host has a mod to reload.
-    let stale = if hook_mode && host == Some(Host::Mod) {
+    // hook's operator-facing message. The hook reaches only a mod host.
+    let stale = if hook_mode {
         stale_mod_note(&store, attend_presence::session::started_at(&session_id), installed_mod(&claude_config_dir(), &app_mod_manifest()).as_ref())
     } else {
         None
@@ -539,7 +533,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
         if mode == DrainMode::Json {
             print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref(), lapsed);
         } else if hook_mode {
-            if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), host, form, stale.as_deref()) {
+            if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), stale.as_deref()) {
                 println!("{out}");
             }
         } else {
@@ -558,12 +552,13 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // Deliver, THEN record: a crash between the two re-delivers at the
     // next boundary (the seen-set never got the marks), which dedup
     // tolerates — at-least-once. The reverse order would mark messages
-    // consumed with no conduit having shown them: loss on BOTH conduits,
-    // since the sensor imports drain marks (PR #385 review, finding 2).
+    // consumed with nothing having shown them: loss, since every reader
+    // of the seen-set takes a mark as delivered (PR #385 review, finding
+    // 2).
     if mode == DrainMode::Json {
         print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref(), lapsed);
     } else if hook_mode {
-        if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), host, form, stale.as_deref()) {
+        if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), stale.as_deref()) {
             println!("{out}");
         }
     } else {
@@ -700,42 +695,25 @@ fn drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Optio
 /// forced an extra turn over messages the session need not read. `me`
 /// rides only the delivery, the one part of the output the model reads.
 ///
-/// `host` is what hosts the session's delivery: the attend mod gets its own
-/// format and tools ([`render_mod_delivery`]), and a session under a live
-/// `attend run`, the only other one the hook delivers to, the CLI's.
-/// `form` is [`StopForm::Block`] only for a Claude Code older than the
-/// first build that reads a Stop hook's `additionalContext`.
-fn hook_output(
-    delivered: &[impl DrainedView],
-    note: Option<&str>,
-    me: Option<&str>,
-    host: Option<Host>,
-    form: StopForm,
-    operator_note: Option<&str>,
-) -> Option<String> {
+/// The hook reaches only a session the attend mod hosts, so a delivery is
+/// in the mod's format, with its tools ([`render_mod_delivery`]).
+fn hook_output(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>, operator_note: Option<&str>) -> Option<String> {
     if delivered.is_empty() {
         // A systemMessage is shown to the operator only, never to the
         // model, so the name, which is for the model, stays out of it.
         let text = match (note, operator_note) {
-            (Some(n), Some(o)) => format!("{}\n{o}", render_drain_reason(delivered, Some(n), None)),
-            (Some(n), None) => render_drain_reason(delivered, Some(n), None),
+            (Some(n), Some(o)) => format!("[attend] {n}\n{o}"),
+            (Some(n), None) => format!("[attend] {n}"),
             (None, Some(o)) => o.to_string(),
             (None, None) => return None,
         };
         return Some(format!("{{\"systemMessage\": \"{}\"}}", json_escape(&text)));
     }
     let operator = operator_note.map(|o| format!("\"systemMessage\": \"{}\", ", json_escape(o))).unwrap_or_default();
-    let text = match host {
-        Some(Host::Mod) => render_mod_delivery(delivered, note, me),
-        None => render_drain_reason(delivered, note, me),
-    };
-    Some(match form {
-        StopForm::Context => format!(
-            "{{{operator}\"hookSpecificOutput\": {{\"hookEventName\": \"Stop\", \"additionalContext\": \"{}\"}}}}",
-            json_escape(&text)
-        ),
-        StopForm::Block => format!("{{{operator}\"decision\": \"block\", \"reason\": \"{}\"}}", json_escape(&text)),
-    })
+    Some(format!(
+        "{{{operator}\"hookSpecificOutput\": {{\"hookEventName\": \"Stop\", \"additionalContext\": \"{}\"}}}}",
+        json_escape(&render_mod_delivery(delivered, note, me))
+    ))
 }
 
 /// What the operator reads when the mod a session loaded is older than the
@@ -836,53 +814,6 @@ fn stale_mod_note(store: &attend_state::StateStore, started: Option<std::time::S
         return None;
     }
     Some(note)
-}
-
-/// How a hook drain continues the turn with what it delivered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StopForm {
-    /// `hookSpecificOutput.additionalContext`: shown once, no error.
-    Context,
-    /// `decision: block`: shown as a hook error, but the only form a Claude
-    /// Code older than [`CONTEXT_SINCE`] reads. An older build ignores
-    /// `additionalContext`, and the drain has already marked the messages
-    /// read, so they would be lost.
-    ///
-    /// A session the attend mod hosts never gets it: the mod needs Claude
-    /// Code 2.1.296 or later. The Stop hook also delivers to a session
-    /// whose `attend run` is live, and `attend run` under Monitor sets no
-    /// floor on the Claude Code it runs in, so this form stays for such a
-    /// session until `attend run` is removed.
-    Block,
-}
-
-/// The first Claude Code release whose Stop hooks read
-/// `hookSpecificOutput.additionalContext` (its changelog, 2.1.163).
-const CONTEXT_SINCE: (u32, u32, u32) = (2, 1, 163);
-
-impl StopForm {
-    /// The form for a Claude Code `version` as its session record states it.
-    /// An unknown or unreadable version takes [`StopForm::Context`]: the
-    /// record has carried a version for far longer than 2.1.163 has been out.
-    fn for_version(version: Option<&str>) -> Self {
-        let parsed = version.and_then(|v| {
-            let mut parts = v.trim().split(['.', '-', '+']).map(|p| p.parse::<u32>().ok());
-            Some((parts.next()??, parts.next()??, parts.next()??))
-        });
-        match parsed {
-            Some(v) if v < CONTEXT_SINCE => StopForm::Block,
-            _ => StopForm::Context,
-        }
-    }
-}
-
-/// The `version` field of Claude Code process `pid`'s session record.
-fn claude_version(pid: u32) -> Option<String> {
-    attend_presence::session::sessions_dirs().iter().find_map(|dir| {
-        let text = std::fs::read_to_string(dir.join(format!("{pid}.json"))).ok()?;
-        let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
-        doc.get("version")?.as_str().map(str::to_string)
-    })
 }
 
 /// The data note the drain puts over a mod-format delivery. The mod's own
@@ -1022,83 +953,11 @@ fn safe_sender(s: &str) -> String {
 /// opens the same way.
 const SILENCE_FIRST: &str = "Silence is a valid reply to the messages below; you may continue your work.";
 
-/// The injected turn-continuation text. Sober and contract-preserving:
-/// a drained message informs the turn — the standing messaging
-/// guidance (reply autonomy, silence-is-valid) rides along verbatim so
-/// turn-boundary delivery never reads as a command to respond.
-///
-/// `note` is the cold start's count of messages it held back; it rides the
-/// first delivery after enrollment, or goes alone when nothing else does.
-/// `me` is the session's own name, given on that same first contact.
-fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>) -> String {
-    if delivered.is_empty() {
-        return format!("[attend] {}", note.unwrap_or("no peer messages"));
-    }
-    let you = me.map(|m| format!(" (you are {m})")).unwrap_or_default();
-    let mut out = format!(
-        "{SILENCE_FIRST}\n[attend] {} peer message(s) delivered at the turn boundary (ADR-172 drain){you}:\n",
-        delivered.len()
-    );
-    if let Some(note) = note {
-        out.push_str(&format!("({note})\n"));
-    }
-    for d in delivered.iter().take(DRAIN_RENDER_MAX) {
-        // The canonical id is usually already the id stem's prefix;
-        // spell it out only when it is not, so the reason does not
-        // repeat ~45 characters per row.
-        let from = if from_is_id_prefix(d.sender_id(), d.id()) {
-            String::new()
-        } else {
-            format!(", from {}", d.sender_id())
-        };
-        // A reply names its parent, so the reader can tell what it answers.
-        let re = d.re().map(|re| format!(", re {re}")).unwrap_or_default();
-        out.push_str(&format!(
-            "\n[{}] {} ({}, id {}{}{}):\n{}\n",
-            d.when(),
-            d.sender(),
-            d.scope(),
-            d.id(),
-            re,
-            from,
-            d.body()
-        ));
-    }
-    if delivered.len() > DRAIN_RENDER_MAX {
-        out.push_str(&format!(
-            "\n(+{} more — attend message inbox for the rest)\n",
-            delivered.len() - DRAIN_RENDER_MAX
-        ));
-    }
-    out.push('\n');
-    out.push_str(
-        "To answer, attend message reply \"...\" auto-threads to the newest; \
-         attend message send starts a new thread.",
-    );
-    out
-}
-
-/// Whether the canonical sender id is already legible from the message
-/// id. Id stems are `<sender-id>-<timestamp>-<seq>`
-/// (`agent_identity::signal_filename`), so for a claude sender the
-/// session id opens the stem. External ids are sanitized in the stem
-/// (`aaron@kitty` → `aaron-kitty`) and so do not match; those rows, and
-/// hand-written ids, get an explicit `from`.
-fn from_is_id_prefix(from: &str, id: &str) -> bool {
-    let ident = from.split_once(':').map(|(_, i)| i).unwrap_or(from);
-    !ident.is_empty()
-        && id
-            .strip_prefix(ident)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
-}
-
-/// View trait so `render_drain_reason` is testable without the
+/// View trait so the renderers are testable without the
 /// filesystem-shaped `Drained` struct.
 trait DrainedView {
     fn when(&self) -> &str;
     fn sender(&self) -> &str;
-    /// Canonical sender id — the wire `from` (`claude:<session-id>`).
-    fn sender_id(&self) -> &str;
     fn scope(&self) -> &str;
     fn id(&self) -> &str;
     /// The parent's id, for a threaded reply.
@@ -1187,7 +1046,6 @@ mod drain_tests {
     struct FakeMsg {
         when: String,
         sender: String,
-        sender_id: String,
         scope: String,
         id: String,
         re: Option<String>,
@@ -1196,7 +1054,6 @@ mod drain_tests {
     impl DrainedView for FakeMsg {
         fn when(&self) -> &str { &self.when }
         fn sender(&self) -> &str { &self.sender }
-        fn sender_id(&self) -> &str { &self.sender_id }
         fn scope(&self) -> &str { &self.scope }
         fn id(&self) -> &str { &self.id }
         fn re(&self) -> Option<&str> { self.re.as_deref() }
@@ -1206,7 +1063,6 @@ mod drain_tests {
         FakeMsg {
             when: "11:4{}".replace("{}", &(n % 10).to_string()),
             sender: format!("peer-{n}"),
-            sender_id: format!("claude:session-{n}"),
             scope: "#open".into(),
             id: format!("id-{n}"),
             re: None,
@@ -1351,22 +1207,17 @@ mod drain_tests {
     }
 
     #[test]
-    fn the_operator_note_rides_every_hook_form() {
+    fn the_operator_note_rides_the_hook_output() {
         let msgs = [msg(1)];
-        let empty = hook_output(&[] as &[FakeMsg], None, None, None, StopForm::Context, Some(STALE_MOD_NOTE)).unwrap();
+        let empty = hook_output(&[] as &[FakeMsg], None, None, Some(STALE_MOD_NOTE)).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&empty).expect(&empty);
         assert_eq!(doc["systemMessage"], STALE_MOD_NOTE);
         assert!(doc.get("decision").is_none(), "{empty}");
-        let out = hook_output(&msgs, None, None, None, StopForm::Context, Some(STALE_MOD_NOTE)).unwrap();
+        let out = hook_output(&msgs, None, None, Some(STALE_MOD_NOTE)).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
         assert_eq!(doc["systemMessage"], STALE_MOD_NOTE, "{out}");
         assert!(doc["hookSpecificOutput"]["additionalContext"].as_str().unwrap().contains("body 1"), "{out}");
         assert!(doc.get("decision").is_none(), "{out}");
-        let out = hook_output(&msgs, None, None, None, StopForm::Block, Some(STALE_MOD_NOTE)).unwrap();
-        let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
-        assert_eq!(doc["systemMessage"], STALE_MOD_NOTE, "{out}");
-        assert_eq!(doc["decision"], "block", "{out}");
-        assert!(doc["reason"].as_str().unwrap().contains("body 1"), "{out}");
     }
 
     #[test]
@@ -1395,19 +1246,6 @@ mod drain_tests {
         assert!(!parse_stop_hook_active(
             r#"{"note": "stop_hook_active is unrelated here", "stop_hook_active": false}"#
         ));
-    }
-
-    #[test]
-    fn drain_reason_renders_messages_and_contract_line() {
-        let msgs = vec![msg(1), msg(2)];
-        let reason = render_drain_reason(&msgs, None, None);
-        assert!(reason.contains("2 peer message(s)"));
-        assert!(reason.contains("peer-1 (#open, id id-1, from claude:session-1):"));
-        assert!(reason.contains("body 2"));
-        // The permission to stay silent opens the delivery, ahead of the
-        // messages and every reply verb (ADR-406 item 4).
-        assert_eq!(reason.lines().next(), Some(SILENCE_FIRST), "{reason}");
-        assert!(reason.lines().last().unwrap().starts_with("To answer, attend message reply"), "{reason}");
     }
 
     // --- scan_pending core (PR #385 review, finding 6) ---
@@ -1623,100 +1461,11 @@ mod drain_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Issue #534: one message, two conduits, one name. A real
-    /// `PeerSensor` polls the fixture tray (the Monitor conduit) and the
-    /// scan core drains it (the Stop-hook conduit); the sender text must
-    /// be identical, or a receiver has to know both forms to correlate a
-    /// notification with a later drain row.
-    #[cfg(feature = "sensor-peers")]
-    #[test]
-    fn monitor_and_drain_render_the_same_sender() {
-        use sensor_trait::{Focus, Sensor};
-
-        let dir = scan_fixture("conduits");
-        write_signal(&dir, "peer-1", "claude:other-session", "same name on both");
-        // Drain path.
-        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], false, &Default::default(), NOW);
-        assert_eq!(delivered.len(), 1);
-        let drained = &delivered[0];
-
-        // Monitor path: the sensor scans only the fixture, as its project
-        // tray. A non-empty state import skips the cold-start baseline
-        // that would otherwise swallow the fixture, and
-        // `reply_hint_shown` keeps the hint off the body.
-        let mut sensor = sensor_peers::PeerSensor::new();
-        let fixture = dir.clone();
-        sensor.set_receive_dirs_provider(std::sync::Arc::new(move |_: &str| {
-            vec![attend_groups::ReceiveDir { path: fixture.clone(), room: attend_groups::Room::Project }]
-        }));
-        sensor.import_state(&[("reply_hint_shown".to_string(), "true".to_string())]);
-        // A warm cache, so the wake gate lets the message out.
-        sensor.set_cache_lapsed_provider(std::sync::Arc::new(|_: &str| false));
-        // The fixture's cwd doubles as the focus so the sensor's
-        // `attend message reply` bookkeeping (keyed on the host session) sees
-        // an own-project message and records nothing.
-        let focus = Focus {
-            description: String::new(),
-            working_dir: "/src/cwd".to_string(),
-            keywords: Vec::new(),
-        };
-        let _ = sensor.poll(&focus); // first poll: peer-presence baseline, emits nothing
-        let observations = sensor.poll(&focus);
-
-        let expected = format!("message from {} ~{}: same name on both", drained.sender, short_id("peer-1"));
-        assert!(
-            observations.iter().any(|(_, line)| line == &expected),
-            "Monitor conduit did not emit {expected:?}; got {:?}",
-            observations.iter().map(|(_, l)| l.as_str()).collect::<Vec<_>>()
-        );
-        // Persona-plus-project form on both — not the pre-#534 Monitor
-        // form `claude//src/cwd`.
-        assert!(drained.sender.ends_with(" (cwd)"), "{:?}", drained.sender);
-        assert!(!drained.sender.contains('/'), "{:?}", drained.sender);
-        // The canonical id rides the row, so the label never has to be
-        // the key (ADR-171).
-        assert_eq!(drained.sender_id, "claude:other-session");
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    /// The id stem already opens with the sender's session id, so the
-    /// hook reason spells `from` out only when the id does not carry it.
-    #[test]
-    fn drain_reason_omits_from_when_id_carries_it() {
-        let carried = FakeMsg {
-            when: "11:40".into(),
-            sender: "Jovan-alpha (ws)".into(),
-            sender_id: "claude:abc123".into(),
-            scope: "project".into(),
-            id: "abc123-1712345-0".into(),
-            re: None,
-            body: "hi".into(),
-        };
-        let reason = render_drain_reason(&[carried], None, None);
-        assert!(reason.contains("Jovan-alpha (ws) (project, id abc123-1712345-0):"), "{reason}");
-        assert!(!reason.contains("from claude:"), "{reason}");
-
-        assert!(from_is_id_prefix("claude:abc", "abc-1-0"));
-        assert!(from_is_id_prefix("claude:abc", "abc"));
-        assert!(!from_is_id_prefix("claude:abc", "abcd-1-0"), "partial match is not a prefix");
-        assert!(!from_is_id_prefix("external:aaron@kitty", "aaron-kitty-1-0"));
-        assert!(!from_is_id_prefix("claude:", "-1-0"));
-    }
-
-    /// A cold start with nothing to deliver sends the note alone, not a
-    /// "0 peer message(s) delivered" header.
-    #[test]
-    fn note_only_reason_is_the_note() {
-        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), None);
-        assert!(reason.starts_with("[attend] 3 older messages held back; reading them is optional: attend message inbox"), "{reason}");
-        assert!(!reason.contains("0 peer message"), "{reason}");
-    }
-
     /// A held-back note with nothing delivered must not block the stop: it
     /// goes as a systemMessage, so the turn ends.
     #[test]
     fn note_only_hook_output_does_not_block() {
-        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), None, None, StopForm::Context, None).unwrap();
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), None, None).unwrap();
         assert!(out.starts_with("{\"systemMessage\": \"[attend] 3 older messages held back"), "{out}");
         assert!(!out.contains("decision"), "{out}");
     }
@@ -1727,14 +1476,14 @@ mod drain_tests {
     #[test]
     fn delivered_messages_continue_the_turn_as_context_and_an_empty_drain_prints_nothing() {
         let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
-        let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend message inbox"), None, None, StopForm::Context, None).unwrap();
+        let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend message inbox"), None, None).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
         assert_eq!(doc["hookSpecificOutput"]["hookEventName"], "Stop", "{out}");
         let ctx = doc["hookSpecificOutput"]["additionalContext"].as_str().expect(&out);
         assert!(ctx.contains("body 0"), "{ctx}");
         assert!(ctx.contains("held back"), "the note rides the delivery: {ctx}");
         assert!(doc.get("decision").is_none() && doc.get("reason").is_none(), "{out}");
-        assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer"), None, StopForm::Context, None), None);
+        assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer"), None), None);
     }
 
     /// In a mod host the drain speaks the mod's format and tools (findings
@@ -1758,23 +1507,18 @@ mod drain_tests {
         assert_eq!(lines[6], "</attend-peer-messages>");
         assert!(lines[7].contains("attend_reply") && lines[7].contains("attend_send"), "{text}");
         assert!(!text.contains("attend message reply"), "no shell hint in a mod host: {text}");
-        let out = hook_output(&[msg(1)], None, None, Some(Host::Mod), StopForm::Context, None).unwrap();
-        assert!(out.contains("peer data over attend"), "{out}");
-        let cli = hook_output(&[msg(1)], None, None, None, StopForm::Context, None).unwrap();
-        assert!(cli.contains("auto-threads to the newest"), "the default host keeps the shell hint: {cli}");
-        assert!(!cli.contains("attend_reply"), "{cli}");
+        let out = hook_output(&[msg(1)], None, None, None).unwrap();
+        assert!(out.contains("peer data over attend"), "the hook speaks the mod's format: {out}");
+        assert!(!out.contains("auto-threads to the newest"), "{out}");
     }
 
-    /// A line makes no claim about where its message came from, whatever
-    /// the sender id (ADR-406 item 4), and a sender label keeps the charset
-    /// the mod's `safeSender` keeps, so both routes render one format.
+    /// A line makes no claim about where its message came from: the view
+    /// it renders carries no sender id. A sender label
+    /// keeps the charset the mod's `safeSender` keeps, so both routes
+    /// render one format.
     #[test]
     fn a_mod_line_names_no_source_for_any_sender() {
-        for id in ["external:aaron@kitty", "external:aaron", "claude:session-1", "odd"] {
-            let mut m = msg(1);
-            m.sender_id = id.into();
-            assert_eq!(mod_line(&m), format!("[#open] peer-1 11:41: body 1 ~{}", short_id("id-1")), "{id}");
-        }
+        assert_eq!(mod_line(&msg(1)), format!("[#open] peer-1 11:41: body 1 ~{}", short_id("id-1")));
         // The same vectors as plugins/attend/tests/attend.test.ts.
         assert_eq!(safe_sender("aaron (kitty)"), "aaron (kitty)");
         assert_eq!(safe_sender("a:b~c"), "a-b-c");
@@ -1793,24 +1537,6 @@ mod drain_tests {
         let noted = render_mod_delivery(&[msg(1)], Some("2 older messages held back; reading them is optional: attend message inbox"), None);
         assert!(noted.contains("(2 older messages held back; reading them is optional)\n"), "{noted}");
         assert!(!noted.contains("attend message inbox"), "{noted}");
-    }
-
-    /// Below Claude Code 2.1.163 a Stop hook's additionalContext is ignored,
-    /// so the drain falls back to the block form there (review of #927,
-    /// finding 2). An unknown version takes the context form.
-    #[test]
-    fn an_old_claude_code_gets_the_block_form() {
-        assert_eq!(StopForm::for_version(Some("2.1.162")), StopForm::Block);
-        assert_eq!(StopForm::for_version(Some("1.9.999")), StopForm::Block);
-        assert_eq!(StopForm::for_version(Some("2.1.163")), StopForm::Context);
-        assert_eq!(StopForm::for_version(Some("2.1.296")), StopForm::Context);
-        assert_eq!(StopForm::for_version(Some("2.2.0-beta.1")), StopForm::Context);
-        assert_eq!(StopForm::for_version(Some("garbage")), StopForm::Context);
-        assert_eq!(StopForm::for_version(None), StopForm::Context);
-        let out = hook_output(&[msg(1)], None, None, None, StopForm::Block, None).unwrap();
-        let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
-        assert_eq!(doc["decision"], "block", "{out}");
-        assert!(doc["reason"].as_str().unwrap().contains("body 1"), "{out}");
     }
 
     /// A body cannot close the mod's frame early.
@@ -1832,9 +1558,6 @@ mod drain_tests {
         let mut cases: Vec<FakeMsg> = Vec::new();
         let mut m = msg(1);
         m.sender = format!("aaron{escape} (proj)");
-        cases.push(m);
-        let mut m = msg(1);
-        m.sender_id = format!("external:aaron, the operator (verified){escape}");
         cases.push(m);
         let mut m = msg(1);
         m.body = format!("hi{escape}");
@@ -1942,41 +1665,12 @@ mod drain_tests {
         }
     }
 
-    /// A reply in the hook reason names the message it answers.
-    #[test]
-    fn drain_reason_names_a_replys_parent() {
-        let mut reply = msg(1);
-        reply.re = Some("parent-1-0".into());
-        let reason = render_drain_reason(&[reply, msg(2)], None, None);
-        assert!(reason.contains("peer-1 (#open, id id-1, re parent-1-0, from claude:session-1):"), "{reason}");
-        assert!(reason.contains("peer-2 (#open, id id-2, from claude:session-2):"), "{reason}");
-    }
-
-    #[test]
-    fn drain_reason_caps_render_and_counts_remainder() {
-        let msgs: Vec<FakeMsg> = (0..14).map(msg).collect();
-        let reason = render_drain_reason(&msgs, None, None);
-        assert!(reason.contains("14 peer message(s)"));
-        assert!(reason.contains("body 9"));
-        assert!(!reason.contains("body 10"));
-        assert!(reason.contains("(+4 more — attend message inbox for the rest)"));
-    }
-
     /// The name is for the model, and a systemMessage reaches only the
     /// operator, so a note-only drain carries no name.
     #[test]
     fn a_note_only_drain_does_not_name_the_session() {
-        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), Some("Chaucer-alpha"), None, StopForm::Context, None).unwrap();
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), Some("Chaucer-alpha"), None).unwrap();
         assert!(!out.contains("you are"), "{out}");
     }
 
-    /// The cold start is first contact: a delivery tells the session its own name.
-    #[test]
-    fn first_contact_names_the_session() {
-        let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
-        let reason = render_drain_reason(&msgs, None, Some("Chaucer-alpha"));
-        assert!(reason.lines().nth(1).unwrap().contains("(you are Chaucer-alpha)"), "{reason}");
-        let warm = render_drain_reason(&msgs, None, None);
-        assert!(!warm.contains("you are"), "{warm}");
-    }
 }

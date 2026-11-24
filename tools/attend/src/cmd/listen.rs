@@ -29,9 +29,6 @@ pub(crate) fn cmd_listen(sub: ListenCmd, json: bool) {
             std::process::exit(1);
         }
     };
-    if matches!(sub, ListenCmd::Off) && state.listening && state.run_live {
-        eprintln!("[attend] an attend run holds this session; it listens until that run exits");
-    }
     if !state.resolved {
         eprintln!("[attend] no Claude Code session owns this process; nothing listens for it");
     }

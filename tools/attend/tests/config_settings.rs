@@ -8,6 +8,8 @@
 //! `ATTEND_BIN` runs the suite against another build, such as the parent
 //! commit's, to see which tests fail before the change.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -84,7 +86,7 @@ fn text(b: &[u8]) -> String {
 
 /// A hand-edited user file: comments, an order, and a burst_threshold of the
 /// operator's own that tune must not overwrite.
-const HAND: &str = "# my attend settings\ngovernor:\n  base_cooldown: 20   # slower\n\nengagement:\n  # tuned by hand in March\n  burst_threshold: 5\n  step_multiplier: 1.5\n  absolute_refractory: 60   # think time\n  decay_per_minute: 0.1\n  peer_activity_window: 900\n# trailing note\n";
+const HAND: &str = "# my attend settings\ngovernor:\n  base_cooldown: 20   # slower\n\nengagement:\n  # tuned by hand in March\n  burst_threshold: 5\n  step_multiplier: 1.5\n  absolute_refractory: 60   # think time\n  decay_per_minute: 0.1\n# trailing note\n";
 
 // ── tune --apply ───────────────────────────────────────────────
 
@@ -96,20 +98,20 @@ fn tune_apply_changes_only_the_derived_keys_and_keeps_comments() {
     let out = fx.run(&["config", "tune", "--apply"]);
     assert!(out.status.success(), "{}{}", text(&out.stdout), text(&out.stderr));
     let after = std::fs::read_to_string(fx.user()).unwrap();
-    // Only the three derived values may differ, each on its own line.
+    // Only the two derived values may differ, each on its own line.
     let (old, new): (Vec<&str>, Vec<&str>) = (HAND.lines().collect(), after.lines().collect());
     assert_eq!(old.len(), new.len(), "{after}");
     for (a, b) in old.iter().zip(&new) {
-        let derived = ["absolute_refractory:", "decay_per_minute:", "peer_activity_window:"].iter().any(|k| a.trim_start().starts_with(k));
+        let derived = ["absolute_refractory:", "decay_per_minute:"].iter().any(|k| a.trim_start().starts_with(k));
         if !derived {
             assert_eq!(a, b, "a line tune does not own changed:\n{after}");
         }
     }
     assert!(after.contains("  absolute_refractory: 70   # think time\n"), "the inline comment stays:\n{after}");
     assert!(after.contains("burst_threshold: 5") && after.contains("step_multiplier: 1.5"), "{after}");
-    // The think time is 70 s; the window is the turn cycle's p90, 120 s,
-    // times the operator's burst_threshold, 5.
-    assert!(after.contains("peer_activity_window: 600"), "{after}");
+    // The burst window is the turn cycle's p90, 120 s, times the operator's
+    // burst_threshold, 5: ten minutes, over which a 1.5 step decays.
+    assert!(after.contains("decay_per_minute: 0.075"), "{after}");
 }
 
 #[cfg(unix)]
@@ -157,7 +159,7 @@ fn tune_apply_derives_from_the_file_as_it_is_under_the_lock() {
     drop(held);
     assert!(child.wait().unwrap().success());
     let after = std::fs::read_to_string(fx.user()).unwrap();
-    assert!(after.contains("peer_activity_window: 600"), "derived from burst_threshold 5, not the 3 read before the lock:\n{after}");
+    assert!(after.contains("decay_per_minute: 0.0625"), "derived from burst_threshold 5, not the 3 read before the lock:\n{after}");
 }
 
 #[test]
@@ -205,7 +207,7 @@ fn tune_apply_on_no_file_writes_only_the_derived_values() {
     let body = std::fs::read_to_string(fx.user()).unwrap();
     assert_eq!(
         body,
-        "# attend settings; `ways settings help attend` describes each key\nengagement:\n  absolute_refractory: 70\n  decay_per_minute: 0.1042\n  peer_activity_window: 360\n"
+        "# attend settings; `ways settings help attend` describes each key\nengagement:\n  absolute_refractory: 70\n  decay_per_minute: 0.1042\n"
     );
     let lint = fx.run(&["config", "lint"]);
     assert!(lint.status.success(), "{}", text(&lint.stdout));
@@ -258,4 +260,51 @@ fn init_never_overwrites_a_file() {
     let out = fx.run(&["config", "init"]);
     assert!(out.status.success());
     assert_eq!(std::fs::read_to_string(fx.user()).unwrap(), "# mine\n");
+}
+
+/// A user's file for a sensor attend removed, the disclosure sensor here,
+/// that sets more than `enabled` reads as no sensor: `attend sensor list`
+/// lists no row for it and says to delete it, and `attend config lint`
+/// warns, where it would read as invalid with no shipped file under it.
+// #1316 grace: remove after the next release.
+#[test]
+fn a_file_for_a_removed_sensor_warns_and_lists_no_row() {
+    let f = common::Fixture::new("removed-disclosure");
+    f.sensor("disclosure", "interval: 90\nthreshold: 2.0\n");
+    let list = f.attend(&["sensor", "list"]);
+    let listed = String::from_utf8_lossy(&list.stdout);
+    assert!(list.status.success(), "{}", String::from_utf8_lossy(&list.stderr));
+    assert!(!listed.lines().any(|l| l.starts_with("disclosure ") || l.contains("invalid")), "no row and nothing invalid: {listed}");
+    assert!(listed.contains("disclosure.yaml: the disclosure sensor was removed; delete this file"), "{listed}");
+    assert!(!listed.contains("kind is required"), "{listed}");
+    let lint = f.attend(&["config", "lint"]);
+    let said = String::from_utf8_lossy(&lint.stdout);
+    assert_eq!(lint.status.code(), Some(0), "{said}");
+    assert!(said.contains("disclosure.yaml: [attend.sensors.disclosure] disclosure: warning: the disclosure sensor was removed; delete this file"), "{said}");
+}
+
+/// With a user's and a project's file for each removed sensor, `attend
+/// sensor list` names every file once: one line for each disclosure file,
+/// and one line naming both keepwarm files.
+// #1316 grace: remove after the next release.
+#[test]
+fn sensor_list_names_each_removed_file_once() {
+    let f = common::Fixture::new("removed-both");
+    f.sensor("disclosure", "interval: 90\n");
+    f.sensor("keepwarm", "enabled: false\n");
+    let project = Path::new(&f.origin).join(".claude").join("attend").join("sensors");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("disclosure.yaml"), "interval: 60\n").unwrap();
+    std::fs::write(project.join("keepwarm.yaml"), "enabled: true\n").unwrap();
+    let list = f.attend(&["sensor", "list"]);
+    let listed = String::from_utf8_lossy(&list.stdout).into_owned();
+    let lines: Vec<&str> = listed.lines().map(str::trim).filter(|l| l.starts_with("disclosure: ") || l.starts_with("keepwarm: ")).collect();
+    let user = f.home.join("config").join("attend").join("sensors");
+    let disclosure: Vec<&&str> = lines.iter().filter(|l| l.starts_with("disclosure: ")).collect();
+    assert_eq!(disclosure.len(), 2, "{listed}");
+    assert!(disclosure.iter().any(|l| l.contains(&user.join("disclosure.yaml").display().to_string())), "{listed}");
+    assert!(disclosure.iter().any(|l| l.contains(&project.join("disclosure.yaml").display().to_string())), "{listed}");
+    let keepwarm: Vec<&&str> = lines.iter().filter(|l| l.starts_with("keepwarm: ")).collect();
+    assert_eq!(keepwarm.len(), 1, "one line for both keepwarm files: {listed}");
+    assert!(keepwarm[0].contains(&user.join("keepwarm.yaml").display().to_string()) && keepwarm[0].contains(&project.join("keepwarm.yaml").display().to_string()), "{listed}");
 }

@@ -74,39 +74,7 @@ fn scene_private_un_enrolls_when_attend_run_is_not_running() {
     assert!(!f.enrolled(&f.sid));
 }
 
-#[test]
-fn leaving_every_channel_keeps_a_session_that_ran_attend() {
-    let f = Fixture::new("runleave");
-    {
-        let run = f.run();
-        run.wait_for("enrollment by attend run", Duration::from_secs(20), |_| f.marker(&f.sid).exists());
-    }
-    f.ok(&["channel", "join", "a"]);
-    f.ok(&["channel", "leave", "a"]);
-    assert!(f.marker(&f.sid).exists(), "attend run enrolled it; leave does not undo that");
-}
-
-/// #725 re-review, finding 3: `scene private` under a live `attend run`
-/// is recorded, and takes effect once the run is gone.
-// `attend run` ends at once with no sensor to schedule, and the fixture's
-// config leaves it only the peers sensor.
-#[cfg(feature = "sensor-peers")]
-#[test]
-fn scene_private_under_a_live_run_sticks() {
-    let f = Fixture::new("privaterun");
-    f.ok(&["channel", "join", "a"]);
-    {
-        let run = f.run();
-        run.wait_for("enrollment by attend run", Duration::from_secs(20), |_| f.record_has(&f.sid, "run"));
-        f.ok(&["channel", "scene", "private"]);
-        assert!(f.record_has(&f.sid, "optout"), "the opt-out is recorded under the live run");
-    }
-    f.put("_broadcast", "other-1-x", "after opting out", Duration::ZERO);
-    assert_eq!(f.drain("plain"), "", "the opt-out holds once the run is gone");
-    assert!(!f.enrolled(&f.sid));
-}
-
-/// A fresh `attend run` or `attend channel join` after `scene private` enrolls the
+/// A fresh `attend listen on` or `attend channel join` after `scene private` enrolls the
 /// session again.
 #[test]
 fn enrolling_again_after_private_clears_the_opt_out() {
