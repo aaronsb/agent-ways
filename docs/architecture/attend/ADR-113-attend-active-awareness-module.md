@@ -55,6 +55,8 @@ An additional and load-bearing reason this ADR is possible *now* rather than ear
 
 `Monitor` closes that gap by treating a background script's stdout as an async event stream, delivering each line as a notification in Claude's chat. With `persistent: true`, a single `Monitor` invocation covers the duration of a Claude Code session. This is the delivery primitive the awareness layer depends on.
 
+> Amended 2026-11-23 by ADR-416 (#1316): Monitor no longer delivers anything from attend. `attend run`, the loop it hosted, is removed; the attend mod delivers messages and the sensor host's reports, and `/attend` calls the mod's `attend_listen`.
+
 ### Why a new binary (and not a ways subcommand)
 
 The `ways` binary is a matcher, scorer, and disclosure gate — a stateless computation engine invoked by hooks. It responds to events; it does not observe between them. Adding a durable, long-lived executive layer to `ways` would conflate two different lifecycles.
@@ -78,6 +80,9 @@ Introduce `attend`, a new Rust binary hosted as a sibling crate to `ways` in the
 - **Crate:** `attend/` (sibling to `ways/` in the workspace)
 - **Role:** Active awareness module — sensor loop, peer awareness, inter-session signaling
 - **Lifecycle:** Per work session. Explicit start via `/attend` skill or `attend run`. Exits cleanly on signal.
+
+  > Amended 2026-11-23 by ADR-416 (#1316): neither `/attend` nor `attend run` starts attend now. The attend mod starts one `attend sensor host` for each listening session and ends it when the session stops listening or Claude Code exits.
+
 
 ### CLI
 
