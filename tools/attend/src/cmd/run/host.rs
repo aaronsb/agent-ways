@@ -252,14 +252,12 @@ pub(crate) fn cmd_host(a: &HostArgs) {
             last_checkpoint: &mut last_checkpoint,
             peers_checkpointed_once: &mut peers_checkpointed_once,
             last_instance_touch: &mut last_instance_touch,
-            register_instances: true,
             last_cleanup: &mut last_cleanup,
             state_store: &state_store,
             instance_registry: &registry,
             focus: &focus,
             heartbeat_id: &session,
             cfg: &cfg,
-            cache_gate: None,
             sink: &mut sink,
         });
         if sink.closed {

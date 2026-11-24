@@ -466,16 +466,8 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
     s
 }
 
-/// The slots `attend run` polls, and their names, for the session found by
-/// process ancestry.
-pub fn register_sensors(cfg: &Config, focus: &Focus, _catchup: bool, groups: &Groups) -> (Vec<SensorSlot>, Vec<String>) {
-    let ident = attend_presence::session::identity();
-    let ctx = Ctx { cfg, groups: Some(groups), session: ident.session_resolved.then_some(ident.session_id.as_str()), host: false };
-    register(&ctx, focus)
-}
-
 /// The slots the sensor host of `session` polls, and their names: every
-/// sensor `attend run` would poll but keepwarm and disclosure, with the
+/// sensor that runs but keepwarm and disclosure, with the
 /// peers sensor reporting presence alone, on the event lane, since
 /// presence is no one's words.
 ///

@@ -30,15 +30,21 @@ pub(crate) struct Cli {
     pub(crate) command: Option<Commands>,
 }
 
-/// The nine top-level commands (ADR-413 item 1). The one-release aliases of
-/// the old flat verbs (item 5) were removed by issue #982.
+/// The eight top-level commands. The one-release aliases of the old flat
+/// verbs were removed by issue #982, and `run` by #1316: awareness reaches
+/// a session only through the attend mod.
 #[derive(Subcommand)]
 pub(crate) enum Commands {
-    /// Start the sensor loop (use with Monitor for async delivery)
+    /// `attend run` is removed (#1316). It stays as a hidden stub for one
+    /// release, so an `attend run` an older attend started, which
+    /// re-executes into this binary when it updates, or a Monitor that
+    /// starts it again, says where awareness went and exits 2.
+    // #1316 grace: remove after the next release.
+    #[command(hide = true, disable_help_flag = true)]
     Run {
-        /// Replay backlog signals on startup before normal cadence
-        #[arg(long)]
-        catchup: bool,
+        /// Whatever the old command took, `--catchup` included: ignored.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        rest: Vec<String>,
     },
 
     #[command(about = describe::LISTEN)]
@@ -133,7 +139,7 @@ pub(crate) enum MessageCmd {
     /// session that may still read the bus, an id such a session had
     /// before /clear and this session's own are refused. Its messages stay
     /// on disk; `attend message delete --everywhere --from <id>` marks them
-    /// for deletion (ADR-404 D3e).
+    /// for deletion.
     Tombstone(TombstoneArgs),
 }
 
@@ -848,13 +854,13 @@ mod tests {
         }
     }
 
-    /// `attend` has the nine groups and nothing else (ADR-413 item 1; the
-    /// item 5 aliases were removed by #982).
+    /// `attend` has the eight groups and nothing else: the old flat verbs'
+    /// aliases were removed by #982, and `run` by #1316.
     #[test]
-    fn help_lists_the_nine_commands() {
+    fn help_lists_the_eight_commands() {
         let cli = Cli::command();
-        let shown: Vec<&str> = cli.get_subcommands().map(|c| c.get_name()).collect();
-        assert_eq!(shown, ["run", "listen", "message", "channel", "peer", "keepwarm", "chat", "sensor", "config"]);
+        let shown: Vec<&str> = cli.get_subcommands().filter(|c| !c.is_hide_set()).map(|c| c.get_name()).collect();
+        assert_eq!(shown, ["listen", "message", "channel", "peer", "keepwarm", "chat", "sensor", "config"]);
     }
 
     /// The help states the limits the code applies.

@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! Per-session stamps in the state dir: where the banner stamp lives, and
-//! the startup sweep that removes stamps of sessions long gone.
+//! Per-session stamps in the state dir, and the startup sweep that removes
+//! stamps of sessions long gone.
 //!
-//! `state/<key>.banner` holds the startup banner fingerprint and
-//! `state/<key>.last-inbound` the message `attend message reply` threads to. Both
-//! are written per session and nothing else removes them, so a machine
-//! that runs many sessions collects one pair per session for ever.
+//! `state/<key>.last-inbound` holds the message `attend message reply`
+//! threads to. It is written per session and nothing else removes it, so a
+//! machine that runs many sessions collects one per session for ever.
+//! `state/<key>.banner` held the startup banner fingerprint of `attend
+//! run`, which is gone; the sweep removes the ones it left for one
+//! release.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -23,24 +25,12 @@ pub(super) const STAMP_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60)
 pub(super) const SWEEP_MAX_CANDIDATES: usize = 2000;
 
 /// The stamps the sweep removes. The seen-set (`.state`) has its own
-/// lifecycle and is only read here, as a sign of life.
+/// lifecycle and is only read here, as a sign of life. `banner` stays for
+/// one release after `attend run`, so the stamps it left are removed.
 const SWEPT: &[&str] = &["banner", "last-inbound"];
 
 /// Every file a session keeps in the state dir, read for its newest mtime.
 const LIFE_SIGNS: &[&str] = &["state", "banner", "last-inbound"];
-
-/// The key a session's banner stamp is filed under. A resolved session
-/// uses its session id. A pid-fallback session has none that survives a
-/// Monitor re-arm (its id names the `attend run` pid, new on every
-/// start), so it uses the Claude Code process it runs under, by pid and
-/// start time; with no such process found it keeps no stamp and gets the
-/// full banner on every start.
-pub(super) fn stamp_key(session_id: &str, resolved: bool, claude: Option<(u32, String)>) -> Option<String> {
-    if resolved {
-        return Some(session_id.to_string());
-    }
-    claude.map(|(pid, start)| format!("claude-{pid}-{start}"))
-}
 
 /// Is the session filed under stamp `key` still alive? A resolved session
 /// is alive while it has a Claude Code record in `live`. A pid-fallback key
@@ -59,18 +49,6 @@ fn key_is_live(key: &str, live: &HashSet<String>, start_time: impl Fn(u32) -> Op
 /// [`key_is_live`] against the running system.
 pub(super) fn is_live(key: &str, live: &HashSet<String>) -> bool {
     key_is_live(key, live, attend_presence::process::start_time)
-}
-
-/// The banner stamp path for this process's session, if it can keep one.
-pub(super) fn banner_stamp_path(session_id: &str, resolved: bool) -> Option<PathBuf> {
-    let claude = if resolved {
-        None
-    } else {
-        attend_presence::process::claude_ancestor(std::process::id())
-            .and_then(|pid| Some((pid, attend_presence::process::start_time(pid)?)))
-    };
-    let key = stamp_key(session_id, resolved, claude)?;
-    Some(attend_presence::cache::state_dir().join(format!("{key}.banner")))
 }
 
 /// Remove the banner and last-inbound stamps of every session that
@@ -155,24 +133,6 @@ pub(super) fn live_sessions() -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_resolved_session_is_keyed_by_its_id() {
-        assert_eq!(stamp_key("sess-a", true, Some((7, "99".into()))).as_deref(), Some("sess-a"));
-    }
-
-    /// A pid-fallback session re-armed every 30 minutes gets a new `attend
-    /// run` pid each time; its stamp follows the Claude Code process, so
-    /// the re-arm reads `restarted (unchanged)`, not `started`.
-    #[test]
-    fn a_pid_fallback_session_is_keyed_by_its_claude_process() {
-        let first = stamp_key("pid-100", false, Some((42, "123".into())));
-        let rearm = stamp_key("pid-200", false, Some((42, "123".into())));
-        assert_eq!(first, rearm);
-        assert_eq!(first.as_deref(), Some("claude-42-123"));
-        assert_ne!(first, stamp_key("pid-300", false, Some((42, "456".into()))), "a reused pid is another process");
-        assert_eq!(stamp_key("pid-100", false, None), None);
-    }
 
     fn scratch(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("attend-stamps-{tag}-{}", std::process::id()));
