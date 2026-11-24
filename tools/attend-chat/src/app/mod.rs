@@ -26,6 +26,7 @@ mod keys;
 mod menu;
 mod participants;
 mod pending;
+mod reopen;
 mod unsent;
 mod settings_view;
 mod sidebar;
@@ -166,9 +167,12 @@ pub struct ChatPane {
     /// unless the chat reopens the tab the last chat showed
     /// ([`Chat::reopen_last_tab`]).
     foreground: Tab,
-    /// The file the shown tab is recorded in each time it changes, for the
-    /// next chat to reopen ([`crate::last_tab`]); none records nothing.
-    last_tab_path: Option<std::path::PathBuf>,
+    /// The state directory the chat records the shown tab and the operator
+    /// view's DM watermark in, for the next chat to reopen
+    /// ([`crate::last_tab`]); none records nothing. With it, the record the
+    /// file holds now, written again only when it changes.
+    state_dir: Option<std::path::PathBuf>,
+    recorded: Option<crate::last_tab::Last>,
     feed: FeedState,
     /// The feed's height in the last frame, for paging.
     feed_rows: u16,
@@ -278,9 +282,9 @@ pub struct ChatPane {
     /// The newest DM to the operator that the operator view, and each DM
     /// view, held when it was last shown, kept as watermarks of the kind
     /// Hide messages here keeps: an agent's row marks the DMs past both
-    /// ([`dm`]). In memory only: the chat opens on the operator view, which
-    /// shows every DM, or counts it shown when it reopens another tab
-    /// ([`Chat::reopen_last_tab`]).
+    /// ([`dm`]). In memory: the chat opens on the operator view, which
+    /// shows every DM. A chat that reopens another tab starts from the
+    /// operator view's mark the last chat kept ([`reopen`]).
     shown: crate::hidden::Hidden,
     /// The attend CLI the cleanup items run ([`cleanup`]), and the last
     /// delete made, for Undo delete.
@@ -329,7 +333,8 @@ impl ChatPane {
             status_is_error: false,
             tab_cycle: None,
             foreground: Tab::default(),
-            last_tab_path: None,
+            state_dir: None,
+            recorded: None,
             feed: FeedState::default(),
             feed_rows: 0,
             rx,
@@ -574,6 +579,9 @@ impl ChatPane {
             self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, invites(!self.dry_run), instances, &self.foreground, &self.views));
             self.remember_dm_names();
             self.refocus();
+            // A join since the last read, the chat's own or another's,
+            // marks the operator a member of the channel shown.
+            self.record_tab();
         }
         self.world.as_ref().expect("just built")
     }
@@ -610,22 +618,6 @@ impl ChatPane {
                 self.refocus();
             }
             self.draft_back();
-        }
-    }
-
-    /// Record the tab shown, for the next chat to reopen, when the chat
-    /// keeps a record ([`crate::last_tab`]). A record that cannot be
-    /// written is passed over: the next chat opens where it would without.
-    fn record_tab(&self) {
-        let Some(path) = &self.last_tab_path else { return };
-        let member = match &self.foreground {
-            Tab::Channel(c) => attend_groups::load_groups(&crate::signal::signals_base())
-                .get(c)
-                .is_some_and(|g| g.members.contains(&crate::signal::human_member_id())),
-            _ => false,
-        };
-        if let Some(last) = crate::last_tab::Last::of(&self.foreground, member) {
-            let _ = last.save(path);
         }
     }
 
@@ -1411,28 +1403,11 @@ impl Chat {
         self
     }
 
-    /// Open on the tab the last chat showed, as recorded in `path`, and
-    /// record there each tab shown from now on ([`crate::last_tab`]). A
-    /// channel gone since, or left, opens `#open`; with no record, or one
-    /// that does not parse, the chat opens where it opens without one.
-    ///
-    /// The operator view counts as shown up to now, as it would had the
-    /// chat opened on it, so the direct messages that came before do not
-    /// mark their agents' rows as new.
-    pub fn reopen_last_tab(mut self, path: impl Into<std::path::PathBuf>) -> Chat {
-        let path = path.into();
-        let last = crate::last_tab::Last::load(&path);
-        let known = crate::groups::channels(agent_theme::ColorDepth::NoColor);
-        let pane = self.pane_mut();
-        if let Some(tab) = crate::last_tab::reopen(last.as_ref(), &known, &crate::signal::human_member_id()) {
-            if tab != Tab::Merged {
-                let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-                pane.shown.hide(&Tab::Merged, (now, 0, 0));
-            }
-            pane.foreground = tab;
-            pane.invalidate();
-        }
-        pane.last_tab_path = Some(path);
+    /// Open on the tab the last chat showed, as recorded in the state
+    /// directory `dir`, and record there each tab shown from now on
+    /// ([`crate::last_tab`], [`reopen`]).
+    pub fn reopen_last_tab(mut self, dir: impl Into<std::path::PathBuf>) -> Chat {
+        self.pane_mut().reopen_last_tab(dir.into());
         self
     }
 

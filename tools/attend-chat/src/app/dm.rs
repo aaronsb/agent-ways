@@ -100,6 +100,9 @@ impl ChatPane {
         if let Some(n) = newest {
             self.shown.hide(&mark, n);
         }
+        if *tab == Tab::Merged {
+            self.keep_operator_view_mark(newest);
+        }
     }
 
     /// The agents, by membership id, with a DM to the operator newer than

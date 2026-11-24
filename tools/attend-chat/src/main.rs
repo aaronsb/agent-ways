@@ -225,7 +225,7 @@ fn main() {
     // so does a forced exit, which ends the process without that end.
     attend_chat::app::keep_on_panic();
     attend_chat::app::keep_on_forced_exit();
-    let code = match agent_tui::run(chat.reopen_last_tab(attend_chat::last_tab::default_path()).restore_unsent().into_app()) {
+    let code = match agent_tui::run(chat.reopen_last_tab(attend_chat::hidden::state_dir()).restore_unsent().into_app()) {
         Ok(session) => session.signal.map_or(0, |sig| 128 + sig),
         Err(e) => {
             eprintln!("attend-chat: terminal: {e}");

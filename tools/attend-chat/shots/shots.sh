@@ -141,9 +141,10 @@ sweep
 # A restart-* scenario runs the chat from a shell, as hup-bash does, quits
 # it with Ctrl-C and starts it again: restart-chan reopens #deploy, the
 # channel shown when it quit; restart-gone dissolves #deploy from the shell
-# between the two runs, and restart-left has the operator leave #deploy
-# (the own fixture) before the quit, so each opens #open instead. F2 then
-# marks the tab shown with ▸.
+# between the two runs, restart-left has the operator leave #deploy (the
+# own fixture) before the quit, and restart-joined shows #deploy before
+# the operator is in it, joins it by posting there and leaves it, so each
+# of those opens #open instead. F2 then marks the tab shown with ▸.
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
@@ -346,6 +347,7 @@ strip-narrow16 | full16 | wait:Agents M-7 wait:long_names resize:40 gone:Agents 
 restart-chan | base  | wait:$ chat: wait:Agents M-2 wait:rollout_coordination C-c gone:Agents chat: wait:Agents F2 wait:▸#deploy
 restart-gone | base  | wait:$ chat: wait:Agents M-2 wait:rollout_coordination C-c gone:Agents text:attend_channel_dissolve_deploy Enter chat: wait:Agents F2 wait:▸#open
 restart-left | own   | wait:$ chat: wait:Agents_3/4 M-2 wait:rollout_coordination text:/leave Enter wait:left_#deploy C-c gone:Agents chat: wait:Agents F2 wait:▸#open
+restart-joined | base | wait:$ chat: wait:Agents M-2 wait:rollout_coordination text:heading_out Enter wait:sent_→_#deploy text:/leave Enter wait:left_#deploy C-c gone:Agents chat: wait:Agents F2 wait:▸#open
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy

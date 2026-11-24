@@ -4,18 +4,23 @@
 
 //! The tab the chat last showed, so a restart opens on it (#1349).
 //!
-//! Each time the shown tab changes to a channel or the operator view, the
-//! chat writes it to attend-chat's state file
-//! `$XDG_STATE_HOME/attend-chat/last-tab`
-//! (`~/.local/state/attend-chat/last-tab` when the variable is unset). The
-//! write replaces the file whole, through a temporary file and a rename, so
-//! a chat that is killed leaves the last tab it showed. A DM view or an
-//! agent's own DMs is not recorded: the file keeps the channel shown before
-//! it.
+//! The chat keeps two files in attend-chat's state directory
+//! (`$XDG_STATE_HOME/attend-chat`, or `~/.local/state/attend-chat` when the
+//! variable is unset):
 //!
-//! The file is one line: the tab's key, `all` for the operator view or
-//! `#name` for a channel, then for a channel the operator was a member of
-//! when it was shown, a tab and `member`.
+//! - `last-tab`, the tab shown. The chat writes it when the record changes:
+//!   when a channel or the operator view is shown, and when the operator
+//!   becomes a member of the channel shown. A DM view or an agent's own DMs
+//!   is not recorded, and the file keeps the channel shown before it. The
+//!   write replaces the file whole, through a temporary file and a rename,
+//!   so a chat that is killed leaves the last record it made.
+//! - `shown`, the operator view's DM watermark: the newest DM to the
+//!   operator that the operator view held when it was last left, in the
+//!   format of Hide messages here's file ([`crate::hidden`]).
+//!
+//! `last-tab` is one line: `all` for the operator view, or `#name` for a
+//! channel, followed by a tab and `member` when the operator was a member
+//! of the channel at any time while it was shown ([`Last::showing`]).
 //!
 //! At start the chat reopens the recorded tab ([`reopen`]). A channel that
 //! no longer exists, or that the operator was a member of and has left
@@ -28,20 +33,35 @@ use crate::groups::{KnownGroup, BASE_CHANNEL_NAME};
 use crate::tabs::Tab;
 
 /// The tab recorded, and whether the operator was a member of its channel
-/// when it was shown.
+/// while it was shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Last {
     pub tab: Tab,
     pub member: bool,
 }
 
+/// Whether the file can hold the channel `name`: one with no tab, newline
+/// or carriage return, the characters its line is split on.
+fn keepable(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['\t', '\n', '\r'])
+}
+
 impl Last {
-    /// The record for `tab`, or `None` for a tab that is not recorded.
-    pub fn of(tab: &Tab, member: bool) -> Option<Last> {
+    /// The record for `tab` shown now, given the record `prev` made while it
+    /// was shown and the channels `known` lists with their members. The
+    /// operator `person` counts as a member when they are one now, or when
+    /// `prev` already recorded them as one for this tab: leaving the channel
+    /// shown does not clear it. `None` for a tab that is not recorded, a DM
+    /// view or a channel whose name the file cannot hold.
+    pub fn showing(tab: &Tab, prev: Option<&Last>, known: &[KnownGroup], person: &str) -> Option<Last> {
         match tab {
             Tab::Merged => Some(Last { tab: Tab::Merged, member: false }),
-            Tab::Channel(_) => Some(Last { tab: tab.clone(), member }),
-            Tab::Dm(_) | Tab::Review(_) => None,
+            Tab::Channel(name) if keepable(name) => {
+                let now = known.iter().any(|k| k.group.name == *name && k.membership.members.iter().any(|m| m == person));
+                let before = prev.is_some_and(|p| p.tab == *tab && p.member);
+                Some(Last { tab: tab.clone(), member: now || before })
+            }
+            Tab::Channel(_) | Tab::Dm(_) | Tab::Review(_) => None,
         }
     }
 
@@ -66,20 +86,16 @@ impl Last {
         }
         let tab = match key {
             "all" => Tab::Merged,
-            _ => {
-                let name = key.strip_prefix('#')?;
-                if name.is_empty() || name.chars().any(char::is_whitespace) {
-                    return None;
-                }
-                Tab::Channel(name.to_string())
-            }
+            _ => Tab::Channel(key.strip_prefix('#').filter(|n| keepable(n))?.to_string()),
         };
         Some(Last { member: member && matches!(tab, Tab::Channel(_)), tab })
     }
 
-    /// Write the record to `path`, whole.
+    /// Write the record to `path`, whole. A channel whose name the file
+    /// cannot hold is not written, and the file keeps the record before it.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let key = match &self.tab {
+            Tab::Channel(c) if !keepable(c) => return Ok(()),
             Tab::Channel(c) => format!("#{c}"),
             _ => "all".to_string(),
         };
@@ -105,16 +121,22 @@ pub fn reopen(last: Option<&Last>, known: &[KnownGroup], person: &str) -> Option
     Some(if left { open } else { last.tab.clone() })
 }
 
-/// attend-chat's state file for the last tab shown.
-pub fn default_path() -> PathBuf {
-    crate::hidden::state_dir().join("last-tab")
+/// The file in the state directory `dir` that holds the last tab shown.
+pub fn path(dir: &Path) -> PathBuf {
+    dir.join("last-tab")
+}
+
+/// The file in the state directory `dir` that holds the operator view's DM
+/// watermark.
+pub fn shown_path(dir: &Path) -> PathBuf {
+    dir.join("shown")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_theme::ColorDepth;
     use agent_identity::Group;
+    use agent_theme::ColorDepth;
     use attend_groups::GroupEntry;
 
     fn known(channels: &[(&str, &[&str])]) -> Vec<KnownGroup> {
@@ -155,10 +177,41 @@ mod tests {
         assert_eq!(reopen(None, &known(&[("deploy", &[])]), "operator"), None);
     }
 
+    /// The member bit means "a member at some time while it was shown": it
+    /// rises when the operator joins the channel shown and stays set when
+    /// they leave it, and a channel shown afresh starts from what is true
+    /// now.
+    #[test]
+    fn the_member_bit_only_rises_while_the_tab_is_shown() {
+        let out = known(&[("deploy", &[])]);
+        let inside = known(&[("deploy", &["operator"])]);
+        let shown = Last::showing(&chan("deploy"), None, &out, "operator").unwrap();
+        assert!(!shown.member, "shown before joining");
+        let joined = Last::showing(&chan("deploy"), Some(&shown), &inside, "operator").unwrap();
+        assert!(joined.member, "joined while shown");
+        let left = Last::showing(&chan("deploy"), Some(&joined), &out, "operator").unwrap();
+        assert!(left.member, "leaving does not clear it");
+        let elsewhere = Last::showing(&chan("infra"), Some(&joined), &known(&[("infra", &[])]), "operator").unwrap();
+        assert!(!elsewhere.member, "another channel starts afresh");
+        let again = Last::showing(&chan("deploy"), Some(&elsewhere), &out, "operator").unwrap();
+        assert!(!again.member, "shown again after another tab, as a non-member");
+    }
+
+    #[test]
+    fn views_and_names_the_file_cannot_hold_are_not_recorded() {
+        let none = known(&[]);
+        assert_eq!(Last::showing(&Tab::Dm("a1".into()), None, &none, "operator"), None);
+        assert_eq!(Last::showing(&Tab::Review("a1".into()), None, &none, "operator"), None);
+        assert_eq!(Last::showing(&Tab::Merged, None, &none, "operator"), Some(Last { tab: Tab::Merged, member: false }));
+        for bad in ["x\tmember", "a\nb", "a\rb"] {
+            assert_eq!(Last::showing(&chan(bad), None, &none, "operator"), None, "{bad:?}");
+        }
+    }
+
     #[test]
     fn the_record_survives_a_restart() {
         let dir = crate::test_dir::unique("last-tab");
-        let path = dir.join("attend-chat").join("last-tab");
+        let path = path(&dir.join("attend-chat"));
         assert_eq!(Last::load(&path), None, "a first start: no file");
         for last in [Last { tab: chan("deploy"), member: true }, Last { tab: chan("infra"), member: false }, Last { tab: Tab::Merged, member: false }] {
             last.save(&path).unwrap();
@@ -171,11 +224,32 @@ mod tests {
         assert_eq!(leftovers, ["last-tab"], "the temporary file is renamed into place");
     }
 
+    /// Every name without a tab, newline or carriage return comes back as
+    /// written, spaces and Unicode whitespace included. A name with one of
+    /// those is not written, and the file keeps the record before it.
+    #[test]
+    fn names_round_trip_or_are_not_written() {
+        let dir = crate::test_dir::unique("last-tab");
+        let path = path(&dir);
+        for name in ["deploy", "two words", "café\u{a0}ops", "tab\u{2003}em", "trailing "] {
+            for member in [false, true] {
+                let last = Last { tab: chan(name), member };
+                last.save(&path).unwrap();
+                assert_eq!(Last::load(&path), Some(last), "{name:?}");
+            }
+        }
+        Last { tab: chan("kept"), member: false }.save(&path).unwrap();
+        for bad in ["x\tmember", "a\nb", "a\rb"] {
+            Last { tab: chan(bad), member: false }.save(&path).unwrap();
+            assert_eq!(Last::load(&path), Some(Last { tab: chan("kept"), member: false }), "{bad:?} leaves the record before it");
+        }
+    }
+
     #[test]
     fn a_malformed_file_is_no_record() {
         let dir = crate::test_dir::unique("last-tab");
         let path = dir.join("last-tab");
-        for bad in ["", "\n", "deploy\n", "#\n", "#two words\n", "#deploy\tguest\n", "#deploy\tmember\textra\n", "all\n#deploy\n", "\u{0}\u{1}garbage"] {
+        for bad in ["", "\n", "deploy\n", "#\n", "#a\rb\n", "#deploy\tguest\n", "#deploy\tmember\textra\n", "all\n#deploy\n", "\u{0}\u{1}garbage"] {
             std::fs::write(&path, bad).unwrap();
             assert_eq!(Last::load(&path), None, "{bad:?}");
             assert_eq!(reopen(Last::load(&path).as_ref(), &known(&[("deploy", &[])]), "operator"), None, "{bad:?} opens where a first start does");
@@ -185,22 +259,9 @@ mod tests {
     }
 
     #[test]
-    fn views_are_not_recorded() {
-        assert_eq!(Last::of(&Tab::Dm("a1".into()), true), None);
-        assert_eq!(Last::of(&Tab::Review("a1".into()), false), None);
-        assert_eq!(Last::of(&Tab::Merged, true), Some(Last { tab: Tab::Merged, member: false }));
-        assert_eq!(Last::of(&chan("deploy"), true), Some(Last { tab: chan("deploy"), member: true }));
-    }
-
-    #[test]
-    fn the_state_file_is_under_xdg_state_home() {
-        let _env = crate::test_dir::env_lock();
-        let prev = std::env::var_os("XDG_STATE_HOME");
-        std::env::set_var("XDG_STATE_HOME", "/tmp/st");
-        assert_eq!(default_path(), PathBuf::from("/tmp/st/attend-chat/last-tab"));
-        match prev {
-            Some(v) => std::env::set_var("XDG_STATE_HOME", v),
-            None => std::env::remove_var("XDG_STATE_HOME"),
-        }
+    fn the_files_sit_in_the_state_directory() {
+        let dir = Path::new("/tmp/st/attend-chat");
+        assert_eq!(path(dir), PathBuf::from("/tmp/st/attend-chat/last-tab"));
+        assert_eq!(shown_path(dir), PathBuf::from("/tmp/st/attend-chat/shown"));
     }
 }

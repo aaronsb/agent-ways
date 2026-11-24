@@ -16,7 +16,8 @@ use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use agent_tui::testkit;
 use agent_tui::theme::{Palette, Shape};
 use attend_chat::app::Chat;
-use attend_chat::last_tab::Last;
+use attend_chat::hidden::Hidden;
+use attend_chat::last_tab::{self, Last};
 use attend_chat::signal::{Channel, Signal};
 use attend_chat::tabs::Tab;
 
@@ -35,16 +36,22 @@ fn root() -> &'static std::path::Path {
     })
 }
 
-/// A state file of the test's own: tests run in parallel in one fixture.
+/// A state directory of the test's own: tests run in parallel in one
+/// fixture.
 fn state(name: &str) -> PathBuf {
-    root().join("state").join("attend-chat").join(name)
+    root().join("state").join(name)
 }
 
-/// A chat as `main` starts one: reopening and recording through `path`.
+/// The record file in the state directory `dir`.
+fn record(dir: &std::path::Path) -> String {
+    std::fs::read_to_string(last_tab::path(dir)).unwrap()
+}
+
+/// A chat as `main` starts one: reopening and recording in `dir`.
 /// Alt+digit on the channel shown shows it again rather than its menu, so
 /// [`show`] can walk the numbers.
-fn chat(path: &PathBuf) -> Chat {
-    bare().reopen_last_tab(path)
+fn chat(dir: &PathBuf) -> Chat {
+    bare().reopen_last_tab(dir)
 }
 
 fn bare() -> Chat {
@@ -69,62 +76,95 @@ fn show(c: &mut Chat, name: &str) {
     panic!("no Alt+digit showed #{name}");
 }
 
+fn press(c: &mut Chat, key: KeyEvent) {
+    testkit::render_screen(c, 80, 25);
+    assert!(testkit::drive(c, &[key]));
+}
+
+fn type_line(c: &mut Chat, line: &str) {
+    for ch in line.chars() {
+        press(c, KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    press(c, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+}
+
 #[test]
 fn a_restart_reopens_the_channel_shown_last() {
-    let path = state("restart");
-    let mut first = chat(&path);
+    let dir = state("restart");
+    let mut first = chat(&dir);
     assert_eq!(*first.foreground(), Tab::Merged, "a first start opens the operator view");
     show(&mut first, "kept");
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "#kept\tmember\n", "recorded as it is shown, before any exit");
+    assert_eq!(record(&dir), "#kept\tmember\n", "recorded as it is shown, before any exit");
     show(&mut first, "viewed");
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "#viewed\n", "a channel the operator only views");
+    assert_eq!(record(&dir), "#viewed\n", "a channel the operator only views");
     drop(first);
-    assert_eq!(*chat(&path).foreground(), channel("viewed"));
+    assert_eq!(*chat(&dir).foreground(), channel("viewed"));
 }
 
 #[test]
 fn the_operator_view_reopens_too() {
-    let path = state("all");
-    let mut first = chat(&path);
+    let dir = state("all");
+    let mut first = chat(&dir);
     show(&mut first, "kept");
-    testkit::render_screen(&mut first, 80, 25);
-    assert!(testkit::drive(&mut first, &[KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT)]));
+    press(&mut first, KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT));
     assert_eq!(*first.foreground(), Tab::Merged);
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "all\n");
-    assert_eq!(*chat(&path).foreground(), Tab::Merged);
+    assert_eq!(record(&dir), "all\n");
+    assert_eq!(*chat(&dir).foreground(), Tab::Merged);
 }
 
 #[test]
 fn a_channel_dissolved_since_opens_open() {
-    let path = state("dissolved");
-    Last { tab: channel("doomed"), member: true }.save(&path).unwrap();
+    let dir = state("dissolved");
+    Last { tab: channel("doomed"), member: true }.save(&last_tab::path(&dir)).unwrap();
     attend_groups::Groups::new(&attend_chat::signal::signals_base(), "aaron").dissolve("doomed").unwrap();
-    assert_eq!(*chat(&path).foreground(), channel("open"));
+    assert_eq!(*chat(&dir).foreground(), channel("open"));
 }
 
 #[test]
 fn a_channel_left_since_opens_open() {
-    let path = state("left");
-    Last { tab: channel("parting"), member: true }.save(&path).unwrap();
+    let dir = state("left");
+    Last { tab: channel("parting"), member: true }.save(&last_tab::path(&dir)).unwrap();
     attend_groups::Groups::new(&attend_chat::signal::signals_base(), "aaron").leave("parting").unwrap();
-    assert_eq!(*chat(&path).foreground(), channel("open"));
+    assert_eq!(*chat(&dir).foreground(), channel("open"));
 }
 
 #[test]
 fn a_channel_never_recorded_opens_open() {
-    let path = state("unknown");
-    Last { tab: channel("nowhere"), member: false }.save(&path).unwrap();
-    assert_eq!(*chat(&path).foreground(), channel("open"));
+    let dir = state("unknown");
+    Last { tab: channel("nowhere"), member: false }.save(&last_tab::path(&dir)).unwrap();
+    assert_eq!(*chat(&dir).foreground(), channel("open"));
+}
+
+/// The issue's case: a channel made with Ctrl+N is shown before the
+/// operator is in it. A post joins it and a Leave takes them out, with no
+/// change of tab; the restart opens #open.
+#[test]
+fn a_channel_joined_while_shown_and_then_left_opens_open() {
+    let dir = state("joined");
+    let mut first = chat(&dir);
+    press(&mut first, KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+    type_line(&mut first, "deploy");
+    assert_eq!(*first.foreground(), channel("deploy"), "{}", first.status());
+    // A live agent joins, so the post has a reader.
+    attend_groups::Groups::new(&attend_chat::signal::signals_base(), AGENT_SID).join("deploy", false).unwrap();
+    type_line(&mut first, "anyone here?");
+    assert_eq!(first.status(), "sent → #deploy");
+    type_line(&mut first, "/leave");
+    assert_eq!(first.status(), "left #deploy");
+    testkit::render_screen(&mut first, 80, 25);
+    assert_eq!(record(&dir), "#deploy\tmember\n", "a member while it was shown, though not now");
+    drop(first);
+    assert_eq!(*chat(&dir).foreground(), channel("open"));
 }
 
 #[test]
 fn no_record_or_a_malformed_one_opens_the_operator_view() {
-    let path = state("missing");
-    assert_eq!(*chat(&path).foreground(), Tab::Merged, "no file");
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let dir = state("missing");
+    assert_eq!(*chat(&dir).foreground(), Tab::Merged, "no file");
+    std::fs::create_dir_all(&dir).unwrap();
     for bad in ["", "kept\n", "#kept\tguest\n", "#kept\n#viewed\n"] {
-        std::fs::write(&path, bad).unwrap();
-        let c = chat(&path);
+        std::fs::write(last_tab::path(&dir), bad).unwrap();
+        let c = chat(&dir);
         assert_eq!(*c.foreground(), Tab::Merged, "{bad:?}");
         assert_eq!(c.status(), "", "{bad:?}: nothing said");
     }
@@ -134,7 +174,8 @@ fn no_record_or_a_malformed_one_opens_the_operator_view() {
 fn a_chat_that_does_not_reopen_records_nothing() {
     let mut c = bare();
     show(&mut c, "kept");
-    assert!(!state("last-tab").exists(), "the default state file is left alone");
+    let dir = root().join("state").join("attend-chat");
+    assert!(!last_tab::path(&dir).exists() && !last_tab::shown_path(&dir).exists(), "the default state files are left alone");
 }
 
 /// A DM to the operator from the fixture's agent, sent at `ts`.
@@ -153,25 +194,63 @@ fn dm(id: &str, ts: u64) -> Signal {
     }
 }
 
-/// The agent's row in the left column.
-fn agent_row(c: &mut Chat) -> String {
+/// Whether the agent's row in the left column marks a new DM.
+fn marked(c: &mut Chat) -> bool {
     let name = agent_identity::Identity::for_cwd("/work/alpha", agent_theme::ColorDepth::NoColor).nickname.to_string();
     let rows = testkit::rows(&testkit::render_screen(c, 120, 35));
-    rows.iter().skip(1).map(|r| r.split('│').next().unwrap_or("").to_string()).find(|r| r.contains(&name)).unwrap_or_else(|| panic!("no row for {name}: {}", rows.join("\n")))
+    let row = rows.iter().skip(1).map(|r| r.split('│').next().unwrap_or("").to_string()).find(|r| r.contains(&name));
+    row.unwrap_or_else(|| panic!("no row for {name}: {}", rows.join("\n"))).contains('✉')
 }
 
-/// A chat that opens on a channel has not shown the operator view, which
-/// shows every DM. The DMs sent before it started still count as seen, as
-/// they would had it opened there; one sent since marks the agent's row.
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+}
+
+/// With no operator view mark kept, a chat that opens on a channel counts
+/// the DMs from before its start as shown, as it would had it opened on the
+/// operator view; one sent since marks the agent's row.
 #[test]
-fn a_reopened_channel_marks_only_the_dms_sent_since() {
-    let path = state("dms");
-    Last { tab: channel("kept"), member: true }.save(&path).unwrap();
-    let mut c = chat(&path).heartbeat(false).dry_run(true);
+fn with_no_mark_kept_only_the_dms_sent_since_the_start_are_new() {
+    let dir = state("dms");
+    Last { tab: channel("kept"), member: true }.save(&last_tab::path(&dir)).unwrap();
+    let mut c = chat(&dir).heartbeat(false).dry_run(true);
     assert_eq!(*c.foreground(), channel("kept"));
     c.push(dm("d-1", 1_790_949_000));
-    assert!(!agent_row(&mut c).contains('✉'), "a DM from before the start is not new: {}", agent_row(&mut c));
-    let later = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 60;
-    c.push(dm("d-2", later));
-    assert!(agent_row(&mut c).contains('✉'), "a DM since marks the agent: {}", agent_row(&mut c));
+    assert!(!marked(&mut c), "a DM from before the start is not new");
+    c.push(dm("d-2", now() + 60));
+    assert!(marked(&mut c), "a DM since marks the agent");
+}
+
+/// The operator view's mark outlives the chat: a DM that came while no
+/// chat ran, newer than the mark the last chat kept, marks the agent's row
+/// in a chat that reopens a channel, and an older one does not.
+#[test]
+fn a_dm_that_came_while_the_chat_was_closed_is_new() {
+    let dir = state("closed");
+    Last { tab: channel("kept"), member: true }.save(&last_tab::path(&dir)).unwrap();
+    let mark = now() - 3600;
+    Hidden::hide_in(&last_tab::shown_path(&dir), &Tab::Merged, (mark, 0, 0)).unwrap();
+    let mut c = chat(&dir).heartbeat(false).dry_run(true);
+    c.push(dm("d-1", mark - 60));
+    assert!(!marked(&mut c), "a DM the operator view showed is not new");
+    c.push(dm("d-2", mark + 60));
+    assert!(marked(&mut c), "a DM from while the chat was closed marks the agent");
+}
+
+/// Leaving the operator view keeps its mark for the next chat: the DMs it
+/// held stay seen there, and the next one does not.
+#[test]
+fn leaving_the_operator_view_keeps_its_mark_for_the_next_chat() {
+    let dir = state("kept-mark");
+    let held = now() - 3600;
+    let mut first = chat(&dir).heartbeat(false).dry_run(true);
+    first.push(dm("d-1", held));
+    show(&mut first, "kept");
+    drop(first);
+    let mut next = chat(&dir).heartbeat(false).dry_run(true);
+    assert_eq!(*next.foreground(), channel("kept"));
+    next.push(dm("d-1", held));
+    assert!(!marked(&mut next), "the DM the operator view showed");
+    next.push(dm("d-2", held + 60));
+    assert!(marked(&mut next), "a DM after it, from before this start");
 }
