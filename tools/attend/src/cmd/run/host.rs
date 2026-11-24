@@ -170,7 +170,10 @@ pub(crate) fn cmd_host(a: &HostArgs) {
     }
 
     let cfg = config::Config::load(&focus.working_dir);
-    let (mut slots, names) = sensors::register_host_sensors(&cfg, &focus, &session);
+    // The session's Claude Code: --parent when the mod passed it, else the
+    // process that started the host. The processes sensor reports only the
+    // builds that run under it.
+    let (mut slots, names) = sensors::register_host_sensors(&cfg, &focus, &session, a.parent.unwrap_or(parent));
     let curve = build_engagement(&cfg);
     for slot in &mut slots {
         slot.engagement = sensor_trait::EngagementState::new(curve.clone());

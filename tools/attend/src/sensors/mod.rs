@@ -336,6 +336,10 @@ pub struct Ctx<'a> {
     pub cfg: &'a Config,
     /// The session its reports go to; none when the caller has no id.
     pub session: Option<&'a str>,
+    /// The session's Claude Code pid. The processes sensor reports only the
+    /// builds that run under it; none reports every build the user runs.
+    #[cfg_attr(not(feature = "sensor-processes"), allow(dead_code))]
+    pub root: Option<u32>,
 }
 
 /// The sensor `h` configures, ready to poll, or why it cannot run here.
@@ -366,7 +370,8 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
             // A list, even empty, replaces the sensor's own.
             Some(list) => ProcessSensor::with_watch(list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()),
             None => ProcessSensor::new(),
-        }),
+        }
+        .with_root(ctx.root)),
         #[cfg(feature = "sensor-peers")]
         "peers" => Box::new(PeerSensor::new()),
         id => return Err(format!("crate {id} is not compiled into this attend")),
@@ -410,8 +415,8 @@ pub fn slot(sensor: Box<dyn Sensor>, lane: Lane, crate_id: Option<&str>) -> Sens
 ///
 /// References:
 /// - ADR-416 items 4 and 5: what the host runs, and the lane rule.
-pub fn register_host_sensors(cfg: &Config, focus: &Focus, session: &str) -> (Vec<SensorSlot>, Vec<String>) {
-    let ctx = Ctx { cfg, session: Some(session) };
+pub fn register_host_sensors(cfg: &Config, focus: &Focus, session: &str, root: u32) -> (Vec<SensorSlot>, Vec<String>) {
+    let ctx = Ctx { cfg, session: Some(session), root: Some(root) };
     register(&ctx, focus)
 }
 

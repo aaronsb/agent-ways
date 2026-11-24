@@ -320,6 +320,21 @@ fn ps_rows(output: std::io::Result<Output>, columns: Columns) -> Option<Vec<Proc
 /// bounds the walk per process (ADR-137) and stops a pid cycle.
 const MAX_ANCESTRY: usize = 16;
 
+/// Whether `pid` runs under `root` in the process table `procs`, within
+/// [`MAX_ANCESTRY`] hops. A parent missing from the table ends the walk.
+fn descends_from(procs: &[Proc], pid: u32, root: u32) -> bool {
+    let parent: HashMap<u32, u32> = procs.iter().map(|p| (p.pid, p.ppid)).collect();
+    let mut cur = pid;
+    for _ in 0..MAX_ANCESTRY {
+        let Some(&ppid) = parent.get(&cur) else { return false };
+        if ppid == root {
+            return true;
+        }
+        cur = ppid;
+    }
+    false
+}
+
 /// A watched tool at the top of a build, such as one `npm test` run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Tool {
@@ -437,6 +452,11 @@ pub struct ProcessSensor {
     ps_has_lstart: bool,
     /// `ps` reads that have failed in a row.
     failed_reads: u32,
+    /// The session's root process, Claude Code. When set, a watched tool
+    /// is tracked only when it runs under this pid, so a build another
+    /// session or a terminal started is not reported to this session as
+    /// its own. Apps are presence, and stay machine-wide (ADR-113).
+    root: Option<u32>,
 }
 
 /// Failed `ps` reads in a row after which the recovering poll establishes
@@ -464,7 +484,15 @@ impl ProcessSensor {
             watch,
             ps_has_lstart: true,
             failed_reads: 0,
+            root: None,
         }
+    }
+
+    /// Track only the watched tools that run under `root`, the session's
+    /// Claude Code. `None` tracks every watched tool the user runs.
+    pub fn with_root(mut self, root: Option<u32>) -> Self {
+        self.root = root;
+        self
     }
 
     /// Is `name` one of the processes we enrich on exit?
@@ -555,6 +583,9 @@ impl ProcessSensor {
             eprintln!("[attend] processes: ps reads again after {failed} failed poll(s)");
         }
         let mut current = tally(&rows, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
+        if let Some(root) = self.root {
+            current.tools.retain(|pid, _| descends_from(&rows, *pid, root));
+        }
         for (pid, tool) in current.tools.iter_mut() {
             tool.ticks = ticks(*pid);
         }
@@ -1582,5 +1613,30 @@ mod tests {
         assert!(s.diff(snap(&["nvim", "docker"]), 0).is_empty());
         assert_eq!(texts(&s.diff(snap(&["docker"]), 0)), vec!["nvim exited"]);
         assert_eq!(texts(&s.diff(snap(&[]), 0)), vec!["docker exited"]);
+    }
+
+    /// With a root, a build that runs outside the session's process tree,
+    /// in another session or a terminal, is not reported; one under the
+    /// root still is, however deep its shell.
+    #[test]
+    fn a_rooted_sensor_reports_only_builds_under_its_root() {
+        const CLAUDE: (u32, u32, &str) = (100, 1, "claude");
+        const OTHER: (u32, u32, &str) = (200, 1, "claude");
+        let rows = |builds: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), CLAUDE, OTHER, (110, 100, "zsh"), (210, 200, "zsh")];
+            all.extend_from_slice(builds);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        assert!(s.observe(rows(&[]), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows(&[(211, 210, "cargo"), (111, 110, "timeout"), (112, 111, "make")]), no_ticks, &focus, 0).is_empty());
+        assert_eq!(s.prior_tools.keys().copied().collect::<Vec<_>>(), vec![112]);
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["make finished"]);
+
+        let mut unrooted = ProcessSensor::new();
+        unrooted.observe(rows(&[]), no_ticks, &focus, 0);
+        unrooted.observe(rows(&[(211, 210, "cargo")]), no_ticks, &focus, 0);
+        assert_eq!(texts(&unrooted.observe(rows(&[]), no_ticks, &focus, 0)), vec!["cargo finished"]);
     }
 }
