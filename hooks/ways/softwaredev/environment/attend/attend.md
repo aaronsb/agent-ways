@@ -43,7 +43,7 @@ requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bas
 The sensor host reports these on the event lane:
 
 - **git** — dirty files, branch changes, upstream divergence
-- **peers** — other Claude Code sessions starting, leaving and changing state
+- **peers** — other Claude Code sessions starting and leaving, and one in this project nearing compaction
 - **processes** — application presence (not PID churn)
 - **context** — this session's context filling up
 

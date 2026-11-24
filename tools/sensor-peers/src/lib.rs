@@ -13,14 +13,17 @@ use std::time::Duration;
 /// Discovers peer Claude Code sessions by reading ~/.claude/sessions/*.json
 /// and their transcript files. Same discovery pattern as abtop.
 ///
-/// Reports deltas when peers appear, disappear, or change state.
-/// Filters through focus: only surfaces peers in the same working directory
-/// (or with overlapping git branches) as noteworthy.
+/// Reports a peer that starts or exits, and a same-project peer whose
+/// context nears compaction. A peer in the same working directory weighs
+/// more than one elsewhere. It does not report a peer turning between
+/// working and waiting: a peer does that every turn, and each report it
+/// wrote would cost the receiving session a turn of its own.
 ///
 /// It reads no messages: the attend mod's drain carries them.
 ///
 /// References:
-/// - ADR-416 item 5: the host keeps the presence half of peers.
+/// - ADR-416 item 5: the host keeps the presence half of peers, without
+///   the working and waiting flips.
 pub struct PeerSensor {
     /// Our own PID, so we can exclude self
     own_pid: u32,
@@ -289,60 +292,7 @@ impl Sensor for PeerSensor {
             return Vec::new();
         }
 
-        let mut observations = Vec::new();
-
-        // New peers
-        for (sid, peer) in &current {
-            if !self.prior.contains_key(sid) {
-                let relevance = if attend_presence::session::same_dir(&peer.cwd, &focus.working_dir) {
-                    "same project"
-                } else {
-                    "other project"
-                };
-                let magnitude = if attend_presence::session::same_dir(&peer.cwd, &focus.working_dir) { 3.0 } else { 1.0 };
-                observations.push((magnitude, format!(
-                    "peer session started: {} [{}] ({}, {}, ctx {:.0}%)",
-                    peer.project_name, peer.cwd, relevance, peer.status, peer.context_percent
-                )));
-            }
-        }
-
-        // Exited peers
-        for (sid, peer) in &self.prior {
-            if !current.contains_key(sid) {
-                let magnitude = if attend_presence::session::same_dir(&peer.cwd, &focus.working_dir) { 2.0 } else { 0.5 };
-                observations.push((magnitude, format!(
-                    "peer session exited: {} [{}]", peer.project_name, peer.cwd
-                )));
-            }
-        }
-
-        // State changes in existing peers (only for same-project peers)
-        for (sid, peer) in &current {
-            if let Some(prior) = self.prior.get(sid) {
-                // Only track peers in same project
-                if !attend_presence::session::same_dir(&peer.cwd, &focus.working_dir) {
-                    continue;
-                }
-
-                // Status changed
-                if peer.status != prior.status {
-                    observations.push((1.5, format!(
-                        "peer {} [{}] now {} (was {})",
-                        peer.project_name, peer.cwd, peer.status, prior.status
-                    )));
-                }
-
-                // Context pressure — peer approaching limits
-                if peer.context_percent >= 80.0 && prior.context_percent < 80.0 {
-                    observations.push((2.0, format!(
-                        "peer {} [{}] context at {:.0}% — approaching compaction",
-                        peer.project_name, peer.cwd, peer.context_percent
-                    )));
-                }
-            }
-        }
-
+        let observations = changes(&self.prior, &current, &focus.working_dir);
         self.prior = current;
         observations
     }
@@ -365,6 +315,46 @@ impl Sensor for PeerSensor {
 }
 
 // --- Helpers ---
+
+/// What changed between two polls, for a session working in `working_dir`:
+/// a peer that started or exited, and a same-project peer whose context
+/// crossed 80%. A peer's working or waiting status is not compared.
+fn changes(prior: &HashMap<String, PeerSummary>, current: &HashMap<String, PeerSummary>, working_dir: &str) -> Vec<(f64, String)> {
+    let same = |p: &PeerSummary| attend_presence::session::same_dir(&p.cwd, working_dir);
+    let mut observations = Vec::new();
+
+    for (sid, peer) in current {
+        if !prior.contains_key(sid) {
+            let (magnitude, relevance) = if same(peer) { (3.0, "same project") } else { (1.0, "other project") };
+            observations.push((magnitude, format!(
+                "peer session started: {} [{}] ({}, {}, ctx {:.0}%)",
+                peer.project_name, peer.cwd, relevance, peer.status, peer.context_percent
+            )));
+        }
+    }
+
+    for (sid, peer) in prior {
+        if !current.contains_key(sid) {
+            let magnitude = if same(peer) { 2.0 } else { 0.5 };
+            observations.push((magnitude, format!(
+                "peer session exited: {} [{}]", peer.project_name, peer.cwd
+            )));
+        }
+    }
+
+    // A same-project peer approaching compaction.
+    for (sid, peer) in current {
+        let Some(was) = prior.get(sid) else { continue };
+        if same(peer) && peer.context_percent >= 80.0 && was.context_percent < 80.0 {
+            observations.push((2.0, format!(
+                "peer {} [{}] context at {:.0}% — approaching compaction",
+                peer.project_name, peer.cwd, peer.context_percent
+            )));
+        }
+    }
+
+    observations
+}
 
 /// The fields this sensor keeps from a session record. Records without a
 /// cwd are skipped. The cwd is the identity root, not the live cwd (#394), so
@@ -405,6 +395,58 @@ mod tests {
         assert!(pct > 0.0);
         assert!(!matches!(sensor.infer_status("/srv/my proj", "sid-1"), PeerStatus::Unknown));
         fs::remove_dir_all(&root).ok();
+    }
+
+    fn peer(cwd: &str, status: PeerStatus, context_percent: f64) -> PeerSummary {
+        PeerSummary {
+            pid: 42,
+            cwd: cwd.to_string(),
+            project_name: cwd.rsplit('/').next().unwrap().to_string(),
+            context_percent,
+            model: "claude-opus-4-8".to_string(),
+            status,
+        }
+    }
+
+    fn polls(statuses: &[PeerStatus]) -> Vec<HashMap<String, PeerSummary>> {
+        statuses.iter().map(|s| HashMap::from([("p1".to_string(), peer("/srv/proj", s.clone(), 10.0))])).collect()
+    }
+
+    #[test]
+    fn a_same_project_peer_turning_working_and_waiting_is_not_reported() {
+        // A peer flips every turn. Two flips in one window added up to the
+        // event lane's cut, and the drain continued the turn to deliver them.
+        let seen = polls(&[PeerStatus::Working, PeerStatus::Waiting, PeerStatus::Working, PeerStatus::Unknown]);
+        for pair in seen.windows(2) {
+            assert_eq!(changes(&pair[0], &pair[1], "/srv/proj"), Vec::<(f64, String)>::new());
+        }
+    }
+
+    #[test]
+    fn a_peer_that_starts_or_exits_is_still_reported() {
+        let none = HashMap::new();
+        let one = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Working, 12.0))]);
+        assert_eq!(
+            changes(&none, &one, "/srv/proj"),
+            vec![(3.0, "peer session started: proj [/srv/proj] (same project, working, ctx 12%)".to_string())],
+        );
+        assert_eq!(changes(&one, &none, "/srv/proj"), vec![(2.0, "peer session exited: proj [/srv/proj]".to_string())]);
+        assert_eq!(
+            changes(&none, &one, "/srv/other"),
+            vec![(1.0, "peer session started: proj [/srv/proj] (other project, working, ctx 12%)".to_string())],
+        );
+        assert_eq!(changes(&one, &none, "/srv/other"), vec![(0.5, "peer session exited: proj [/srv/proj]".to_string())]);
+    }
+
+    #[test]
+    fn a_same_project_peer_nearing_compaction_is_still_reported() {
+        let before = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Working, 79.0))]);
+        let after = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Waiting, 81.0))]);
+        assert_eq!(
+            changes(&before, &after, "/srv/proj"),
+            vec![(2.0, "peer proj [/srv/proj] context at 81% — approaching compaction".to_string())],
+        );
+        assert_eq!(changes(&before, &after, "/srv/other"), Vec::<(f64, String)>::new());
     }
 
     #[test]

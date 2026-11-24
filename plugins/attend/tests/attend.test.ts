@@ -165,6 +165,9 @@ type World = {
    *  a stream left open makes the kit settle each step of the mock clock
    *  slowly, so only the tests of the host run one. */
   host?: boolean
+  /** A host the mod ends stays alive until the test calls its `exit`, as
+   *  a real one does until it next looks at its stop flag. */
+  lingers?: boolean
   /** Holds each drain in flight until it settles. */
   holdDrain?: Promise<void>
   /** Holds the next read of $.state until it settles, then is spent. */
@@ -299,6 +302,8 @@ function host(on: On, world: World) {
   // The sensor host: runs until the mod ends its stream (next.signal
   // aborts) or the test ends it, writing what the test has it say.
   const spawns: Spawned[] = []
+  // The most hosts alive at once, counted at each spawn.
+  let peak = 0
   on('process.spawn', async function* ($, e, next) {
     const queue: { stream: 'stdout' | 'stderr'; text: string }[] = []
     let wake = () => {}
@@ -321,6 +326,7 @@ function host(on: On, world: World) {
       sp.ended = true
       return { value: { code: 2, signal: null } } as never
     }
+    peak = Math.max(peak, live().length)
     const onAbort = () => {
       sp.killed = true
       wake()
@@ -331,7 +337,7 @@ function host(on: On, world: World) {
         while (queue.length > 0) yield queue.shift()!
         // A call on $ answers { value }: how the child ended.
         if (result) return { value: result } as never
-        if (sp.killed) return { value: { code: null, signal: 'SIGTERM' } } as never
+        if (sp.killed && !world.lingers) return { value: { code: null, signal: 'SIGTERM' } } as never
         await new Promise<void>(r => (wake = r))
       }
     } finally {
@@ -411,7 +417,7 @@ function host(on: On, world: World) {
   const status = () => state.value as Partial<AttendStatus> | undefined
   const reads = () => idReads
   const live = () => spawns.filter(sp => !sp.ended)
-  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts, commands, reads, spawns, live, hostLogs }
+  return { status, argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts, commands, reads, spawns, live, peak: () => peak, hostLogs }
 }
 
 /** What `attend keepwarm check --policy --json` prints. */
@@ -909,6 +915,24 @@ describe('the drain\'s status on the row', () => {
     drains.push(DRAIN_UNRESOLVED, DRAIN_UNRESOLVED, DRAIN_UNRESOLVED)
     await clock.advance(6_000)
     expect(await shows(/attend not listening/)).toBe(true)
+  })
+
+  test('attend_listen after listening was turned off elsewhere says listening is on again, not that it already was', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    const listen = async () => String(((await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)) as { result?: unknown }).result)
+    expect(await listen()).toContain('attend was already listening in this session.')
+    // `attend listen off` from a shell: the poll's drain says so.
+    drains.push(DRAIN_NOT_LISTENING, DRAIN_NOT_LISTENING)
+    await clock.advance(6_000)
+    const again = await listen()
+    expect(again).toContain('Listening had been turned off for this session; attend is listening again.')
+    expect(again).not.toContain('already')
+    await clock.advance(12_000)
+    expect(await listen()).toContain('attend was already listening in this session.')
   })
 })
 
@@ -2804,6 +2828,11 @@ describe('keepalive policy: the pure pieces', () => {
 const HOST = (session: string, ...movedFrom: string[]) => ['attend', 'sensor', 'host', '--session', session, '--cwd', '/work/agent-ways', ...movedFrom]
 
 describe('the sensor host (ADR-416 item 2)', () => {
+  /** Steps the clock 100 ms at a time until `cond` holds, 20 s at most. */
+  const until = async (clock: ReturnType<typeof mock.clock>, cond: () => boolean) => {
+    for (let ms = 0; !cond() && ms < 20_000; ms += 100) await clock.advance(100)
+    expect(cond()).toBe(true)
+  }
   const shows = async ($: Engine, text: RegExp) => {
     const ui = await $.ui.mount(BAND as never)
     const found = await ui.find({ text } as never)
@@ -2949,6 +2978,61 @@ describe('the sensor host (ADR-416 item 2)', () => {
     expect(h.spawns[1]?.killed).toBe(true)
     expect(h.live().map(sp => sp.argv)).toEqual([HOST('s3')])
     expect(h.spawns.length).toBe(3)
+  })
+
+  // A host the mod ends lingers until it next looks at its stop flag. Live,
+  // the old and the new host ran side by side for 0.7 s after a /clear.
+  test('a /clear spawns the new host only once the old one has exited; two never run at once', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, host: true, lingers: true })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's2')
+    await until(clock, () => h.spawns[0]?.killed === true)
+    await clock.advance(2_000)
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s1')])
+    expect(h.spawns.length).toBe(1)
+    h.spawns[0]?.exit(null, 'SIGTERM')
+    await clock.settle()
+    expect(h.live().map(sp => sp.argv)).toEqual([HOST('s2', '--moved-from', 's1')])
+    expect(h.peak()).toBe(1)
+    // The old host's end is the module's own doing: no respawn follows it.
+    await clock.advance(60_000)
+    expect(h.spawns.length).toBe(2)
+    expect(h.status()?.hostStopped).toBe(false)
+  })
+
+  test('an old host that never exits holds the new one back 3 s at most', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, host: true, lingers: true })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's2')
+    await until(clock, () => h.spawns[0]?.killed === true)
+    await clock.advance(2_800)
+    expect(h.spawns.length).toBe(1)
+    await clock.advance(300)
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1'), HOST('s2', '--moved-from', 's1')])
+    expect(h.live().length).toBe(2)
+  })
+
+  test('listening turned off and on again before the old host exits waits for it too', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains, host: true, lingers: true })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    drains.push(DRAIN_NOT_LISTENING)
+    await until(clock, () => h.spawns[0]?.killed === true)
+    // The next drain finds the session listening, while the old host lingers.
+    const polls = h.count('message inbox --drain --json --wake')
+    await until(clock, () => h.count('message inbox --drain --json --wake') > polls)
+    await clock.advance(2_000)
+    expect(h.spawns.length).toBe(1)
+    h.spawns[0]?.exit(null, 'SIGTERM')
+    await clock.settle()
+    expect(h.spawns.map(sp => sp.argv)).toEqual([HOST('s1'), HOST('s1')])
+    expect(h.peak()).toBe(1)
   })
 
   // A hot reload in the middle of a /clear: $.state holds what the hold

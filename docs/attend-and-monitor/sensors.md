@@ -37,7 +37,7 @@ These are the shipped files' values.
 |---|---|---|---|---|---|---|
 | **context** | the session's own token usage | 60s / 20s | 1.5 | 3 | event | `Read` |
 | **git** | the working tree and its upstream | 30s / 10s | 2.0 | 4 | event | `Bash(git:*)` |
-| **peers** | other Claude Code sessions starting, leaving and changing state | 30s / 10s | 2.0 | 5 | event | `Read` |
+| **peers** | other Claude Code sessions starting and leaving, and one in this project nearing compaction | 30s / 10s | 2.0 | 5 | event | `Read` |
 | **processes** | build and dev-tool processes | 30s / 5s | 2.0 | 5 | event | `Bash(ps:*)` |
 | **ways-update** | a newer agent-ways release on the install's channel | 7d / 7d | 1.0 | 1 | event | `Bash(ways:*)` |
 
@@ -81,13 +81,12 @@ It does not read commit messages, tags or hooks.
 
 ## `peers`
 
-Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and their transcripts, and reports their presence: who else is working, and where. It reads no messages; the attend mod's drain delivers those ([`delivery.md`](delivery.md)). Presence is no one's words, so its reports ride the event lane.
+Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and their transcripts, and reports their presence: who else is working, and where. It reads no messages; the attend mod's drain delivers those ([`delivery.md`](delivery.md)). Presence is no one's words, so its reports ride the event lane. It does not report a session turning between working and waiting. A session does that every turn, and two such reports in one window add up past the event lane's cut of 3.0, so the turn-end drain would continue the receiving session's turn to deliver them.
 
 | Event | Magnitude |
 |---|---|
 | peer session started, same project / other project | 3.0 / 1.0 |
 | peer session exited, same project / other project | 2.0 / 0.5 |
-| same-project peer changed status (working, waiting) | 1.5 |
 | same-project peer crossed 80% context | 2.0 |
 
 ## `ways-update`

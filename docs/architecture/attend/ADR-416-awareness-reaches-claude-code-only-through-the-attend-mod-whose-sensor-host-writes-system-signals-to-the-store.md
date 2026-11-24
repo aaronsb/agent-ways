@@ -96,6 +96,9 @@ considered:
   - operator: aaronsb
     said: "Delete, use config"
     via: "session 2026-11-23, question tool, #1316 plan"
+  - operator: aaronsb
+    said: "Drop flips under the host"
+    via: session 2026-11-23, question tool, live check
 status: accepted
 date: 2026-11-21
 deciders:
@@ -172,6 +175,8 @@ The operator set the direction: awareness is furnished through the mod, and a se
    Of `tools/attend/src/cmd/run/`, these stay as the host: the sensor slots and their scheduling in `tick_iteration`, the disclosure governor (`governor.rs`), the stamp sweep (`stamps.rs`) and the in-place re-exec on a binary change. These go: the message-lane poller and its flush, `CacheGate`, `reload_plan` and its held lines, the startup banner and its fingerprint, `rekey.rs`, `--catchup`, and the Monitor formatting in `emit/`. In `attend-presence`, a run's enrollment lock and the "held by `attend run`" rules go. A session listens through the mod, or does not listen.
 
    > Amended 2026-11-23 (#1316, #1108): `attend run` was the only process that registered a session in the instance registry (ADR-129), so the host takes that over. It registers its session's instance slot as it starts and refreshes it with the tick loop's minute touch. A host started with `--moved-from` first moves the old id's slot to the new id, so the session's name keeps its suffix across `/clear`. A listening session with a host therefore shows its suffix, and a session with none shows its bare nickname.
+
+   > Amended 2026-11-23: the host's peers sensor does not report a peer's working/waiting flips. Two flips added up past the 3.0 cut, and the turn-end drain continued a session's turn for each. The release live check found it. A peer session starting or exiting, and a same-project peer nearing compaction, are still reported at the magnitudes they had.
 
 6. **The update check is a shipped command sensor.** No update-specific code goes into attend. The check is a `command` sensor whose argv runs `ways`. attend's trigger logic reads the JSON and decides.
    - **The ways side.** `ways manage update --what-if --json` prints the check as one JSON document, built by `whatif::gather`, the resolver the update itself uses. In JSON mode the release notes are left out, so the check makes no GitHub REST call and needs no token. Its one network step is the `git fetch origin` that `gather` already runs in the app source. A plain `ways status --json` stays offline, which is why the check sits on the update verb and not behind a status flag.
