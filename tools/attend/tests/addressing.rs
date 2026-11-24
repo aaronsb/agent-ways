@@ -196,6 +196,58 @@ fn a_bare_name_reaches_the_bare_session_only() {
     }
 }
 
+/// A bare session that names its own nickname is refused: that is itself,
+/// and its `-alpha` sibling, which shares the nickname, is not meant.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_send_to_your_own_name_is_refused() {
+    let f = Fixture::new("addr-self");
+    let _env = enter(&f);
+    let sibling = Peer::start(&f, "peer-sib", "proj");
+    assert_eq!(sibling.cwd, f.origin);
+    let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+    assert_eq!(registry.register(&f.origin, &f.sid).unwrap(), attend_instances::BARE);
+    assert_eq!(registry.register(&f.origin, "peer-sib").unwrap(), "alpha");
+    let name = agent_identity::Identity::for_cwd(&f.origin, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    match send(Some(&name), None, "note to self") {
+        Err(e) => {
+            assert_eq!(serde_json::to_value(&e).unwrap()["kind"], "to_self", "{e:?}");
+            assert!(e.to_string().contains("that is you"), "{e}");
+        }
+        Ok(sent) => panic!("delivered to {:?}", read(&sibling.tray(&f), &sent.id).0),
+    }
+    assert!(files(&sibling.tray(&f)).is_empty());
+}
+
+/// With no live session holding the bare name, the bare name is no full
+/// name: a session with no registry row answers only through its nickname,
+/// with every other session that carries it, and two are refused.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_bare_name_no_session_holds_is_ambiguous() {
+    let f = Fixture::new("addr-rowless");
+    let _env = enter(&f);
+    let first = Peer::start(&f, "peer-first", "twin");
+    let a = Peer::start(&f, "peer-a", "twin");
+    let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+    assert_eq!(registry.register(&a.cwd, "peer-first").unwrap(), attend_instances::BARE);
+    assert_eq!(registry.register(&a.cwd, "peer-a").unwrap(), "alpha");
+    drop(first);
+    // peer-b runs no sensor host, so it has no row.
+    let _b = Peer::start(&f, "peer-b", "twin");
+    let name = agent_identity::Identity::for_cwd(&a.cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    match send(Some(&name), None, "which one?") {
+        Err(e @ attend::verbs::SendError::AmbiguousRecipient { .. }) => {
+            let why = e.to_string();
+            assert!(why.contains("peer-a") && why.contains("peer-b"), "{why}");
+        }
+        other => panic!("expected ambiguous_recipient: {other:?}"),
+    }
+    assert!(files(&a.tray(&f)).is_empty());
+}
+
 /// A name that is no live session and no known person is refused.
 #[test]
 fn an_unknown_name_is_refused() {

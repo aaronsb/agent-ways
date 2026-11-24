@@ -47,6 +47,9 @@ pub(super) struct TickState<'a> {
     pub(super) last_cleanup: &'a mut Option<Instant>,
     pub(super) state_store: &'a state::StateStore,
     pub(super) instance_registry: &'a attend_instances::Registry,
+    /// The instance name the host holds, for the minute refresh to restore
+    /// should its row go missing.
+    pub(super) instance_held: &'a mut Option<String>,
     pub(super) focus: &'a Focus,
     pub(super) heartbeat_id: &'a str,
     pub(super) cfg: &'a config::Config,
@@ -261,7 +264,9 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // renamed this id's slot, and this host, still running until the mod
     // ends it, must not take the old id a fresh slot.
     if s.last_instance_touch.elapsed() >= INSTANCE_TOUCH_INTERVAL {
-        s.instance_registry.keep(&s.focus.working_dir, s.heartbeat_id).ok();
+        if let Ok(Some(held)) = s.instance_registry.keep(&s.focus.working_dir, s.heartbeat_id, s.instance_held.as_deref()) {
+            *s.instance_held = Some(held);
+        }
         *s.last_instance_touch = Instant::now();
     }
 

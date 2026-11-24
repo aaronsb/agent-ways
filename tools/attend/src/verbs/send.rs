@@ -82,6 +82,10 @@ pub enum SendError {
     /// The `to` name matches more than one session, or a session and a
     /// person.
     AmbiguousRecipient { name: String, candidates: Vec<String> },
+    /// The `to` name is this session's own name or id. A bare session's
+    /// name is also its `-alpha` sibling's nickname, which must not catch
+    /// it.
+    ToSelf { name: String },
     /// A channel post addressed to someone who is not a member of the
     /// channel: they would never read it.
     NotInChannel { name: String, channel: String },
@@ -140,6 +144,7 @@ impl std::fmt::Display for SendError {
                 write!(f, "'{name}' names more than one recipient: {}; name one of them", candidates.join(", "))
             }
             Self::NotInChannel { name, channel } => write!(f, "@{name} is not in #{channel}; nothing sent"),
+            Self::ToSelf { name } => write!(f, "'{name}' is this session's own name: that is you; nothing sent"),
             Self::SenderExited { session, name } => write!(
                 f,
                 "the message you are replying to came from {name} (session {session}), which has exited; nothing was sent"
@@ -309,6 +314,9 @@ struct LiveSession {
     cwd: String,
     nickname: String,
     name: String,
+    /// Holds a registry row, so its name is one the registry gave it. A
+    /// session with no row shows as its bare nickname without holding it.
+    registered: bool,
 }
 
 fn live_sessions() -> Vec<LiveSession> {
@@ -316,10 +324,18 @@ fn live_sessions() -> Vec<LiveSession> {
     list_peers()
         .into_iter()
         .map(|(id, cwd, _, _, _)| {
-            let (nickname, name) = crate::verbs::peers::names(&cwd, registry.lookup(&cwd, &id).as_deref());
-            LiveSession { id, cwd, nickname, name }
+            let instance = registry.lookup(&cwd, &id);
+            let (nickname, name) = crate::verbs::peers::names(&cwd, instance.as_deref());
+            LiveSession { id, cwd, nickname, name, registered: instance.is_some() }
         })
         .collect()
+}
+
+/// The name session `me` holds in the registry, or `None` when it holds
+/// none: an unresolved session, or one that runs no sensor host.
+fn own_name(me: &Session) -> Option<String> {
+    let instance = attend_instances::Registry::new().lookup(&me.origin_path, &me.session_id)?;
+    me.resolved().then(|| crate::verbs::peers::names(&me.origin_path, Some(&instance)).1)
 }
 
 /// The people attend knows by member id (ADR-170): the person at this
@@ -350,17 +366,23 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     if is_project_path(to) {
         return resolve_project(me, to);
     }
+    // This session's own id or name names nobody else: the bare session's
+    // name is also its `-alpha` sibling's nickname (ADR-129).
+    if let Some(name) = own_name(me).filter(|name| name.eq_ignore_ascii_case(to) || (me.resolved() && me.session_id == to)) {
+        return Err(SendError::ToSelf { name });
+    }
     let sessions = live_sessions();
     // A session id is canonical: it names that session, whatever else
     // answers to the same text.
     if let Some(s) = sessions.iter().find(|s| s.id == to) {
         return Ok(Dest::Sessions { cwd: s.cwd.clone(), ids: vec![s.id.clone()] });
     }
-    // A session's full name before its nickname: `Urban` is the session
-    // that holds the bare name, not every `Urban-*` beside it (ADR-129).
-    // With no session named so, the nickname answers for the sessions
-    // that carry it.
-    let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| s.name.eq_ignore_ascii_case(to)).collect();
+    // A registered session's full name before its nickname: `Urban` is the
+    // session that holds the bare name, not every `Urban-*` beside it
+    // (ADR-129). A session with no row shows as its bare nickname without
+    // holding it, so it answers only through the nickname, with every
+    // session that carries it.
+    let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| s.registered && s.name.eq_ignore_ascii_case(to)).collect();
     let matched = if by_name.is_empty() {
         sessions.iter().filter(|s| s.nickname.eq_ignore_ascii_case(to)).collect()
     } else {

@@ -17,6 +17,7 @@
 //!
 //! ```yaml
 //! <bare-session-uuid>:
+//!   instance:
 //!   registered_at: 2026-04-28T10:20:00Z
 //!   last_seen: 2026-04-28T10:35:00Z
 //! <session-uuid>:
@@ -28,13 +29,20 @@
 //!   registered_at: 2026-04-28T09:00:00Z
 //!   last_seen: 2026-04-28T10:29:00Z
 //!   alias_of: <session-uuid>
+//! <ended-session-uuid>:
+//!   instance: beta
+//!   registered_at: 2026-04-28T08:00:00Z
+//!   last_seen: 2026-04-28T08:40:00Z
+//!   retired: true
 //! ```
 //!
-//! A row with no `instance` line holds the bare name; in memory its
-//! `instance` is the empty string ([`BARE`]). Leaving the line out keeps
-//! the file readable by a release that predates the bare name: that
-//! release skips such a row and shows the session by its bare nickname,
-//! which is the name it holds.
+//! The bare name is an `instance` line with an empty value; in memory it
+//! is the empty string ([`BARE`]). A release that predates the bare name
+//! (attend v0.36.0) parses that line as an empty instance and writes it
+//! back unchanged on its minute refresh, so the row survives a sensor host
+//! still running the old binary. That release renders the session as
+//! `Jovan-` until it restarts. A row with no `instance` line is no row,
+//! as before.
 //!
 //! ## Slot semantics
 //!
@@ -59,7 +67,15 @@
 //! the slot. An alias is not a slot. It blocks no name in allocation, and a
 //! session resumed under an alias id is allocated as any resume is. Aliases
 //! age out with the same GC as slots. An alias whose chain reaches no slot
-//! in its cwd is dropped when its name goes to a new session.
+//! in its cwd keeps reading the name it read.
+//!
+//! ## Retired rows
+//!
+//! When a name goes to a new session, the rows of ended sessions that held
+//! it are retired, not dropped: a retired row keeps the name its session
+//! held, so that session's earlier messages still read that name, and it
+//! holds no slot. A retired row blocks no name, and a resume under its id
+//! takes the name back when no live session holds it.
 //!
 //! ## Allocator
 //!
@@ -67,8 +83,7 @@
 //! numeric fallback (`Jovan-25`, `Jovan-26`, …) so a directory with dozens
 //! of live sessions still issues a discriminator. Latin spelling, not
 //! glyphs — keyboards without a compose key still type the suffix into
-//! `@`-completion. The rows of ended sessions that held the name handed
-//! out are dropped, so a dead session and a live one never share a name.
+//! `@`-completion.
 //!
 //! ## Concurrency
 //!
@@ -79,10 +94,10 @@
 //!
 //! ## Age-based GC
 //!
-//! Entries with `last_seen` older than 7 days are removed. An ended
-//! session's row stays until then, or until its name goes to a new
-//! session, so its earlier messages still read its name and a resume can
-//! take that name back.
+//! Entries with `last_seen` older than 7 days are removed, unless their
+//! session is still live: a laptop suspended for over a week wakes with
+//! every row stale, and a running session keeps its row and its name. The
+//! liveness scan runs only when a row is past the cutoff.
 //!
 //! ## File size note
 //!
@@ -143,11 +158,15 @@ pub struct InstanceEntry {
     /// The id that took this row's slot when the session's id changed
     /// (`/clear`). Set, the row is an alias and holds no slot.
     pub alias_of: Option<String>,
+    /// The row of an ended session whose name went to a new session. It
+    /// keeps the name for that session's earlier messages and holds no
+    /// slot.
+    pub retired: bool,
 }
 
 impl InstanceEntry {
     fn is_slot(&self) -> bool {
-        self.alias_of.is_none()
+        self.alias_of.is_none() && !self.retired
     }
 }
 
@@ -162,10 +181,13 @@ enum Liveness {
     Given(Arc<dyn Fn(&str) -> bool + Send + Sync>),
 }
 
+/// Whether a session id is live, as judged for one registry call.
+type Predicate<'a> = Box<dyn Fn(&str) -> bool + 'a>;
+
 impl Liveness {
-    /// The predicate for one allocation. The process scan is taken once,
+    /// The predicate for one registry call. The process scan is taken once,
     /// here, under the registry lock.
-    fn judge(&self) -> Box<dyn Fn(&str) -> bool + '_> {
+    fn judge(&self) -> Predicate<'_> {
         match self {
             Liveness::Presence => {
                 let running: HashSet<String> = attend_presence::running_sessions().into_iter().collect();
@@ -173,6 +195,23 @@ impl Liveness {
             }
             Liveness::Given(live) => Box::new(move |id| live(id)),
         }
+    }
+}
+
+/// [`Liveness`] for one registry call, judged on first use: a call that
+/// never asks scans nothing, and one that asks twice scans once.
+struct Judge<'a> {
+    liveness: &'a Liveness,
+    judged: std::cell::OnceCell<Predicate<'a>>,
+}
+
+impl<'a> Judge<'a> {
+    fn new(liveness: &'a Liveness) -> Self {
+        Self { liveness, judged: std::cell::OnceCell::new() }
+    }
+
+    fn live(&self, id: &str) -> bool {
+        (self.judged.get_or_init(|| self.liveness.judge()))(id)
     }
 }
 
@@ -184,7 +223,8 @@ enum Pass {
     /// name its row records unless another live session holds it.
     Register,
     /// [`Registry::keep`]: a running session refreshes its row. An alias
-    /// stays an alias, and the name it holds is never contested.
+    /// stays an alias, the name it holds is never contested, and a missing
+    /// row comes back under the name the host holds when it is free.
     Keep,
 }
 
@@ -243,7 +283,7 @@ impl Registry {
     ///   `session_id` (a resume of an id that `/clear` moved on) is
     ///   replaced; the resume keeps the name it read when no live session
     ///   holds that name.
-    /// - Prune entries past `DEFAULT_GC_AGE`.
+    /// - Prune entries past `DEFAULT_GC_AGE` whose session is not live.
     ///
     /// Read-modify-write under `flock(LOCK_EX)` on a sentinel
     /// `<cwd>.yaml.lock` file (PR #77 review fix). Locking on the
@@ -269,7 +309,7 @@ impl Registry {
         gc_age: Duration,
         now: u64,
     ) -> io::Result<String> {
-        self.upsert(cwd, session_id, gc_age, now, Pass::Register).map(Option::unwrap_or_default)
+        self.upsert(cwd, session_id, gc_age, now, Pass::Register, None).map(Option::unwrap_or_default)
     }
 
     /// The periodic refresh of `session_id`'s slot in `cwd`, which a sensor
@@ -279,15 +319,17 @@ impl Registry {
     /// ([`rename`](Self::rename)); the old host, still running until the mod
     /// ends it, must not then take a fresh slot for the old id and undo the
     /// rename. A slot keeps its name, whoever else holds it: a running
-    /// session is never renamed. Returns the instance held, or `None` for
-    /// an alias.
-    pub fn keep(&self, cwd: &str, session_id: &str) -> io::Result<Option<String>> {
-        self.upsert(cwd, session_id, DEFAULT_GC_AGE, agent_fmt::when::now_secs(), Pass::Keep)
+    /// session is never renamed. `held` is the name the host was given;
+    /// when the row is gone (a writer dropped it) or retired, the session
+    /// takes `held` back unless a live session holds it, and only then the
+    /// lowest free name. Returns the instance held, or `None` for an alias.
+    pub fn keep(&self, cwd: &str, session_id: &str, held: Option<&str>) -> io::Result<Option<String>> {
+        self.upsert(cwd, session_id, DEFAULT_GC_AGE, agent_fmt::when::now_secs(), Pass::Keep, held)
     }
 
     /// [`register_with_age`](Self::register_with_age) and [`keep`](Self::keep),
-    /// as `pass` says.
-    fn upsert(&self, cwd: &str, session_id: &str, gc_age: Duration, now: u64, pass: Pass) -> io::Result<Option<String>> {
+    /// as `pass` says. `held` is the name `keep`'s host was given.
+    fn upsert(&self, cwd: &str, session_id: &str, gc_age: Duration, now: u64, pass: Pass, held: Option<&str>) -> io::Result<Option<String>> {
         fs::create_dir_all(&self.base_dir)?;
         let path = self.path_for(cwd);
 
@@ -306,15 +348,18 @@ impl Registry {
         // register/touch on this cwd can be mid-write.
         let content = fs::read_to_string(&path).unwrap_or_default();
         let mut map = parse_registry(&content);
-        if pass == Pass::Keep && map.get(session_id).is_some_and(|e| !e.is_slot()) {
+        if pass == Pass::Keep && map.get(session_id).is_some_and(|e| e.alias_of.is_some()) {
             return Ok(None);
         }
+        let judge = Judge::new(&self.live);
 
         // GC: drop any entry whose `last_seen` is older than gc_age,
         // *unless* it is our own session — we never evict ourselves
-        // mid-register.
+        // mid-register — or a session still live, whose host has not
+        // refreshed it (a suspended machine). Liveness is judged only
+        // for the rows past the cutoff.
         let cutoff = now.saturating_sub(gc_age.as_secs());
-        map.retain(|sid, entry| sid == session_id || entry.last_seen >= cutoff);
+        map.retain(|sid, entry| sid == session_id || entry.last_seen >= cutoff || judge.live(sid));
 
         // Reclaim path: existing slot → refresh + return. The
         // migration sweep runs here too (PR #395 finding 4): every
@@ -323,7 +368,7 @@ impl Registry {
         // register whose name another live session holds (a resume
         // while a newcomer took the name) falls through and yields.
         let reclaim = map.get(session_id).filter(|e| e.is_slot()).map(|e| e.instance.clone());
-        if let Some(instance) = reclaim.filter(|inst| pass == Pass::Keep || !self.held_elsewhere(&map, session_id, inst)) {
+        if let Some(instance) = reclaim.filter(|inst| pass == Pass::Keep || !held_elsewhere(&map, session_id, inst, &judge)) {
             if let Some(entry) = map.get_mut(session_id) {
                 entry.last_seen = now;
             }
@@ -333,7 +378,7 @@ impl Registry {
             return Ok(Some(instance));
         }
 
-        let instance = allocate(&mut map, session_id, now, &*self.live.judge());
+        let instance = allocate(&mut map, session_id, now, held, &judge);
         write_registry(&path, &map)?;
         drop(lock_file);
 
@@ -346,19 +391,6 @@ impl Registry {
         // staleness, never worse.
         self.evict_elsewhere(cwd, session_id);
         Ok(Some(instance))
-    }
-
-    /// Whether a live session other than `session_id` holds a slot named
-    /// `instance` in `map`. The process scan runs only when another slot
-    /// carries the name.
-    fn held_elsewhere(&self, map: &BTreeMap<String, InstanceEntry>, session_id: &str, instance: &str) -> bool {
-        let rivals: Vec<&String> =
-            map.iter().filter(|(id, e)| *id != session_id && e.is_slot() && e.instance == instance).map(|(id, _)| id).collect();
-        if rivals.is_empty() {
-            return false;
-        }
-        let live = self.live.judge();
-        rivals.into_iter().any(|id| live(id))
     }
 
     /// Move `old`'s slot in `cwd` to `new`, for a session whose id changed
@@ -549,36 +581,34 @@ impl Default for SnapshotCache {
     }
 }
 
-/// Give `session_id` a slot of its own: the name its row recorded when no
-/// live session holds it (a resume), else the lowest name no live session
-/// holds, bare first. `live` judges the other slots. The row under
-/// `session_id`, slot or alias, is detached first. The rows of ended
-/// sessions that held the name handed out, and orphaned aliases that read
-/// it, are dropped, so a dead session and a live one never share a name.
-fn allocate(map: &mut BTreeMap<String, InstanceEntry>, session_id: &str, now: u64, live: &dyn Fn(&str) -> bool) -> String {
-    let recorded = detach(map, session_id).map(|e| e.instance);
+/// Whether a live session other than `session_id` holds a slot named
+/// `instance` in `map`. Liveness is judged only when another slot carries
+/// the name.
+fn held_elsewhere(map: &BTreeMap<String, InstanceEntry>, session_id: &str, instance: &str, judge: &Judge) -> bool {
+    map.iter().any(|(id, e)| id != session_id && e.is_slot() && e.instance == instance && judge.live(id))
+}
+
+/// Give `session_id` a slot of its own: the name its row recorded, or else
+/// `held` (the name its host was given), when no live session holds it (a
+/// resume, or a row a writer dropped); otherwise the lowest name no live
+/// session holds, bare first. The row under `session_id`, slot, alias or
+/// retired, is detached first. The slots of ended sessions that held the
+/// name handed out are retired: they keep the name for those sessions'
+/// earlier messages and hold no slot.
+fn allocate(map: &mut BTreeMap<String, InstanceEntry>, session_id: &str, now: u64, held: Option<&str>, judge: &Judge) -> String {
+    let recorded = detach(map, session_id).map(|e| e.instance).or_else(|| held.map(str::to_string));
     let taken: HashSet<&str> =
-        map.iter().filter(|(id, e)| e.is_slot() && live(id)).map(|(_, e)| e.instance.as_str()).collect();
+        map.iter().filter(|(id, e)| e.is_slot() && judge.live(id)).map(|(_, e)| e.instance.as_str()).collect();
     let instance = match recorded {
         Some(name) if !taken.contains(name.as_str()) => name,
         _ => next_free_instance(&taken),
     };
-    let ended: Vec<String> =
-        map.iter().filter(|(_, e)| e.is_slot() && e.instance == instance).map(|(id, _)| id.clone()).collect();
-    for id in ended {
-        detach(map, &id);
-    }
-    let orphans: Vec<String> = map
-        .iter()
-        .filter(|(id, e)| e.instance == instance && orphaned(map, id))
-        .map(|(id, _)| id.clone())
-        .collect();
-    for id in orphans {
-        detach(map, &id);
+    for entry in map.values_mut().filter(|e| e.is_slot() && e.instance == instance) {
+        entry.retired = true;
     }
     map.insert(
         session_id.to_string(),
-        InstanceEntry { instance: instance.clone(), registered_at: now, last_seen: now, alias_of: None },
+        InstanceEntry { instance: instance.clone(), registered_at: now, last_seen: now, alias_of: None, retired: false },
     );
     relabel_followers(map, session_id, &instance);
     instance
@@ -608,12 +638,6 @@ fn detach(map: &mut BTreeMap<String, InstanceEntry>, id: &str) -> Option<Instanc
         }
     }
     Some(entry)
-}
-
-/// Whether `id` is an alias whose chain reaches no slot in `map`.
-fn orphaned(map: &BTreeMap<String, InstanceEntry>, id: &str) -> bool {
-    map.get(id).is_some_and(|e| !e.is_slot())
-        && chain_end(map, id).is_none_or(|end| !map.contains_key(&end))
 }
 
 /// The id at the end of `id`'s `alias_of` chain: the first one that is no
@@ -662,6 +686,7 @@ fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
     let mut current_registered_at: Option<u64> = None;
     let mut current_last_seen: Option<u64> = None;
     let mut current_alias_of: Option<String> = None;
+    let mut current_retired = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -680,6 +705,7 @@ fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
                 current_registered_at.take(),
                 current_last_seen.take(),
                 current_alias_of.take(),
+                std::mem::take(&mut current_retired),
             );
             current_sid = Some(trimmed.trim_end_matches(':').to_string());
             continue;
@@ -695,6 +721,7 @@ fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
                     "registered_at" => current_registered_at = value.parse().ok(),
                     "last_seen" => current_last_seen = value.parse().ok(),
                     "alias_of" => current_alias_of = Some(value.to_string()),
+                    "retired" => current_retired = value == "true",
                     _ => {}
                 }
             }
@@ -709,6 +736,7 @@ fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
         current_registered_at,
         current_last_seen,
         current_alias_of,
+        current_retired,
     );
     out
 }
@@ -720,22 +748,21 @@ fn commit_entry(
     registered_at: Option<u64>,
     last_seen: Option<u64>,
     alias_of: Option<String>,
+    retired: bool,
 ) {
-    let Some(sid) = sid else {
+    // A row with no `instance` line is no row; the bare name is the line
+    // with an empty value.
+    let (Some(sid), Some(instance)) = (sid, instance) else {
         return;
     };
-    // A row with no `instance` line holds the bare name. A key with no
-    // fields at all is no row.
-    if instance.is_none() && registered_at.is_none() && last_seen.is_none() && alias_of.is_none() {
-        return;
-    }
     out.insert(
         sid,
         InstanceEntry {
-            instance: instance.unwrap_or_default(),
+            instance,
             registered_at: registered_at.unwrap_or(0),
             last_seen: last_seen.unwrap_or(0),
             alias_of,
+            retired,
         },
     );
 }
@@ -745,13 +772,14 @@ fn serialize_registry(map: &BTreeMap<String, InstanceEntry>) -> String {
     for (sid, entry) in map {
         out.push_str(sid);
         out.push_str(":\n");
-        // The bare name is the absent line, which a release that predates
-        // it reads as no row: the session shows as its bare nickname there too.
+        // The bare name is an empty value. A release that predates it keeps
+        // the line as an empty instance and writes it back as it read it.
+        out.push_str("  instance:");
         if entry.instance != BARE {
-            out.push_str("  instance: ");
+            out.push(' ');
             out.push_str(&entry.instance);
-            out.push('\n');
         }
+        out.push('\n');
         out.push_str("  registered_at: ");
         out.push_str(&entry.registered_at.to_string());
         out.push('\n');
@@ -762,6 +790,9 @@ fn serialize_registry(map: &BTreeMap<String, InstanceEntry>) -> String {
             out.push_str("  alias_of: ");
             out.push_str(target);
             out.push('\n');
+        }
+        if entry.retired {
+            out.push_str("  retired: true\n");
         }
     }
     out
@@ -857,15 +888,15 @@ mod tests {
         with_registry(|r| {
             r.register("/x", "sess-a").unwrap();
             r.register("/x", "sess-b").unwrap();
-            assert_eq!(r.keep("/x", "sess-a").unwrap().as_deref(), Some(BARE));
+            assert_eq!(r.keep("/x", "sess-a", None).unwrap().as_deref(), Some(BARE));
             assert_eq!(r.register("/x", "sess-a").unwrap(), BARE);
-            assert_eq!(r.keep("/x", "sess-b").unwrap().as_deref(), Some("alpha"));
+            assert_eq!(r.keep("/x", "sess-b", None).unwrap().as_deref(), Some("alpha"));
         });
     }
 
     /// An ended session's name goes to the next session, lowest first: with
     /// the bare holder gone and `-alpha` running, the next one is bare. The
-    /// ended row is dropped, so the two never share a name.
+    /// ended row is retired: it holds no slot.
     #[test]
     fn an_ended_sessions_name_is_reused() {
         with_sessions(|s| {
@@ -873,7 +904,7 @@ mod tests {
             s.register("/x", "sess-b").unwrap();
             s.end("sess-a");
             assert_eq!(s.register("/x", "sess-c").unwrap(), BARE);
-            assert_eq!(s.lookup("/x", "sess-a"), None, "the ended row no longer reads the name");
+            assert!(s.snapshot("/x")["sess-a"].retired, "the ended row is retired and holds no slot");
             assert_eq!(s.lookup("/x", "sess-b").as_deref(), Some("alpha"), "the live holder is untouched");
             s.end("sess-b");
             assert_eq!(s.register("/x", "sess-d").unwrap(), "alpha");
@@ -915,15 +946,60 @@ mod tests {
     fn a_register_yields_a_name_another_live_slot_holds() {
         with_sessions(|s| {
             fs::create_dir_all(&s.base_dir).unwrap();
-            let slot = |at| InstanceEntry { instance: BARE.to_string(), registered_at: at, last_seen: agent_fmt::when::now_secs(), alias_of: None };
+            let slot = |at| InstanceEntry { instance: BARE.to_string(), registered_at: at, last_seen: agent_fmt::when::now_secs(), alias_of: None, retired: false };
             write_registry(&s.path_for("/x"), &BTreeMap::from([("sess-a".to_string(), slot(1)), ("sess-c".to_string(), slot(2))])).unwrap();
-            assert_eq!(s.keep("/x", "sess-a").unwrap().as_deref(), Some(BARE), "a refresh keeps the name");
+            assert_eq!(s.keep("/x", "sess-a", None).unwrap().as_deref(), Some(BARE), "a refresh keeps the name");
             assert_eq!(s.register("/x", "sess-a").unwrap(), "alpha");
             assert_eq!(s.register("/x", "sess-c").unwrap(), BARE);
             // With the other holder ended, a register keeps the name.
             s.end("sess-a");
             write_registry(&s.path_for("/x"), &BTreeMap::from([("sess-a".to_string(), slot(1)), ("sess-c".to_string(), slot(2))])).unwrap();
             assert_eq!(s.register("/x", "sess-c").unwrap(), BARE);
+        });
+    }
+
+    /// A sensor host on a released attend (v0.36.0) rewrites the registry
+    /// with its own parse and write rules every minute. A bare row passes
+    /// through that round trip and comes back bare.
+    #[test]
+    fn a_bare_row_survives_the_released_parser_and_writer() {
+        let bare = InstanceEntry { instance: BARE.into(), registered_at: 100, last_seen: 200, alias_of: None, retired: false };
+        let lettered = InstanceEntry { instance: "alpha".into(), registered_at: 110, last_seen: 210, alias_of: None, retired: false };
+        let ours = BTreeMap::from([("sess-a".to_string(), bare), ("sess-b".to_string(), lettered)]);
+        let released = v036::parse_registry(&serialize_registry(&ours));
+        assert_eq!(released.get("sess-a").map(|e| e.instance.as_str()), Some(""), "the released parser keeps the bare row");
+        let back = parse_registry(&v036::serialize_registry(&released));
+        assert_eq!(back, ours, "the released writer keeps it bare");
+    }
+
+    /// An ended session's row is retired, not dropped, when a new session
+    /// takes its name: its earlier messages still read the name it held,
+    /// never the live bare holder's, and the retired row blocks no name.
+    #[test]
+    fn an_ended_sessions_messages_keep_the_name_it_held() {
+        with_sessions(|s| {
+            s.register("/x", "sess-a").unwrap();
+            s.register("/x", "sess-b").unwrap();
+            s.end("sess-b");
+            assert_eq!(s.register("/x", "sess-c").unwrap(), "alpha");
+            assert_eq!(s.lookup("/x", "sess-b").as_deref(), Some("alpha"), "the retired row reads the name it held");
+            assert_ne!(display_name("Urban", s.lookup("/x", "sess-b").as_deref()), display_name("Urban", s.lookup("/x", "sess-a").as_deref()));
+            assert_eq!(s.register("/x", "sess-d").unwrap(), "beta");
+            s.end("sess-c");
+            assert_eq!(s.register("/x", "sess-e").unwrap(), "alpha", "neither the retired row nor the ended slot blocks alpha");
+        });
+    }
+
+    /// The 7-day GC spares a live session whose row went unrefreshed (a
+    /// laptop suspended for over a week): it keeps its row and its name.
+    #[test]
+    fn gc_spares_a_live_sessions_row() {
+        with_sessions(|s| {
+            let now = 1_000_000u64;
+            let way_old = now - (8 * 24 * 3600);
+            s.register_with_age("/x", "sess-a", DEFAULT_GC_AGE, way_old).unwrap();
+            assert_eq!(s.register_with_age("/x", "sess-b", DEFAULT_GC_AGE, now).unwrap(), "alpha");
+            assert_eq!(s.lookup("/x", "sess-a").as_deref(), Some(BARE), "the live session's row survives GC");
         });
     }
 
@@ -938,13 +1014,14 @@ mod tests {
     }
 
     #[test]
-    fn a_row_unseen_past_gc_age_is_removed() {
-        with_registry(|r| {
+    fn an_ended_sessions_row_unseen_past_gc_age_is_removed() {
+        with_sessions(|s| {
             let now = 1_000_000u64;
             let way_old = now - (8 * 24 * 3600); // 8 days
-            r.register_with_age("/x", "sess-a", DEFAULT_GC_AGE, way_old).unwrap();
-            r.register_with_age("/x", "sess-b", DEFAULT_GC_AGE, now).unwrap();
-            assert_eq!(r.lookup("/x", "sess-a"), None, "sess-a's stale row is collected");
+            s.register_with_age("/x", "sess-a", DEFAULT_GC_AGE, way_old).unwrap();
+            s.end("sess-a");
+            s.register_with_age("/x", "sess-b", DEFAULT_GC_AGE, now).unwrap();
+            assert_eq!(s.lookup("/x", "sess-a"), None, "sess-a's stale row is collected");
         });
     }
 
@@ -1012,24 +1089,27 @@ mod tests {
             registered_at,
             last_seen,
             alias_of: alias_of.map(str::to_string),
+            retired: false,
         };
         let m = BTreeMap::from([
             ("sess-a".to_string(), entry("alpha", 1_000, 2_000, None)),
             ("sess-b".to_string(), entry("beta", 1_500, 2_500, Some("sess-a"))),
             ("sess-c".to_string(), entry(BARE, 1_700, 2_700, None)),
             ("sess-d".to_string(), entry(BARE, 1_800, 2_800, Some("sess-c"))),
+            ("sess-e".to_string(), InstanceEntry { retired: true, ..entry("gamma", 1_900, 2_900, None) }),
         ]);
         let yaml = serialize_registry(&m);
         assert_eq!(parse_registry(&yaml), m);
     }
 
-    /// The bare name is written as no `instance` line, which a release that
-    /// predates it skips: it shows the session by its bare nickname too.
+    /// The bare name is an `instance` line with an empty value, and a row
+    /// with no `instance` line is no row.
     #[test]
-    fn a_bare_row_has_no_instance_line() {
-        let row = InstanceEntry { instance: BARE.into(), registered_at: 100, last_seen: 200, alias_of: None };
+    fn a_bare_row_has_an_empty_instance_line() {
+        let row = InstanceEntry { instance: BARE.into(), registered_at: 100, last_seen: 200, alias_of: None, retired: false };
         let yaml = serialize_registry(&BTreeMap::from([("sess-a".to_string(), row)]));
-        assert_eq!(yaml, "sess-a:\n  registered_at: 100\n  last_seen: 200\n");
+        assert_eq!(yaml, "sess-a:\n  instance:\n  registered_at: 100\n  last_seen: 200\n");
+        assert!(parse_registry("sess-a:\n  registered_at: 100\n  last_seen: 200\n").is_empty());
     }
 
     /// A registry the released attend wrote, every row lettered, loads as it
@@ -1111,7 +1191,7 @@ sess-a:
             assert_eq!(s.rename("/x", "sess-a", "sess-a2").unwrap().as_deref(), Some(BARE));
             s.end("sess-a");
             assert_eq!(s.register("/x", "sess-a2").unwrap(), BARE);
-            assert_eq!(s.keep("/x", "sess-a").unwrap(), None, "the old host leaves the alias alone");
+            assert_eq!(s.keep("/x", "sess-a", None).unwrap(), None, "the old host leaves the alias alone");
             let snap = s.snapshot("/x");
             assert_eq!(snap["sess-a2"].instance, BARE);
             assert_eq!(snap["sess-a"].instance, BARE, "the old id reads the bare name");
@@ -1130,12 +1210,12 @@ sess-a:
             reg.register("/x", "a").unwrap();
             reg.register("/x", "b").unwrap();
             reg.rename("/x", "b", "c").unwrap();
-            assert_eq!(reg.keep("/x", "b").unwrap(), None);
+            assert_eq!(reg.keep("/x", "b", None).unwrap(), None);
             let snap = reg.snapshot("/x");
             assert_eq!(snap["b"].alias_of.as_deref(), Some("c"), "b is still an alias");
             assert_eq!(reg.successor("/x", "b").as_deref(), Some("c"));
-            assert_eq!(reg.keep("/x", "c").unwrap().as_deref(), Some("alpha"), "the slot is refreshed");
-            assert_eq!(reg.keep("/x", "d").unwrap().as_deref(), Some("beta"), "an id with no row is allocated");
+            assert_eq!(reg.keep("/x", "c", None).unwrap().as_deref(), Some("alpha"), "the slot is refreshed");
+            assert_eq!(reg.keep("/x", "d", None).unwrap().as_deref(), Some("beta"), "an id with no row is allocated");
         });
     }
 
@@ -1166,7 +1246,7 @@ sess-a:
             s.end("sess-c");
             s.start("sess-b");
             assert_eq!(s.register("/x", "sess-b").unwrap(), "alpha");
-            assert_eq!(s.lookup("/x", "sess-c"), None, "the ended successor gives up the name");
+            assert!(s.snapshot("/x")["sess-c"].retired, "the ended successor is retired");
         });
     }
 
@@ -1190,8 +1270,10 @@ sess-a:
         });
     }
 
+    /// An alias whose chain reaches no slot in its cwd blocks no name and
+    /// keeps reading the name it read, for its earlier messages.
     #[test]
-    fn an_orphaned_alias_gives_up_the_name_it_reads() {
+    fn an_orphaned_alias_keeps_the_name_it_reads() {
         with_registry(|reg| {
             reg.register("/x", "sess-a").unwrap();
             reg.rename("/x", "sess-a", "sess-c").unwrap();
@@ -1199,7 +1281,30 @@ sess-a:
             reg.register("/y", "sess-c").unwrap();
             assert_eq!(reg.lookup("/x", "sess-a").as_deref(), Some(BARE));
             assert_eq!(reg.register("/x", "sess-d").unwrap(), BARE);
-            assert_eq!(reg.lookup("/x", "sess-a"), None, "the dead alias no longer reads sess-d's name");
+            assert_eq!(reg.lookup("/x", "sess-a").as_deref(), Some(BARE));
+        });
+    }
+
+    /// A row a writer dropped (a released host's rewrite, a misjudged
+    /// liveness) comes back on the minute refresh under the name the host
+    /// holds, not the lowest free one, unless a live session took it.
+    #[test]
+    fn keep_restores_a_missing_row_under_its_own_name() {
+        with_sessions(|s| {
+            s.register("/x", "sess-a").unwrap();
+            s.register("/x", "sess-b").unwrap();
+            assert_eq!(s.register("/x", "sess-c").unwrap(), "beta");
+            s.end("sess-b");
+            let mut map = s.snapshot("/x");
+            map.remove("sess-c");
+            write_registry(&s.path_for("/x"), &map).unwrap();
+            assert_eq!(s.keep("/x", "sess-c", Some("beta")).unwrap().as_deref(), Some("beta"), "alpha is free, but sess-c holds beta");
+            // A name a live session took meanwhile is not taken back.
+            let mut map = s.snapshot("/x");
+            map.remove("sess-a");
+            write_registry(&s.path_for("/x"), &map).unwrap();
+            assert_eq!(s.register("/x", "sess-d").unwrap(), BARE);
+            assert_eq!(s.keep("/x", "sess-a", Some(BARE)).unwrap().as_deref(), Some("alpha"));
         });
     }
 
@@ -1250,7 +1355,7 @@ sess-a:
         with_registry(|reg| {
             fs::create_dir_all(&reg.base_dir).unwrap();
             let old = reg.base_dir.join("-srv-a b.yaml");
-            let entry = InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: agent_fmt::when::now_secs(), alias_of: None };
+            let entry = InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: agent_fmt::when::now_secs(), alias_of: None, retired: false };
             write_registry(&old, &BTreeMap::from([("sess-a".to_string(), entry)])).unwrap();
             assert_eq!(reg.lookup("/srv/a b", "sess-a"), None);
             reg.touch_at("/srv/a b", "sess-a", 500).unwrap();
@@ -1401,6 +1506,104 @@ sess-a:
         assert_eq!(snap.len(), THREADS, "registry yaml lost entries: {snap:?}");
 
         fs::remove_dir_all(&base).ok();
+    }
+}
+
+/// The registry's parse and write rules as attend v0.36.0 released them
+/// (`git show attend-v0.36.0:tools/attend-instances/src/lib.rs`), copied
+/// verbatim but for the entry type, so a test can run a row through a
+/// released sensor host's minute rewrite.
+#[cfg(test)]
+mod v036 {
+    use std::collections::BTreeMap;
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct InstanceEntry {
+        pub instance: String,
+        pub registered_at: u64,
+        pub last_seen: u64,
+        pub alias_of: Option<String>,
+    }
+
+    pub fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
+        let mut out = BTreeMap::new();
+        let mut current_sid: Option<String> = None;
+        let mut current_instance: Option<String> = None;
+        let mut current_registered_at: Option<u64> = None;
+        let mut current_last_seen: Option<u64> = None;
+        let mut current_alias_of: Option<String> = None;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let indent = line.len() - line.trim_start().len();
+            if indent == 0 && trimmed.ends_with(':') {
+                commit_entry(
+                    &mut out,
+                    current_sid.take(),
+                    current_instance.take(),
+                    current_registered_at.take(),
+                    current_last_seen.take(),
+                    current_alias_of.take(),
+                );
+                current_sid = Some(trimmed.trim_end_matches(':').to_string());
+                continue;
+            }
+            if indent == 2 {
+                if let Some((key, value)) = trimmed.split_once(':') {
+                    let key = key.trim();
+                    let value = value.trim();
+                    match key {
+                        "instance" => current_instance = Some(value.to_string()),
+                        "registered_at" => current_registered_at = value.parse().ok(),
+                        "last_seen" => current_last_seen = value.parse().ok(),
+                        "alias_of" => current_alias_of = Some(value.to_string()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        commit_entry(&mut out, current_sid, current_instance, current_registered_at, current_last_seen, current_alias_of);
+        out
+    }
+
+    fn commit_entry(
+        out: &mut BTreeMap<String, InstanceEntry>,
+        sid: Option<String>,
+        instance: Option<String>,
+        registered_at: Option<u64>,
+        last_seen: Option<u64>,
+        alias_of: Option<String>,
+    ) {
+        let (Some(sid), Some(instance)) = (sid, instance) else {
+            return;
+        };
+        out.insert(sid, InstanceEntry { instance, registered_at: registered_at.unwrap_or(0), last_seen: last_seen.unwrap_or(0), alias_of });
+    }
+
+    pub fn serialize_registry(map: &BTreeMap<String, InstanceEntry>) -> String {
+        let mut out = String::new();
+        for (sid, entry) in map {
+            out.push_str(sid);
+            out.push_str(":\n");
+            out.push_str("  instance: ");
+            out.push_str(&entry.instance);
+            out.push('\n');
+            out.push_str("  registered_at: ");
+            out.push_str(&entry.registered_at.to_string());
+            out.push('\n');
+            out.push_str("  last_seen: ");
+            out.push_str(&entry.last_seen.to_string());
+            out.push('\n');
+            if let Some(target) = &entry.alias_of {
+                out.push_str("  alias_of: ");
+                out.push_str(target);
+                out.push('\n');
+            }
+        }
+        out
     }
 }
 
