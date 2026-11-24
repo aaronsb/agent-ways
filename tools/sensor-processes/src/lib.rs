@@ -479,7 +479,10 @@ pub struct ProcessSensor {
     /// The session's root process, Claude Code. When set, a watched tool
     /// is tracked only when it runs under this pid, so a build another
     /// session or a terminal started is not reported to this session as
-    /// its own. Apps are presence, and stay machine-wide (ADR-113).
+    /// its own. Apps are presence, and stay machine-wide.
+    ///
+    /// References:
+    /// - ADR-113: the sensor tracks application presence.
     root: Option<u32>,
 }
 
