@@ -327,13 +327,18 @@ const MAX_ANCESTRY: usize = 16;
 
 /// Whether `pid` runs under `root`, given `parent`, each pid's parent in
 /// one process table, within [`MAX_ANCESTRY`] hops. A parent missing from
-/// the table ends the walk.
-fn descends_from(parent: &HashMap<u32, u32>, pid: u32, root: u32) -> bool {
+/// the table ends the walk. So does another Claude Code session in
+/// `sessions`: a `claude -p` run from the session's shell is a session of
+/// its own, and its builds are its own.
+fn descends_from(parent: &HashMap<u32, u32>, sessions: &HashSet<u32>, pid: u32, root: u32) -> bool {
     let mut cur = pid;
     for _ in 0..MAX_ANCESTRY {
         let Some(&ppid) = parent.get(&cur) else { return false };
         if ppid == root {
             return true;
+        }
+        if sessions.contains(&ppid) {
+            return false;
         }
         cur = ppid;
     }
@@ -353,6 +358,22 @@ struct Tool {
     /// Apps (not themselves watched) running under this tool, such as
     /// `node` under `npm run dev` or `docker` under `make up`.
     hosts: HashSet<String>,
+    /// When the sensor last saw the tool running, in Unix seconds.
+    seen: u64,
+}
+
+/// How long after its start a watched tool must still be running when a
+/// poll sees it to count as a build. A compiler that a script runs many
+/// times, such as `cc` under `./configure`, lives well under a second,
+/// and a poll that happens to catch one would report a finish for each.
+/// Such a run reports nothing.
+const MIN_BUILD_SECS: i64 = 5;
+
+/// Whether `tool` was seen too soon after its start to count as a build.
+/// A tool whose start is unknown, or a clock that reads before the start,
+/// counts as a build.
+fn brief(tool: &Tool) -> bool {
+    tool.start.is_some_and(|start| (0..MIN_BUILD_SECS).contains(&(tool.seen as i64 - start)))
 }
 
 /// One poll's view of the session's processes.
@@ -423,7 +444,7 @@ fn tally_under(
         let above = watched_above(p);
         if is_watched(&p.comm) {
             if above.is_empty() {
-                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), start: p.start, ticks: None, hosts: HashSet::new() });
+                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), start: p.start, ticks: None, hosts: HashSet::new(), seen: 0 });
             }
             continue;
         }
@@ -612,6 +633,7 @@ impl ProcessSensor {
         let mut current = tally_under(&rows, self.root, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
         for (pid, tool) in current.tools.iter_mut() {
             tool.ticks = ticks(*pid);
+            tool.seen = now;
         }
         if let Some(root) = self.root {
             // A tool under the root is the session's. One the session
@@ -619,9 +641,10 @@ impl ProcessSensor {
             // and it was adopted, is still the same run and stays tracked,
             // so its finish is reported when it ends, not when it moves.
             let parent: HashMap<u32, u32> = rows.iter().map(|p| (p.pid, p.ppid)).collect();
+            let sessions: HashSet<u32> = rows.iter().filter(|p| canonical_name(&p.comm) == "claude").map(|p| p.pid).collect();
             let prior = &self.prior_tools;
             current.tools.retain(|pid, tool| {
-                descends_from(&parent, *pid, root)
+                descends_from(&parent, &sessions, *pid, root)
                     || prior.get(pid).is_some_and(|p| p.name == tool.name && same_start(p, tool))
             });
         }
@@ -683,6 +706,9 @@ impl ProcessSensor {
         // hosted it, the one with the lowest pid.
         let mut named = vec![false; exits.len()];
         for (pid, tool) in finished {
+            if brief(tool) {
+                continue;
+            }
             let mut with: Vec<String> = Vec::new();
             for (i, exit) in exits.iter().enumerate() {
                 if !named[i] && exit.hosts.contains(pid) {
@@ -774,7 +800,9 @@ impl Sensor for ProcessSensor {
 
     /// A build finishing in the session passes the refractory: each one is
     /// a result the agent may be waiting on, such as a rebuild after a
-    /// failure, and they come one per finished build, so they cannot flood.
+    /// failure. Only a tool still running [`MIN_BUILD_SECS`] after its
+    /// start reports a finish, so a script that runs a compiler many times
+    /// does not report each run.
     fn skips_refractory(&self, description: &str) -> bool {
         description.split_once(" finished").is_some_and(|(tool, _)| self.is_watched(tool))
     }
@@ -1031,7 +1059,7 @@ mod tests {
     }
 
     fn tool(name: &str, hosts: &[&str]) -> Tool {
-        Tool { name: name.into(), start: Some(T0_SECS), ticks: None, hosts: hosts.iter().map(|h| h.to_string()).collect() }
+        Tool { name: name.into(), start: Some(T0_SECS), ticks: None, hosts: hosts.iter().map(|h| h.to_string()).collect(), seen: 0 }
     }
 
     #[test]
@@ -1728,15 +1756,15 @@ mod tests {
     #[test]
     fn descends_from_reaches_a_root_max_ancestry_hops_up_and_no_further() {
         let parent = chain(MAX_ANCESTRY as u32 + 1);
-        assert!(descends_from(&parent, 1000, 1000 + MAX_ANCESTRY as u32));
-        assert!(!descends_from(&parent, 1000, 1000 + MAX_ANCESTRY as u32 + 1));
+        assert!(descends_from(&parent, &HashSet::new(), 1000, 1000 + MAX_ANCESTRY as u32));
+        assert!(!descends_from(&parent, &HashSet::new(), 1000, 1000 + MAX_ANCESTRY as u32 + 1));
     }
 
     #[test]
     fn descends_from_ends_on_a_pid_cycle_and_a_missing_parent() {
         let cycle: HashMap<u32, u32> = [(5, 6), (6, 5)].into_iter().collect();
-        assert!(!descends_from(&cycle, 5, 7));
-        assert!(!descends_from(&HashMap::new(), 5, 7));
+        assert!(!descends_from(&cycle, &HashSet::new(), 5, 7));
+        assert!(!descends_from(&HashMap::new(), &HashSet::new(), 5, 7));
     }
 
     /// A build finishing skips the refractory; an app's start or exit, and
@@ -1750,5 +1778,42 @@ mod tests {
         assert!(!s.skips_refractory("node exited"));
         assert!(!s.skips_refractory("docker started"));
         assert!(!s.skips_refractory("nvim finished"));
+    }
+
+    /// A watched tool that a poll caught moments after its start, such as
+    /// one `cc` of a `./configure` run, reports no finish; one still
+    /// running [`MIN_BUILD_SECS`] after its start does.
+    #[test]
+    fn a_tool_seen_only_just_after_its_start_reports_no_finish() {
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "zsh")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let t0 = T0_SECS as u64;
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        s.observe(rows(&[]), no_ticks, &focus, t0);
+        s.observe(rows(&[(120, 110, "cc")]), no_ticks, &focus, t0 + 1);
+        assert!(s.observe(rows(&[]), no_ticks, &focus, t0 + 6).is_empty(), "a brief cc reports nothing");
+        s.observe(rows(&[(130, 110, "cargo")]), no_ticks, &focus, t0 + MIN_BUILD_SECS as u64);
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, t0 + 40)), vec!["cargo finished"]);
+    }
+
+    /// A `claude -p` run from the session's shell is a session of its own:
+    /// its builds are not this session's.
+    #[test]
+    fn a_build_under_a_nested_claude_session_is_not_the_session_s() {
+        let rows = |extra: &[(u32, u32, &'static str)]| {
+            let mut all = vec![(1, 0, "systemd"), (100, 1, "claude"), (110, 100, "zsh"), (150, 110, "claude"), (160, 150, "bash")];
+            all.extend_from_slice(extra);
+            Some(procs(&all))
+        };
+        let focus = no_focus();
+        let mut s = ProcessSensor::new().with_root(Some(100));
+        s.observe(rows(&[]), no_ticks, &focus, 0);
+        s.observe(rows(&[(170, 160, "cargo"), (180, 110, "make")]), no_ticks, &focus, 0);
+        assert_eq!(s.prior_tools.keys().copied().collect::<Vec<_>>(), vec![180]);
+        assert_eq!(texts(&s.observe(rows(&[]), no_ticks, &focus, 0)), vec!["make finished"]);
     }
 }

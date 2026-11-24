@@ -190,6 +190,39 @@ fn a_build_finishing_passes_a_refractory_another_line_started() {
     assert!(slot.ready_to_disclose());
 }
 
+/// A crate sensor wrapped in its file passes on which lines skip the
+/// refractory, as the host runs the processes sensor.
+#[test]
+fn a_file_sensor_passes_on_what_its_crate_sensor_lets_skip_the_refractory() {
+    let s = sensors::hosted::FileSensor::new("processes".into(), sensor_spec::DEFAULTS, Box::new(Builds(Vec::new())), "/p", None, false);
+    assert!(s.skips_refractory("cargo finished"));
+    assert!(!s.skips_refractory("docker started"));
+}
+
+/// The event lane's governor may hold a build finishing behind a recent
+/// disclosure. It holds the line, and writes it once it opens.
+#[test]
+fn a_build_finishing_the_governor_holds_is_written_once_it_opens() {
+    let polls = vec![vec![(3.0, "cargo finished (success)".to_string())], vec![(3.0, "cargo finished (failure, code 101)".to_string())]];
+    let mut slots = vec![sensors::slot(Box::new(Builds(polls)), sensor_spec::Lane::Event, None)];
+    slots[0].engagement = sensor_trait::EngagementState::new(build_engagement(&config::Config::default()));
+    let focus = Focus { description: String::new(), working_dir: "/p".into(), keywords: Vec::new() };
+    let mut governor = DisclosureGovernor::new(Duration::from_millis(200), 3, Duration::from_secs(120));
+    let mut sink = Written::default();
+    slots[0].poll(&focus);
+    try_disclose(&mut slots, &[0], &mut governor, true, &mut sink);
+    assert_eq!(sink.0, ["cargo finished (success)"]);
+    slots[0].poll(&focus);
+    assert!(slots[0].ready_to_disclose());
+    try_disclose(&mut slots, &[0], &mut governor, true, &mut sink);
+    assert_eq!(sink.0.len(), 1, "the governor holds the second batch");
+    assert_eq!(slots[0].accumulator.events, ["cargo finished (failure, code 101)"], "held, not dropped");
+    std::thread::sleep(Duration::from_millis(250));
+    assert!(slots[0].ready_to_disclose());
+    try_disclose(&mut slots, &[0], &mut governor, true, &mut sink);
+    assert_eq!(sink.0, ["cargo finished (success)", "cargo finished (failure, code 101)"]);
+}
+
 #[test]
 fn hash_file_is_stable_and_content_sensitive() {
     // The same-hash skip on the reload path (issue #140) depends on
