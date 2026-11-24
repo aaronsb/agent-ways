@@ -229,7 +229,7 @@ impl Fixture {
     /// Whether session `sid`'s enrollment record holds a way. A record
     /// whose last way went keeps only its process, and enrolls nothing.
     pub fn enrolled(&self, sid: &str) -> bool {
-        ["run", "join", "listen", "add"].iter().any(|line| self.record_has(sid, line))
+        ["join", "listen", "add"].iter().any(|line| self.record_has(sid, line))
     }
 
     /// Whether session `sid`'s enrollment record has `line` as a whole

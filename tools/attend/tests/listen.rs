@@ -47,7 +47,7 @@ fn listen_on_delivers_what_was_addressed_while_dormant() {
     assert_eq!(state["listening"], true);
     assert_eq!(state["via"], json!(["listen"]));
     assert_eq!(state["resolved"], true);
-    assert_eq!(state["run_live"], false);
+    assert!(state.get("run_live").is_none(), "no run can hold a session: {state}");
     assert_eq!(state["session_id"], f.sid.as_str());
     assert!(f.marker(&f.sid).exists());
     assert!(f.heartbeat(&f.sid).exists(), "a listening session looks alive");

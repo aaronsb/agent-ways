@@ -4,18 +4,17 @@
 
 //! `listen`: whether the drain delivers to this session, set without
 //! joining a channel. The Stop hook delivers only to a session the attend
-//! mod enrolled (`--host mod`), or one whose `attend run` is live.
+//! mod enrolled (`--host mod`).
 //!
 //! Listening is enrollment (ADR-172, addendum of 2026-10-01). A session
-//! listens once it runs `attend listen on`, runs `attend run`, or joins a
-//! channel, and stops at `attend listen off` or `attend channel scene private`.
+//! listens once it runs `attend listen on` or joins a channel, and stops
+//! at `attend listen off` or `attend channel scene private`.
 //! While it is not listening the drain delivers nothing and marks nothing
 //! read; the messages wait in the store.
 //!
 //! References:
 //! - ADR-406 item 10: listening is set without joining a channel.
-//! - ADR-416, turn-end settlement and its amendment of 2026-11-23: who the
-//!   Stop hook delivers to.
+//! - ADR-416, turn-end settlement: who the Stop hook delivers to.
 
 use crate::util::{adopt_previous_enrollment, current_session, enroll_as, Session};
 use attend_presence::enrollment::{self, Host, Source};
@@ -29,15 +28,12 @@ pub struct Listening {
     /// unresolved session never listens: the drain does not run for it.
     pub resolved: bool,
     pub listening: bool,
-    /// The ways it is listening: `listen`, `run`, `join`. Empty when not.
+    /// The ways it is listening: `listen`, `join`, `add`. Empty when not.
     pub via: Vec<&'static str>,
-    /// What hosts delivery when it is not Monitor or a shell: `mod` once the
-    /// attend mod turned listening on (ADR-406). The drain speaks that
-    /// host's tools and format.
+    /// What hosts delivery when it is not a shell: `mod` once the attend
+    /// mod turned listening on. The drain speaks that host's
+    /// tools and format.
     pub host: Option<&'static str>,
-    /// An `attend run` holds the session. It listens until that run exits,
-    /// whatever `listen off` said.
-    pub run_live: bool,
 }
 
 /// Why `on` or `off` changed nothing.
@@ -71,8 +67,8 @@ pub fn status() -> Listening {
 }
 
 /// Turn listening on. When the session was not listening, the cold-start
-/// rule applies again at the next drain, as it does for a join or `attend
-/// run` ([`enroll_as`]): what was addressed to its project since its Claude
+/// rule applies again at the next drain, as it does for a join
+/// ([`enroll_as`]): what was addressed to its project since its Claude
 /// Code process started is delivered, and `#open` and channel messages from
 /// before now are held back and counted.
 /// Delivers nothing itself. `host` names what hosts delivery (the attend
@@ -90,8 +86,7 @@ pub fn on(host: Option<Host>) -> Result<Listening, ListenError> {
 }
 
 /// Stop listening. Channel memberships stay; the drain delivers nothing
-/// until the session listens again. While an `attend run` holds the session
-/// it keeps listening until that run exits.
+/// until the session listens again.
 pub fn off() -> Result<Listening, ListenError> {
     let me = current_session();
     if !me.resolved() {
@@ -136,6 +131,5 @@ fn state(me: &Session, listening: bool) -> Listening {
         listening,
         via: if listening { enrollment::sources(&me.session_id).into_iter().map(Source::as_str).collect() } else { Vec::new() },
         host: if listening { enrollment::host(&me.session_id).map(Host::as_str) } else { None },
-        run_live: resolved && attend_presence::heartbeat::run_is_live(&me.session_id),
     }
 }

@@ -361,11 +361,6 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         return quiet("no Claude session owns this process, nothing to warm", None);
     }
     let sid = ident.session_id.as_str();
-    // Under `attend run` the sensor holds the state and wakes the session;
-    // a second judge would wake it twice.
-    if attend_presence::heartbeat::run_is_live(sid) {
-        return quiet("an attend run holds this session; its sensor keeps the cache warm", None);
-    }
     let cfg = crate::config::Config::load(&ident.origin_path);
     if !crate::sensors::crate_enabled(&cfg, &ident.origin_path, "keepwarm") {
         return quiet("no sensor file runs the keepwarm sensor", None);

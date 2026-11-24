@@ -131,8 +131,8 @@ pub(crate) enum MessageCmd {
 
     /// Tombstone a session that has exited, so every reader skips its messages
     ///
-    /// The drain, the mod, `attend message unread`, the Monitor poller and
-    /// `attend message inbox` all skip what a tombstoned session sent, and
+    /// The drain, the mod, `attend message unread` and `attend message
+    /// inbox` all skip what a tombstoned session sent, and
     /// the drain records it read, up to when it was tombstoned; what the
     /// session sends later, back under --resume, shows. Only an agent's
     /// session that this host saw exit is tombstoned: a person's id, a
@@ -523,9 +523,8 @@ pub(crate) struct InboxFlags {
     /// Atomically deliver pending messages and record their
     /// consumption. The Stop-hook fast path: a silent no-op
     /// under an unresolved identity or for a session not listening
-    /// (#720), and in hook format for a session that neither the attend
-    /// mod enrolled (`attend listen on --host mod`) nor a live `attend run`
-    /// holds. On a cold start (no
+    /// (#720), and in hook format for a session the attend mod did not
+    /// enroll (`attend listen on --host mod`). On a cold start (no
     /// seen-set) it delivers addressed mail and fresh messages and
     /// counts the older backlog it does not show. A system signal past
     /// its expiry is recorded read and never delivered.
@@ -680,9 +679,8 @@ pub enum KeepwarmCmd {
     /// Cache state, context size, cold price, window left, and this session's cold writes
     Status,
     /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
-    /// one is due, else nothing (exit 0 either way). For a host that polls
-    /// without `attend run`; prints nothing while an `attend run` holds the
-    /// session, since its sensor wakes it.
+    /// one is due, else nothing (exit 0 either way). The attend mod polls
+    /// it.
     Check(KeepwarmCheckArgs),
     /// The operator prompted: the keepalive count starts again, and a sent
     /// wrap and a stop are cleared. The attend mod runs it for each prompt
@@ -761,9 +759,9 @@ pub enum ListenCmd {
     /// Listen: the drain delivers to this session. Messages addressed to
     /// its project while it was not listening are delivered by the next
     /// drain; older #open and channel backlog is held back. The Stop hook
-    /// delivers only with `--host mod`, or while an `attend run` is live
+    /// delivers only with `--host mod`
     On {
-        /// What hosts delivery, when not Monitor or a shell: `mod`, the
+        /// What hosts delivery, when not a shell: `mod`, the
         /// attend mod, whose agent answers with attend_reply and attend_send.
         /// The Stop-hook drain then delivers to the session, in the mod's
         /// format and naming those tools
@@ -771,8 +769,8 @@ pub enum ListenCmd {
         host: Option<ListenHost>,
     },
     /// Stop listening: the drain delivers nothing and marks nothing read.
-    /// Channel memberships are kept; a later join, `attend run` or
-    /// `listen on` listens again
+    /// Channel memberships are kept; a later join or `listen on` listens
+    /// again
     Off,
     /// Print `listening` or `not listening` (default)
     Status,

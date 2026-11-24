@@ -5,20 +5,18 @@
 //! What the Stop-hook drain prints, by host, through the CLI as the hook
 //! runs it.
 //!
-//! The Stop hook delivers to a session the attend mod turned on (`attend
-//! listen on --host mod`) and to one whose `attend run` is live, as the
-//! Stop hook's `additionalContext`, which Claude Code shows once as `Stop
-//! hook feedback`; a `decision: block` showed each delivery a second time
-//! as a hook error. A mod host gets the mod's own format, with its tools
-//! and short `~id` handles that `attend message reply --re` takes; a
-//! session under `attend run` gets the CLI's format and its `attend message
-//! reply` hint. Any other session gets nothing from it.
+//! The Stop hook delivers only to a session the attend mod turned on
+//! (`attend listen on --host mod`), as the Stop hook's `additionalContext`,
+//! which Claude Code shows once as `Stop hook feedback`; a `decision:
+//! block` showed each delivery a second time as a hook error. It speaks
+//! the mod's own format, with its tools and short `~id` handles that
+//! `attend message reply --re` takes. Any other session gets nothing from
+//! it.
 //!
 //! References:
 //! - ADR-406 items 5, 9 and 10: the mod's delivery format and handles.
-//! - ADR-416, turn-end settlement and its amendment of 2026-11-23: the Stop
-//!   hook delivers to a session the mod enrolled, and to one with a live
-//!   `attend run` until #1316.
+//! - ADR-416, turn-end settlement: the Stop hook delivers to a session the
+//!   mod enrolled.
 
 mod common;
 use common::Fixture;
