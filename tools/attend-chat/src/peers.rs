@@ -76,8 +76,7 @@ pub fn roster_with<F: Fn(&str) -> bool>(
             let display = instances
                 .lookup(&s.cwd, &s.session_id)
                 .or_else(|| instances.lookup(&root, &s.session_id))
-                .map(|inst| format!("{nickname}-{inst}"))
-                .unwrap_or_else(|| nickname.to_string());
+                .map_or_else(|| nickname.to_string(), |inst| attend_instances::display_name(nickname, Some(&inst)));
             Peer {
                 session_id: s.session_id.clone(),
                 root,

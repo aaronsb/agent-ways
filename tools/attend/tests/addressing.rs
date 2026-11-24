@@ -175,6 +175,27 @@ fn an_ambiguous_name_is_refused() {
     assert!(files(&a.tray(&f)).is_empty());
 }
 
+/// Two live sessions in one project: the first holds the bare name, the
+/// second `-alpha` (ADR-129). The bare name reaches the first alone, not
+/// every session with that nickname, and the suffixed name the second.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_bare_name_reaches_the_bare_session_only() {
+    let f = Fixture::new("addr-bare");
+    let _env = enter(&f);
+    let a = Peer::start(&f, "peer-a", "twin");
+    let _b = Peer::start(&f, "peer-b", "twin");
+    let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+    assert_eq!(registry.register(&a.cwd, "peer-a").unwrap(), attend_instances::BARE);
+    assert_eq!(registry.register(&a.cwd, "peer-b").unwrap(), "alpha", "peer-a is live, so peer-b joins it");
+    let name = agent_identity::Identity::for_cwd(&a.cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    for (to, id) in [(name.clone(), "peer-a"), (format!("{name}-alpha"), "peer-b"), (name.to_uppercase(), "peer-a")] {
+        let sent = send(Some(&to), None, "just you").unwrap_or_else(|e| panic!("--to {to}: {e:?}"));
+        assert_eq!(read(&a.tray(&f), &sent.id).0.as_deref(), Some(id), "--to {to}");
+    }
+}
+
 /// A name that is no live session and no known person is refused.
 #[test]
 fn an_unknown_name_is_refused() {
@@ -251,7 +272,7 @@ mod reply {
             Err(e @ attend::verbs::SendError::SenderExited { .. }) => {
                 let name = agent_identity::Identity::for_cwd(&cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
                 let why = e.to_string();
-                assert!(why.contains(&format!("{name}-alpha")), "names the session: {why}");
+                assert!(why.contains(&format!("from {name} (session peer-old)")), "names the session by its bare name: {why}");
             }
             other => panic!("expected sender_exited: {other:?}"),
         }

@@ -376,7 +376,9 @@ mod tests {
     fn a_sighting_from_the_id_before_a_clear_is_the_live_sessions_row() {
         let base = std::env::temp_dir().join(format!("attend-chat-alias-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        let registry = attend_instances::Registry::with_base(base.clone());
+        // Every session is live: `other` holds the bare name, so `old`
+        // takes `-alpha` and `new` keeps it across the `/clear`.
+        let registry = attend_instances::Registry::with_liveness(base.clone(), |_| true);
         registry.register("/home/x", "other").unwrap();
         registry.register("/home/x", "old").unwrap();
         registry.rename("/home/x", "old", "new").unwrap();
@@ -387,7 +389,7 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
         let nickname = Identity::for_cwd("/home/x", ColorDepth::TrueColor).nickname;
         let rows: Vec<(&str, &str, bool)> = seen.iter().map(|s| (s.identity.nickname.as_str(), s.member.as_str(), s.live)).collect();
-        assert_eq!(rows, [(format!("{nickname}-beta").as_str(), "new", true)]);
+        assert_eq!(rows, [(format!("{nickname}-alpha").as_str(), "new", true)]);
     }
 
     /// Two live sessions at one cwd with one name are two entries.
@@ -490,11 +492,12 @@ mod tests {
     }
 
     /// Two sessions of one cwd, each holding its own slot, so their names
-    /// differ: `old` dead and seen in the buffer, `new` live.
+    /// differ: `old` dead and seen in the buffer, `new` live. Both were
+    /// live when `new` registered, so `old` is bare and `new` is `-alpha`.
     fn two_names() -> (Vec<Seen>, std::path::PathBuf) {
         let base = std::env::temp_dir().join(format!("attend-chat-lineage-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&base);
-        let registry = attend_instances::Registry::with_base(base.clone());
+        let registry = attend_instances::Registry::with_liveness(base.clone(), |_| true);
         registry.register("/home/x", "old").unwrap();
         registry.register("/home/x", "new").unwrap();
         let cache = SnapshotCache::with_registry(attend_instances::Registry::with_base(base.clone()));

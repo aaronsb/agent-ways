@@ -15,9 +15,12 @@ pub struct Agent {
     pub session_id: Option<String>,
     /// The working directory its identity derives from.
     pub cwd: String,
-    /// The persona name with its instance suffix (ADR-129), as peers see it.
+    /// The persona name with its instance suffix (ADR-129), as peers see it:
+    /// the bare nickname for the first live session in its directory.
     pub name: String,
     pub nickname: String,
+    /// The suffix; `None` for a session that holds the bare name or has no
+    /// registry row, which both show as the bare nickname.
     pub instance: Option<String>,
     /// What the peers sensor reads it doing; `working` for this session.
     pub status: String,
@@ -161,17 +164,16 @@ fn parent_scope(cwd: &str) -> String {
 
 fn agent(session_id: Option<String>, cwd: &str, instance: Option<String>, status: String, context_pct: Option<f64>, here: bool) -> Agent {
     let (nickname, name) = names(cwd, instance.as_deref());
+    let instance = instance.filter(|i| i != attend_instances::BARE);
     Agent { session_id, cwd: cwd.to_string(), name, nickname, instance, status, context_pct, here }
 }
 
-/// A session's `(nickname, name)` at `cwd`: the persona, and the persona
-/// with its instance suffix (ADR-129), as peers see it.
+/// A session's `(nickname, name)` at `cwd`: the persona, and the name peers
+/// see it by, with its instance suffix unless it holds the bare name
+/// (ADR-129).
 pub(crate) fn names(cwd: &str, instance: Option<&str>) -> (String, String) {
     let nickname = agent_identity::Identity::for_cwd(cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
-    let name = match instance {
-        Some(inst) => format!("{nickname}-{inst}"),
-        None => nickname.clone(),
-    };
+    let name = attend_instances::display_name(&nickname, instance);
     (nickname, name)
 }
 

@@ -356,10 +356,16 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     if let Some(s) = sessions.iter().find(|s| s.id == to) {
         return Ok(Dest::Sessions { cwd: s.cwd.clone(), ids: vec![s.id.clone()] });
     }
-    let matched: Vec<&LiveSession> = sessions
-        .iter()
-        .filter(|s| s.id == to || s.name.eq_ignore_ascii_case(to) || s.nickname.eq_ignore_ascii_case(to))
-        .collect();
+    // A session's full name before its nickname: `Urban` is the session
+    // that holds the bare name, not every `Urban-*` beside it (ADR-129).
+    // With no session named so, the nickname answers for the sessions
+    // that carry it.
+    let by_name: Vec<&LiveSession> = sessions.iter().filter(|s| s.name.eq_ignore_ascii_case(to)).collect();
+    let matched = if by_name.is_empty() {
+        sessions.iter().filter(|s| s.nickname.eq_ignore_ascii_case(to)).collect()
+    } else {
+        by_name
+    };
     let person = known_people().into_iter().find(|p| p.eq_ignore_ascii_case(to));
     match (matched.as_slice(), person) {
         ([one], None) => Ok(Dest::Sessions { cwd: one.cwd.clone(), ids: vec![one.id.clone()] }),

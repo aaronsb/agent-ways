@@ -279,38 +279,42 @@ fn instance(f: &Fixture, sid: &str) -> Option<String> {
     attend_instances::Registry::with_base(f.cache().join("instances")).lookup(&f.origin, sid)
 }
 
-/// The host takes the session's instance slot as it starts, so its name
-/// carries a suffix: nothing else registers a listening session (#1108).
+/// The host takes the session's instance slot as it starts: nothing else
+/// registers a listening session (#1108). Alone in its project, the session
+/// holds the bare name, so whoami shows the nickname with no suffix.
 #[test]
-fn a_host_registers_the_session_and_whoami_shows_its_suffix() {
+fn a_host_registers_the_session_bare_when_it_is_alone() {
     let f = quiet("host-register");
     let bare = display_name(&f);
     assert!(!bare.contains('-'), "no suffix before a host runs: {bare}");
     let host = Host::start(&f, &f.sid, &[]);
     host.wait_for("the instance slot", Duration::from_secs(20), || instance(&f, &f.sid).is_some());
-    assert_eq!(instance(&f, &f.sid).as_deref(), Some("alpha"));
-    assert_eq!(display_name(&f), format!("{bare}-alpha"));
+    assert_eq!(instance(&f, &f.sid).as_deref(), Some(attend_instances::BARE));
+    assert_eq!(display_name(&f), bare);
 }
 
 /// After `/clear` the host started with `--moved-from` moves the old id's
-/// slot to the new id before it registers, so the suffix stays. A second
-/// session holds alpha, so the old id holds beta, and a new id registering
-/// on its own would take gamma.
+/// slot to the new id before it registers, so the suffix stays. A live
+/// session holds the bare name, so the old id joins it as alpha, and a new
+/// id registering on its own would take beta.
 #[test]
 fn a_host_with_moved_from_keeps_the_old_suffix() {
     let f = quiet("host-rename");
     let other = Host::start(&f, "sess-other", &[]);
     other.wait_for("the other session's slot", Duration::from_secs(20), || instance(&f, "sess-other").is_some());
+    // The other session is live, as its Claude Code process would show it.
+    std::fs::create_dir_all(f.heartbeat("sess-other").parent().unwrap()).unwrap();
+    std::fs::write(f.heartbeat("sess-other"), b"").unwrap();
     let old = Host::start(&f, "sess-old", &[]);
     old.wait_for("the old id's slot", Duration::from_secs(20), || instance(&f, "sess-old").is_some());
-    assert_eq!(instance(&f, "sess-old").as_deref(), Some("beta"));
+    assert_eq!(instance(&f, "sess-old").as_deref(), Some("alpha"));
     drop(old);
     f.set_session_id("sess-new");
     let bare = display_name(&f);
     let new = Host::start(&f, "sess-new", &["--moved-from", "sess-old"]);
     new.wait_for("the new id's slot", Duration::from_secs(20), || instance(&f, "sess-new").is_some());
-    assert_eq!(instance(&f, "sess-new").as_deref(), Some("beta"), "the new id keeps the old suffix");
-    assert_eq!(display_name(&f), format!("{bare}-beta"));
+    assert_eq!(instance(&f, "sess-new").as_deref(), Some("alpha"), "the new id keeps the old suffix");
+    assert_eq!(display_name(&f), format!("{bare}-alpha"));
 }
 
 /// A command the host runs does not act as the session: its `attend
