@@ -144,6 +144,44 @@ pub fn tombstone_argv(session: &str) -> Vec<String> {
     ["message", "tombstone", session, "--json"].map(String::from).to_vec()
 }
 
+/// `attend message tombstone --ended`, reporting only with `dry_run`.
+pub fn ended_argv(dry_run: bool) -> Vec<String> {
+    let mut out: Vec<String> = ["message", "tombstone", "--ended"].map(String::from).to_vec();
+    if dry_run {
+        out.push("--dry-run".into());
+    }
+    out.push("--json".into());
+    out
+}
+
+/// `attend message tombstone --undo <batch>`.
+pub fn undo_tombstone_argv(batch: &str) -> Vec<String> {
+    ["message", "tombstone", "--undo", batch, "--json"].map(String::from).to_vec()
+}
+
+/// What `attend message tombstone --ended` tombstoned, or would on a dry
+/// run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndedReport {
+    pub count: usize,
+    /// The batch `--undo` names; none on a dry run or when there was
+    /// nothing to tombstone.
+    pub batch: Option<String>,
+}
+
+/// What `attend message tombstone --ended` reported, or its dry run.
+pub fn ended(doc: &serde_json::Value) -> Result<EndedReport, Failure> {
+    let batch = doc.get("batch").and_then(|b| b.as_str()).map(str::to_string);
+    Ok(EndedReport { count: count(doc, "count", "message tombstone")?, batch })
+}
+
+/// What `attend message tombstone --undo <batch>` restored: how many
+/// tombstones it took back, and how many it left, tombstoned again since.
+pub fn tombstones_undone(doc: &serde_json::Value) -> Result<(usize, usize), Failure> {
+    let kept = doc.get("kept").and_then(|k| k.as_array()).map_or(0, Vec::len);
+    Ok((count(doc, "restored", "message tombstone")?, kept))
+}
+
 /// What a delete marked, or would mark on a dry run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
@@ -404,6 +442,20 @@ mod tests {
         assert_eq!(delete_argv(&Scope::Dm("s1".into()), "3d", false), s(&["message", "delete", "--dm", "s1", "--as-person", "--older-than", "3d", "--json"]));
         assert_eq!(undo_argv("17-4"), s(&["message", "delete", "--undo", "17-4", "--json"]));
         assert_eq!(tombstone_argv("s9"), s(&["message", "tombstone", "s9", "--json"]));
+        assert_eq!(ended_argv(true), s(&["message", "tombstone", "--ended", "--dry-run", "--json"]));
+        assert_eq!(ended_argv(false), s(&["message", "tombstone", "--ended", "--json"]));
+        assert_eq!(undo_tombstone_argv("17-4"), s(&["message", "tombstone", "--undo", "17-4", "--json"]));
+    }
+
+    #[test]
+    fn the_ended_reports_are_read() {
+        let doc = serde_json::json!({"dry_run": false, "count": 3, "batch": "17-4", "sessions": ["a", "b", "c"]});
+        assert_eq!(ended(&doc).unwrap(), EndedReport { count: 3, batch: Some("17-4".into()) });
+        let dry = serde_json::json!({"dry_run": true, "count": 0, "batch": null, "sessions": []});
+        assert_eq!(ended(&dry).unwrap(), EndedReport { count: 0, batch: None });
+        assert!(ended(&serde_json::json!({"sessions": []})).is_err(), "no count: not a report");
+        let undone = serde_json::json!({"batch": "17-4", "age_secs": 5, "restored": 2, "sessions": ["a", "b"], "kept": ["c"]});
+        assert_eq!(tombstones_undone(&undone).unwrap(), (2, 1));
     }
 
     #[test]

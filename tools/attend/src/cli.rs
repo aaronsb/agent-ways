@@ -139,7 +139,9 @@ pub(crate) enum MessageCmd {
     /// session that may still read the bus, an id such a session had
     /// before /clear and this session's own are refused. Its messages stay
     /// on disk; `attend message delete --everywhere --from <id>` marks them
-    /// for deletion.
+    /// for deletion. --ended tombstones, as one batch, every agent with a
+    /// message still shown on the bus that the same rule allows, and
+    /// --undo with no session takes the newest batch back.
     Tombstone(TombstoneArgs),
 }
 
@@ -641,13 +643,25 @@ pub(crate) struct DeleteArgs {
 #[derive(Args)]
 pub(crate) struct TombstoneArgs {
     /// The session to tombstone
-    #[arg(value_name = "SESSION-ID", required_unless_present = "list")]
+    #[arg(value_name = "SESSION-ID", required_unless_present_any = ["list", "ended", "undo"])]
     pub(crate) session: Option<String>,
 
-    /// Remove the session's tombstone. What a drain recorded read while it
-    /// stood stays read
-    #[arg(long, requires = "session")]
-    pub(crate) undo: bool,
+    /// Tombstone, as one batch, every agent session with a message still
+    /// shown on the bus that the single tombstone's rule allows
+    #[arg(long, conflicts_with_all = ["session", "undo", "list"])]
+    pub(crate) ended: bool,
+
+    /// With --ended, print what would be tombstoned and change nothing
+    #[arg(long, short = 'n')]
+    pub(crate) dry_run: bool,
+
+    /// Remove the tombstone of a session, named here or as the session id.
+    /// With no session, remove the tombstones the newest --ended batch
+    /// wrote, or those of the batch named here; a tombstone written after
+    /// the batch stays. What a drain recorded read while a tombstone stood
+    /// stays read
+    #[arg(long, value_name = "SESSION-ID|BATCH", num_args = 0..=1, default_missing_value = "")]
+    pub(crate) undo: Option<String>,
 
     /// List the tombstoned sessions
     #[arg(long, conflicts_with_all = ["session", "undo"])]

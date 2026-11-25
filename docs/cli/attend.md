@@ -295,7 +295,7 @@ A message is marked when it is in the scope, older than --older-than, older than
 
 Tombstone a session that has exited, so every reader skips its messages
 
-The drain, the mod, `attend message unread` and `attend message inbox` all skip what a tombstoned session sent, and the drain records it read, up to when it was tombstoned; what the session sends later, back under --resume, shows. Only an agent's session that this host saw exit is tombstoned: a person's id, a session that may still read the bus, an id such a session had before /clear and this session's own are refused. Its messages stay on disk; `attend message delete --everywhere --from <id>` marks them for deletion.
+The drain, the mod, `attend message unread` and `attend message inbox` all skip what a tombstoned session sent, and the drain records it read, up to when it was tombstoned; what the session sends later, back under --resume, shows. Only an agent's session that this host saw exit is tombstoned: a person's id, a session that may still read the bus, an id such a session had before /clear and this session's own are refused. Its messages stay on disk; `attend message delete --everywhere --from <id>` marks them for deletion. --ended tombstones, as one batch, every agent with a message still shown on the bus that the same rule allows, and --undo with no session takes the newest batch back.
 
 **Usage:** `attend message tombstone [OPTIONS] [SESSION-ID]`
 
@@ -305,7 +305,9 @@ The drain, the mod, `attend message unread` and `attend message inbox` all skip 
 
 ###### **Options:**
 
-* `--undo` — Remove the session's tombstone. What a drain recorded read while it stood stays read
+* `--ended` — Tombstone, as one batch, every agent session with a message still shown on the bus that the single tombstone's rule allows
+* `-n`, `--dry-run` — With --ended, print what would be tombstoned and change nothing
+* `--undo <SESSION-ID|BATCH>` — Remove the tombstone of a session, named here or as the session id. With no session, remove the tombstones the newest --ended batch wrote, or those of the batch named here; a tombstone written after the batch stays. What a drain recorded read while a tombstone stood stays read
 * `--list` — List the tombstoned sessions
 * `--json` — Print the result as one JSON document
 

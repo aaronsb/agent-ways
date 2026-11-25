@@ -29,6 +29,7 @@ const DELTA_SID: &str = "dddddddd-0000-4000-8000-000000000004";
 /// record here names keeps (`attend_presence::UNJUDGED_HOLD`).
 const EPSILON_SID: &str = "eeeeeeee-0000-4000-8000-000000000005";
 const BATCH: &str = "001784732645123-4242";
+const TOMB_BATCH: &str = "001784732645123-4250";
 const W: u16 = 120;
 const H: u16 = 35;
 
@@ -42,10 +43,15 @@ static SERIAL: Mutex<()> = Mutex::new(());
 /// as attend refuses one that has not exited. `#empty` has nothing to
 /// delete. `#slow` answers in a second, and logs `done` once it has,
 /// and a delete in `#long` (not its dry run) in eleven, past the ten the
-/// chat once gave attend.
+/// chat once gave attend. `tombstone --ended` counts `$FAKE_ENDED`
+/// sessions, two unset, and tombstones two in batch [`TOMB_BATCH`], which
+/// its undo restores.
 const FAKE: &str = r##"#!/bin/sh
 echo "$*" >> "$FAKE_ATTEND_LOG"
 case "$*" in
+  "message tombstone --ended --dry-run"*) echo "{\"dry_run\":true,\"count\":${FAKE_ENDED:-2},\"batch\":null,\"sessions\":[]}" ;;
+  "message tombstone --ended"*) echo '{"dry_run":false,"count":2,"batch":"001784732645123-4250","sessions":["g","d"]}' ;;
+  "message tombstone --undo"*) echo '{"batch":"001784732645123-4250","age_secs":5,"restored":2,"sessions":["g","d"],"kept":[]}' ;;
   *"--channel legacy"*) echo "error: unrecognized subcommand 'delete'" >&2; exit 2 ;;
   *"--channel empty"*) echo '{"scope":"#empty","dry_run":true,"marked":0,"batch":null,"ids":[],"held":[]}' ;;
   *"--channel slow"*) sleep 1; echo done >> "$FAKE_ATTEND_LOG"; echo '{"scope":"#slow","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
@@ -358,6 +364,40 @@ fn tombstone_is_offered_on_a_dead_agents_row_only_and_shows_a_refusal() {
     pick(&mut c, "Tombstone…");
     press(&mut c, KeyCode::Char('y'));
     assert_eq!(c.status(), format!("tombstone: {DELTA_SID} has not exited"), "attend's own words, after the verb");
+}
+
+/// A click on the Agents heading counts the ended sessions and opens its
+/// menu with the count; the pick asks once, then tombstones them, and the
+/// menu then offers Undo tombstone for that batch. With nothing counted
+/// and nothing to undo, no menu opens.
+#[test]
+fn the_agents_heading_tombstones_the_ended_sessions_and_offers_undo() {
+    let _g = fixture();
+    let mut c = chat();
+    side(&mut c, "Agents", MouseButton::Left);
+    answered(&mut c);
+    assert_eq!(calls(), ["message tombstone --ended --dry-run --json"]);
+    assert_eq!(items(&mut c), ["Tombstone ended sessions… (2)"], "{}", screen(&mut c));
+    pick(&mut c, "Tombstone ended sessions");
+    assert!(screen(&mut c).contains("tombstone 2 ended sessions? their messages and their Agents rows go away"), "{}", screen(&mut c));
+    assert_eq!(calls().len(), 1, "asked first");
+    press(&mut c, KeyCode::Char('y'));
+    assert_eq!(calls().last().unwrap(), "message tombstone --ended --json");
+    assert!(c.status().starts_with("tombstoned 2 ended sessions") && c.status().ends_with(&format!("· batch {TOMB_BATCH}")), "{}", c.status());
+
+    side(&mut c, "Agents", MouseButton::Right);
+    answered(&mut c);
+    assert_eq!(items(&mut c), ["Tombstone ended sessions… (2)", "Undo tombstone"], "{}", screen(&mut c));
+    pick(&mut c, "Undo tombstone");
+    assert_eq!(calls().last().unwrap(), &format!("message tombstone --undo {TOMB_BATCH} --json"));
+    assert_eq!(c.status(), format!("restored 2 of 2 ended sessions from batch {TOMB_BATCH}"));
+
+    std::env::set_var("FAKE_ENDED", "0");
+    side(&mut c, "Agents", MouseButton::Left);
+    answered(&mut c);
+    std::env::remove_var("FAKE_ENDED");
+    assert!(items(&mut c).is_empty(), "nothing to tombstone and nothing to undo: {}", screen(&mut c));
+    assert_eq!(c.status(), "no ended session to tombstone");
 }
 
 /// Tombstone… acts for everyone: its question counts down, and unanswered
