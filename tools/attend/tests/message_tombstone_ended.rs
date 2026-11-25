@@ -4,12 +4,15 @@
 
 //! `attend message tombstone --ended` tombstones, as one batch, every agent
 //! with a message still shown on the bus that the single tombstone's rule
-//! allows, and `--undo` takes the batch back (ADR-404 D3e, #1354).
+//! allows, and `--undo` takes the batch back (#1354).
 //!
 //! Sessions are written into the fixture's cache as attend writes them, as
 //! `message_delete.rs` writes them: a heartbeat, an enrollment record, a
 //! Claude Code session record. Their ids are UUIDs, the shape of a Claude
 //! Code session id.
+//!
+//! References:
+//! - ADR-404 D3e: what a tombstone hides, and the delete it pairs with.
 
 mod common;
 use common::{age_file, Fixture, MINUTE};
