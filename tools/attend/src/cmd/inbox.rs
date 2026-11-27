@@ -364,6 +364,43 @@ pub(crate) fn scan_pending(
     Scan { delivered, mark, note: plan.and_then(|p| p.note()), held_back, skipped }
 }
 
+/// Lapse this session's pending event-lane notices at a session boundary:
+/// every unread system signal on the event lane is recorded read in the
+/// seen-set, as an expired one is, and never delivered. A compaction or a
+/// `/clear` leaves the model's context without what those notices
+/// described, so each would arrive false. Peer messages stay queued, and a
+/// notice written after this call drains as usual. The attend mod runs it
+/// at the boundary. Prints how many lapsed.
+///
+/// A session whose identity is unresolved or that is not listening has no
+/// seen-set to write, so it lapses nothing, as the drain delivers nothing.
+///
+/// References:
+/// - ADR-401, The system sender: an event-lane signal lapses unread.
+pub(crate) fn cmd_lapse_events() {
+    let ident = attend_presence::session::identity();
+    if !ident.resolved() || !crate::util::adopt_previous_enrollment(&ident) {
+        println!("0 notices lapsed");
+        return;
+    }
+    let base = signals_base();
+    let r = crate::groups::Groups::new(&base, &ident.session_id);
+    let store = attend_state::StateStore::new(Some(ident.session_id.clone()));
+    let seen = store.load().map(|s| s.seen_signals).unwrap_or_default();
+    let ids = attend_presence::enrollment::reading_ids(&ident);
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let scan = scan_pending(&r.receive_dirs(&ident.origin_path), &seen, &ids, false, &attend_groups::tombstones::Marks::load(&base), sensor_trait::epoch_secs());
+    let keys: Vec<String> = scan
+        .delivered
+        .into_iter()
+        .filter(|d| d.lane == agent_identity::signal::Lane::Event && d.kind == Some(agent_identity::signal::Kind::System))
+        .map(|d| d.key)
+        .collect();
+    let n = keys.len();
+    store.mark_seen(keys);
+    println!("{n} notices lapsed");
+}
+
 /// Drain pending authored messages for this session: deliver the unseen,
 /// record their consumption in the shared seen-set, and (in `hook`
 /// format) emit the Stop-hook JSON that continues the ending turn with

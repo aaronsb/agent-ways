@@ -15,6 +15,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend message reply`↴](#attend-message-reply)
 * [`attend message inbox`↴](#attend-message-inbox)
 * [`attend message unread`↴](#attend-message-unread)
+* [`attend message lapse`↴](#attend-message-lapse)
 * [`attend message cleanup`↴](#attend-message-cleanup)
 * [`attend message delete`↴](#attend-message-delete)
 * [`attend message tombstone`↴](#attend-message-tombstone)
@@ -159,6 +160,7 @@ Send, reply to, read, count and delete messages, and tombstone a session (defaul
 * `reply` — Reply to the most recent peer message: a direct message to its sender, or in its named channel
 * `inbox` — Read pending messages from peers
 * `unread` — Count this session's unread messages by room, marking none of them read
+* `lapse` — Mark this session's pending event-lane notices read at a session boundary, delivering none of them
 * `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
 * `delete` — Mark for deletion the messages no live session still has to read
 * `tombstone` — Tombstone a session that has exited, so every reader skips its messages
@@ -255,6 +257,18 @@ Count this session's unread messages by room, marking none of them read
 ###### **Options:**
 
 * `--json` — Print the result as one JSON document
+
+
+
+## `attend message lapse`
+
+Mark this session's pending event-lane notices read at a session boundary, delivering none of them
+
+**Usage:** `attend message lapse --events`
+
+###### **Options:**
+
+* `--events` — Lapse the pending event-lane notices: git, processes, presence, context, the update check and any other sensor's. A peer's message stays queued. The attend mod runs this at a compaction or a /clear
 
 
 

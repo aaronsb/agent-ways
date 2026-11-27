@@ -162,6 +162,8 @@ type World = {
   settingsAutoCompact?: boolean | 'absent' | 'throws'
   /** `attend message send` refuses with this reason. */
   sendRefused?: string
+  /** `attend message lapse` fails as an aborted call does. */
+  lapseFails?: boolean
   /** `ways settings` cannot answer. */
   waysFails?: boolean
   /** Holds each policy check in flight until it settles. */
@@ -414,6 +416,7 @@ function host(on: On, world: World) {
       const q = world.policy ?? [decision({ policy: false, state: 'off', reason: 'mods.attend.continuity.keepalive is false' })]
       return ok(q.length > 1 ? q.shift()! : q[0]!)
     }
+    if (cmd === 'message lapse --events' && world.lapseFails) return { ...ok(), exitCode: 127, stderr: 'attend: aborted' }
     if (cmd.startsWith('message send') && world.sendRefused) return { ...ok(), exitCode: 1, stderr: world.sendRefused }
     if (cmd === 'keepwarm check') return ok(world.keepwarm ?? '')
     if (cmd.startsWith('message inbox --drain')) return ok(world.drains?.shift() ?? DRAIN_EMPTY)
@@ -1861,6 +1864,63 @@ describe('session changes through engine events alone', () => {
     h.world.contextTokens = undefined
     await $.command.run({ command: 'compact', args: '' } as never)
     expect(h.status()?.afterCompaction).toBe(true)
+  })
+
+  // A session boundary lapses the notices queued before it (#1368): a
+  // compaction by any route the mod reads, and a /clear.
+  const lapses = (h: { argvs: string[][] }) => h.argvs.filter(a => a.slice(1).join(' ') === 'message lapse --events').length
+
+  test('a compaction lapses the queued notices; a /compact that left the fill reported does not', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, autocompact: null, contextTokens: 90_000 })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.command.run({ command: 'compact', args: '' } as never)
+    expect(lapses(h)).toBe(0)
+    h.world.contextTokens = undefined
+    await $.command.run({ command: 'compact', args: '' } as never)
+    expect(lapses(h)).toBe(1)
+  })
+
+  test('a fill that falls by half lapses the queued notices', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await measured($, 150_000)
+    expect(lapses(h)).toBe(0)
+    await measured($, 30_000)
+    expect(lapses(h)).toBe(1)
+  })
+
+  test('a /clear lapses the queued notices from the call session.start armed, and a /resume does not', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    // Before session.start nothing is armed: the hook makes no call of its own.
+    await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+    await clock.advance(1_000)
+    expect(lapses(h)).toBe(0)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.session.end({ reason: 'resume', sessionId: 's1' } as never)
+    await clock.advance(1_000)
+    expect(lapses(h)).toBe(0)
+    await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+    await clock.advance(1_000)
+    expect(lapses(h)).toBe(1)
+  })
+
+  test('a lapse that fails is logged, after a compaction and after a /clear', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, autocompact: null, contextTokens: 90_000, lapseFails: true })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    h.world.contextTokens = undefined
+    await $.command.run({ command: 'compact', args: '' } as never)
+    expect(h.logs.filter(l => l.includes('could not lapse')).length).toBe(1)
+    await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+    await clock.advance(1_000)
+    expect(h.logs.filter(l => l.includes('could not lapse')).length).toBe(2)
   })
 
   test('a context fill that falls by half, as an automatic compaction leaves it, brings the preamble back', async ($, on) => {

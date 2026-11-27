@@ -149,6 +149,13 @@ export function compactedArgv(failed?: string): string[] {
   return [ATTEND, 'keepwarm', 'compacted', ...(failed === undefined ? [] : ['--failed', oneLine(failed)])]
 }
 
+/** A session boundary, a compaction or a /clear: the session's pending
+ *  event-lane notices lapse unread, since each describes a context the model
+ *  no longer holds. A peer's message stays queued (#1368). */
+export function lapseEventsArgv(): string[] {
+  return [ATTEND, 'message', 'lapse', '--events']
+}
+
 /** The wrap's reply sent over attend: one message, its first line the
  *  handoff line attend wrote, to `#name` as a channel post and to anything
  *  else as a direct message (ADR-414 item 6). */
@@ -227,6 +234,8 @@ export type Mod = {
   /** Starts the move's watch on session.start's `$`, whose timers outlive
    *  any one hook: session.end's bound aborts the waits of its own. */
   startWatch: (() => void) | undefined
+  /** Lapses the queued event notices on session.start's `$`, for a /clear. */
+  lapseEvents: (() => void) | undefined
   /** The context fill the last `session.measure` reported, in tokens. */
   contextTokens: number | undefined
   /** The cold start's held-back note, from a drain the poll ran. A wake
