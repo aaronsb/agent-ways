@@ -70,12 +70,15 @@ retry() {
 # releases API and picks the highest version by `sort -V` within the prefix.
 # Drafts and prereleases are skipped: neither is an install target.
 #
+# ASSET, when given, skips the releases that do not carry an asset of that name.
+#
 # Returns non-zero only when the API call fails after retries, so callers can
 # tell "could not reach GitHub" apart from "reached it, no matching release".
 latest_tag_for_prefix() {
-  local repo="$1" prefix="$2" tags
+  local repo="$1" prefix="$2" asset="${3:-}" has="" tags
+  [[ -n "$asset" ]] && has="| select(any(.assets[]?; .name == \"${asset}\"))"
   tags=$(retry gh api --paginate "repos/${repo}/releases?per_page=100" \
-    --jq ".[] | select((.draft or .prerelease) | not) | .tag_name | select(startswith(\"${prefix}\"))") || return 1
+    --jq ".[] | select((.draft or .prerelease) | not) ${has} | .tag_name | select(startswith(\"${prefix}\"))") || return 1
   [[ -n "$tags" ]] || return 0
   printf '%s\n' "$tags" | sort -V | tail -1
 }
@@ -116,7 +119,8 @@ version_at_least() {
 #
 #   prebuilt_install COMPONENT RELEASE_TAG OUTPUT_DIR REPO BUILD_HINT [CHECK]
 #
-# RELEASE_TAG is a tag, or `latest` for the newest `<COMPONENT>-v*` release.
+# RELEASE_TAG is a tag, or `latest` for the newest `<COMPONENT>-v*` release,
+# or for the newest that carries this platform's binary when that one does not.
 # A running binary already at OUTPUT_DIR/<COMPONENT> is kept when it is at the
 # named tag's version, when it is at or ahead of the latest release's, or when
 # the release cannot be resolved. Otherwise it is replaced (#772).
@@ -144,6 +148,7 @@ version_at_least() {
 # The body runs in a subshell so the cleanup trap stays local to the call.
 prebuilt_install() (
   comp="$1" tag="$2" out_dir="$3" repo="$4" hint="$5" check="${6:-}"
+  requested="$tag"
   platform="$(detect_platform)"
   bin_name="${comp}-${platform}"
   out_file="${out_dir}/${comp}"
@@ -202,6 +207,20 @@ prebuilt_install() (
     echo "error: could not read assets of ${tag} after retries (network/gh/auth?)." >&2
     echo "  Falling back to build-from-source: ${hint}" >&2
     exit 1
+  fi
+  # A best-effort platform's binary (darwin-arm64) attaches to its release
+  # after the release is published. Until then, a request for the latest
+  # takes the newest release that carries this platform's binary.
+  if [[ "$requested" == latest ]] && ! grep -qx -- "$bin_name" <<<"$assets" \
+      && older=$(latest_tag_for_prefix "$repo" "${comp}-v" "$bin_name") && [[ -n "$older" ]]; then
+    echo "${tag} has no ${platform} binary yet; it attaches when its build completes. Using ${older}." >&2
+    tag="$older"
+    [[ -n "$installed" ]] && version_at_least "$installed" "${tag#"${comp}-v"}" && keep_installed
+    if ! assets=$(retry gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name'); then
+      echo "error: could not read assets of ${tag} after retries (network/gh/auth?)." >&2
+      echo "  Falling back to build-from-source: ${hint}" >&2
+      exit 1
+    fi
   fi
   if ! grep -qx -- "$bin_name" <<<"$assets"; then
     echo "No pre-built binary for ${platform} in release ${tag}." >&2
