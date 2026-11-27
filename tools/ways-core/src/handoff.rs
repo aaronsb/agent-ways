@@ -123,10 +123,49 @@ fn is_section_start(line: &str) -> bool {
     head.chars().filter(|c| c.is_ascii_uppercase()).count() >= 3 && (rest.starts_with(" —") || rest.starts_with('—') || rest.starts_with(':') || head.ends_with(" -"))
 }
 
+/// What a handoff section is to the cut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    /// The lines before the first section: the first line and the opening.
+    Lead,
+    Tasks,
+    DoNext,
+    Other,
+}
+
+/// The section `line` opens, by its label: `TASKS —`, `## Do next`.
+fn part_of(line: &str) -> Part {
+    let label = line.trim_start_matches('#').trim_start().to_ascii_uppercase();
+    if label.starts_with("TASKS") {
+        Part::Tasks
+    } else if label.starts_with("DO NEXT") {
+        Part::DoNext
+    } else {
+        Part::Other
+    }
+}
+
+/// `text` as its parts in order, each with its own lines.
+fn parts(text: &str) -> Vec<(Part, String)> {
+    let mut out: Vec<(Part, String)> = vec![(Part::Lead, String::new())];
+    for (i, line) in text.split_inclusive('\n').enumerate() {
+        if i > 0 && is_section_start(line.trim_end()) {
+            out.push((part_of(line.trim_end()), String::new()));
+        }
+        if let Some((_, body)) = out.last_mut() {
+            body.push_str(line);
+        }
+    }
+    out
+}
+
 /// The compaction instructions for the handoff `text` read from `file`:
-/// [`LEAD`], then the handoff, cut at a section boundary so the whole stays
-/// within [`CAP`] characters, with a closing line saying the file holds the
-/// rest.
+/// [`LEAD`], then the handoff, within [`CAP`] characters, with a closing
+/// line saying the file holds the rest. A handoff over the cap keeps its
+/// opening, TASKS and DO NEXT: the other sections go first, the last of
+/// them first, then TASKS is cut after a whole task, with a line naming the
+/// tasks the file still holds. A handoff with neither section is cut at the
+/// last section, else the last line, that fits.
 pub fn instructions(text: &str, file: &Path) -> String {
     let text = text.trim_end();
     let whole = format!("{LEAD}\n\n{text}");
@@ -135,8 +174,90 @@ pub fn instructions(text: &str, file: &Path) -> String {
     }
     let tail = format!("\n\n(The handoff continues in {}; read it there.)", file.display());
     let budget = CAP.saturating_sub(LEAD.chars().count() + 2 + tail.chars().count());
-    // The text up to the last section start that keeps it in budget; with
-    // none, up to the last line that fits.
+    let body = cut_by_part(text, budget, file).unwrap_or_else(|| cut_prefix(text, budget));
+    format!("{LEAD}\n\n{}{tail}", body.trim_end())
+}
+
+/// `text` within `budget`, keeping its opening, TASKS and DO NEXT; `None`
+/// where it has no TASKS or DO NEXT, or where they cannot fit.
+fn cut_by_part(text: &str, budget: usize, file: &Path) -> Option<String> {
+    let mut parts = parts(text);
+    if !parts.iter().any(|(p, _)| matches!(p, Part::Tasks | Part::DoNext)) {
+        return None;
+    }
+    let size = |ps: &[(Part, String)]| ps.iter().map(|(_, b)| b.chars().count()).sum::<usize>();
+    while size(&parts) > budget {
+        let Some(i) = parts.iter().rposition(|(p, _)| *p == Part::Other) else { break };
+        parts.remove(i);
+    }
+    if size(&parts) > budget {
+        let i = parts.iter().position(|(p, _)| *p == Part::Tasks)?;
+        let room = budget.checked_sub(size(&parts) - parts[i].1.chars().count())?;
+        parts[i].1 = cut_tasks(&parts[i].1, room, file)?;
+    }
+    Some(parts.into_iter().map(|(_, b)| b).collect())
+}
+
+/// Whether `line` opens a task: `#3 [OPEN] ...`, `3. ...`, `- ...`.
+fn is_task_start(line: &str) -> bool {
+    let digits = |s: &str| s.chars().take_while(char::is_ascii_digit).count();
+    match line.as_bytes().first() {
+        Some(b'#') => digits(&line[1..]) > 0,
+        Some(b'-' | b'*') => line[1..].starts_with(' '),
+        Some(c) if c.is_ascii_digit() => matches!(line[digits(line)..].chars().next(), Some('.' | ')')),
+        _ => false,
+    }
+}
+
+/// The task number `#3` opens with, where it has one.
+fn task_number(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix('#')?;
+    let n = rest.chars().take_while(char::is_ascii_digit).count();
+    (n > 0).then(|| &rest[..n])
+}
+
+/// The TASKS section `body` within `room`: its heading and the whole tasks
+/// that fit, then a line naming the tasks the file holds. `None` where not
+/// even the heading and that line fit.
+fn cut_tasks(body: &str, room: usize, file: &Path) -> Option<String> {
+    let mut lines = body.split_inclusive('\n');
+    let mut kept = lines.next()?.to_string();
+    let mut tasks: Vec<String> = Vec::new();
+    for line in lines {
+        match tasks.last_mut() {
+            Some(t) if !is_task_start(line) => t.push_str(line),
+            _ if is_task_start(line) => tasks.push(line.to_string()),
+            // Lines under the heading before the first task stay with it.
+            _ => kept.push_str(line),
+        }
+    }
+    let note = |from: usize| {
+        let first = tasks.get(from).and_then(|t| task_number(t));
+        let last = tasks.last().and_then(|t| task_number(t));
+        match (first, last) {
+            (Some(a), Some(b)) if a == b => format!("(Task #{a} is in {}; read it there.)\n\n", file.display()),
+            (Some(a), Some(b)) => format!("(Tasks #{a} to #{b} are in {}; read them there.)\n\n", file.display()),
+            _ => format!("(The rest of TASKS is in {}; read it there.)\n\n", file.display()),
+        }
+    };
+    let mut n = 0;
+    let mut size = kept.chars().count();
+    while n < tasks.len() && size + tasks[n].chars().count() + note(n + 1).chars().count() <= room {
+        size += tasks[n].chars().count();
+        n += 1;
+    }
+    let closing = note(n);
+    if size + closing.chars().count() > room {
+        return None;
+    }
+    kept.extend(tasks.iter().take(n).map(String::as_str));
+    kept.push_str(&closing);
+    Some(kept)
+}
+
+/// The text up to the last section start that keeps it in `budget`; with
+/// none, up to the last line that fits.
+fn cut_prefix(text: &str, budget: usize) -> String {
     let mut kept = 0usize;
     let mut cut = 0usize;
     let mut last_line = 0usize;
@@ -152,8 +273,7 @@ pub fn instructions(text: &str, file: &Path) -> String {
         last_line = kept;
     }
     let at = if cut > 0 { cut } else { last_line };
-    let body: String = text.chars().take(at).collect();
-    format!("{LEAD}\n\n{}{tail}", body.trim_end())
+    text.chars().take(at).collect()
 }
 
 #[cfg(test)]
@@ -197,6 +317,49 @@ mod tests {
         assert!(s.contains("DO NEXT — first."), "the sections that fit stay");
         assert!(!s.contains("KEY FILES"), "the section that does not fit is cut whole");
         assert!(s.ends_with("(The handoff continues in /r/.claude/handoff.wrap.md; read it there.)"), "{}", &s[s.len() - 80..]);
+    }
+
+    /// The review's case: a first line, TASKS at 9,800 characters, then DO
+    /// NEXT. The cut keeps the first line and DO NEXT whole and as many
+    /// whole tasks as fit, with a line naming the file for the rest.
+    #[test]
+    fn a_long_tasks_section_is_cut_at_a_task_and_do_next_stays() {
+        let task = |n: usize| format!("#{n} [OPEN] task {n}\n  {}\n", "d".repeat(90));
+        let tasks: String = (1..=100).map(task).collect();
+        assert!(tasks.len() > 9_700, "{}", tasks.len());
+        let text = format!("2026-11-26 e6bbfbdd wrap=abcdefgh\nContinue work on demo.\n\nTASKS — recreate these.\n{tasks}\nDO NEXT — start #1.\n");
+        let s = instructions(&text, Path::new("/r/.claude/handoff.wrap.md"));
+        assert!(s.chars().count() <= CAP, "{}", s.chars().count());
+        assert!(s.starts_with(&format!("{LEAD}\n\n2026-11-26 e6bbfbdd wrap=abcdefgh\nContinue work on demo.\n\nTASKS — recreate these.\n#1 [OPEN] task 1\n")), "{}", &s[..300]);
+        assert!(s.contains("DO NEXT — start #1."), "DO NEXT stays whole");
+        assert!(s.contains("#2 [OPEN] task 2\n"), "as many tasks as fit");
+        assert!(!s.contains("#100 [OPEN]"), "the tasks that do not fit are cut");
+        let kept = s.matches("[OPEN] task").count();
+        assert!(s.contains(&format!("(Tasks #{} to #100 are in /r/.claude/handoff.wrap.md; read them there.)", kept + 1)), "{}", &s[s.len() - 300..]);
+        // A cut task is cut whole: no task line without its description.
+        let last = s.lines().filter(|l| l.starts_with('#')).last().unwrap();
+        let after = s.split(last).nth(1).unwrap();
+        assert!(after.starts_with(&format!("\n  {}", "d".repeat(90))), "{}", &after[..40]);
+    }
+
+    /// The other sections go before TASKS is cut, the last first, even one
+    /// that comes before TASKS; TASKS and DO NEXT stay whole while they fit.
+    #[test]
+    fn other_sections_are_cut_before_tasks() {
+        let filler = "x".repeat(99) + "\n";
+        let text = format!(
+            "2026-11-26 e6bbfbdd wrap=abcdefgh\n\nLANDED — a.\n{}\nTASKS — keep.\n#1 [OPEN] one\n{}\nDO NEXT — first.\n\nKEY FILES / BRANCHES — k.\n{}",
+            filler.repeat(80),
+            filler.repeat(20),
+            filler.repeat(10)
+        );
+        let s = instructions(&text, Path::new("/r/.claude/handoff.wrap.md"));
+        assert!(s.chars().count() <= CAP, "{}", s.chars().count());
+        assert!(s.contains(&format!("TASKS — keep.\n#1 [OPEN] one\n{}", filler.repeat(20))) && s.contains("DO NEXT — first."), "{s}");
+        assert!(!s.contains("Tasks #"), "TASKS is whole");
+        assert!(!s.contains("KEY FILES") && !s.contains("LANDED"), "the other sections go");
+        assert!(s.starts_with(&format!("{LEAD}\n\n2026-11-26 e6bbfbdd wrap=abcdefgh\n")));
+        assert!(s.ends_with("(The handoff continues in /r/.claude/handoff.wrap.md; read it there.)"));
     }
 
     #[test]
