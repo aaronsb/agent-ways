@@ -319,7 +319,7 @@ fn claim_crates(all: &mut [Hosted]) {
 /// A compiled sensor's description and source, when this build has it.
 pub fn compiled(id: &str) -> Option<Compiled> {
     let s: Box<dyn Sensor> = match id {
-        "context" => Box::new(ContextSensor::new()),
+        "context" => Box::new(ContextSensor::new(None)),
         "git" => Box::new(GitSensor::new()),
         #[cfg(feature = "sensor-peers")]
         "peers" => Box::new(PeerSensor::new()),
@@ -365,7 +365,7 @@ pub fn file_sensor(h: &Hosted, ctx: &Ctx, project: &str, record: bool) -> Result
         _ => return Err(h.state.detail().unwrap_or("its kind is not hosted").to_string()),
     };
     let inner: Box<dyn Sensor> = match c.id.as_str() {
-        "context" => Box::new(ContextSensor::new()),
+        "context" => Box::new(ContextSensor::new(ctx.session)),
         "git" => Box::new(GitSensor::new()),
         #[cfg(feature = "sensor-processes")]
         "processes" => Box::new(match c.fields.get("watch").and_then(|w| w.as_sequence()) {

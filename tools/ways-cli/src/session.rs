@@ -501,23 +501,7 @@ pub fn detect_context_window_for(project: &str, session_id: &str) -> u64 {
 /// curve for every way in the replayed session.
 fn context_window_from_transcript(transcript: &std::path::Path) -> u64 {
     let content = std::fs::read_to_string(transcript).unwrap_or_default();
-    ways_core::context_window::resolve_for_foreign_session(
-        model_from_transcript(&content).as_deref(),
-    )
-    .tokens
-}
-
-/// The model id from the transcript's most recent *real* assistant turn. `None`
-/// before the first assistant turn is written — the launch race a monitor hits
-/// when it starts seconds into a session. Live views must therefore re-resolve on
-/// refresh rather than cache a startup answer taken before the model had spoken.
-///
-/// Sentinel turns (`<synthetic>`, written for interrupts and API errors) are
-/// skipped rather than returned: an interrupted turn does not change which model
-/// the session is running, and treating the sentinel as the model would resolve a
-/// live 1M session to the 200K default.
-fn model_from_transcript(content: &str) -> Option<String> {
-    claude_sessions::usage::last_model(content)
+    ways_core::context_fill::measure(&content, ways_core::context_fill::Owner::Foreign).window.tokens
 }
 
 #[cfg(test)]

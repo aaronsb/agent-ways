@@ -207,39 +207,28 @@ fn usage_tail(path: &std::path::Path) -> Option<String> {
 /// A peer's context fill (percent of its window) and model, from the tail
 /// of its transcript.
 fn transcript_summary(path: &std::path::Path) -> Option<(f64, String)> {
+    use ways_core::context_fill::{measure, Method, Owner};
     let tail = usage_tail(path)?;
 
-    // Placeholder turns (`<synthetic>`, `-`, `unknown`) are skipped by
-    // `last_model`, so a peer whose newest turn is synthetic keeps its real
-    // model (ADR-166).
-    let model = claude_sessions::usage::last_model(&tail).unwrap_or_else(|| "-".to_string());
-    let context_tokens = claude_sessions::usage::last_context_tokens(&tail).unwrap_or(0);
-    // The window comes from the one resolver (ADR-166) — this sensor used to
-    // carry its own substring rules, which disagreed with the gauge's about
-    // sonnet-4.
-    //
-    // `resolve_for_foreign_session`, not `resolve`: this window belongs to the
+    // The measurement `ways context` prints (ways_core::context_fill), with
+    // the window resolved as a foreign session's: this window belongs to the
     // *peer's* session, and `CLAUDE_CONTEXT_WINDOW` states the window of the
     // process that set it. Applying the operator's override to a peer would
     // compute that peer's fill against the observer's window — an operator who
     // set it to 1M would see a haiku peer at 190K/200K (about to compact)
     // rendered as 19% full, and miss the one peer that actually needs room.
-    //
-    // `-` is the no-model placeholder, not a model id: with no model there is
-    // no meaningful percentage, so the peer's fill is suppressed rather than
-    // defaulted to a number that would look authoritative.
-    let context_window: u64 = if model == "-" {
-        0
-    } else {
-        ways_core::context_window::resolve_for_foreign_session(Some(&model)).tokens
-    };
-    let context_percent = if context_window > 0 {
-        (context_tokens as f64 / context_window as f64) * 100.0
-    } else {
-        0.0
+    let fill = measure(&tail, Owner::Foreign);
+
+    // With no model there is no meaningful percentage, and a byte estimate
+    // of a tail is not the peer's fill, so either is suppressed rather than
+    // shown as a number that would look authoritative. `-` is the no-model
+    // placeholder.
+    let context_percent = match (&fill.model, fill.method) {
+        (Some(_), Method::Api) => fill.percent(),
+        _ => 0.0,
     };
 
-    Some((context_percent, model))
+    Some((context_percent, fill.model.unwrap_or_else(|| "-".to_string())))
 }
 
 /// Working when the transcript changed in the last 30 s, else waiting;

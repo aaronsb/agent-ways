@@ -11,7 +11,8 @@
 use anyhow::Result;
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use ways_core::context_window::{self, WindowSource};
+use ways_core::context_fill::{self, Owner};
+use ways_core::context_window::WindowSource;
 
 pub struct ContextInfo {
     pub tokens_used: u64,
@@ -85,21 +86,18 @@ pub fn get_context_for_transcript(transcript: &str) -> Result<ContextInfo> {
 
 /// Accurate context-fill percentage (0–100) from a transcript file path.
 ///
-/// Single source of truth shared with the `context-threshold` trigger in
-/// `scan/state.rs`: both read the same gauge — real API token counts
-/// (`read_token_usage`) divided by the model window (`context_window::resolve`,
-/// ADR-166) — never a transcript-byte heuristic. The transcript *file* is far
+/// The `context-threshold` trigger in `scan/state.rs` reads this; it is the
+/// same measurement `ways context` prints ([`context_fill::measure`]): real
+/// API token counts divided by the model window. The transcript *file* is far
 /// larger than the live context (it holds full tool output, persisted-output
-/// blobs that aren't in context, and JSON envelope overhead), so byte-size badly
-/// over-counts and fires thresholds early.
+/// blobs that aren't in context, and JSON envelope overhead), so its byte size
+/// is never the gauge.
+///
+/// References:
+/// - ADR-166: the one resolver for a model's context window.
 pub fn pct_used_from_transcript(transcript: &str) -> Option<u64> {
-    let content = std::fs::read_to_string(transcript).ok()?;
-    let window = resolve_window(&content).tokens;
-    if window == 0 {
-        return None;
-    }
-    let (tokens_used, _method) = read_token_usage(&content);
-    Some(tokens_used * 100 / window)
+    let fill = context_fill::measure_transcript(Path::new(transcript), Owner::Own).ok()?;
+    (fill.window.tokens > 0).then(|| fill.pct_used())
 }
 
 fn get_context_inner(project_dir: Option<&str>, session_id: Option<&str>) -> Result<ContextInfo> {
@@ -123,31 +121,20 @@ fn context_from_transcript(transcript: PathBuf) -> Result<ContextInfo> {
         .to_string();
 
     let content = std::fs::read_to_string(&transcript)?;
-
-    // Detect model from last assistant message, and resolve its window (ADR-166).
-    let model = detect_model(&content);
-    let window = resolve_window(&content);
-    let window_tokens = window.tokens;
-
-    // Get token count from API usage data
-    let (tokens_used, method) = read_token_usage(&content);
-
-    let tokens_remaining = window_tokens.saturating_sub(tokens_used);
-    let pct_used = (tokens_used * 100).checked_div(window_tokens).unwrap_or(0);
-    let pct_remaining = 100u64.saturating_sub(pct_used);
-
+    let fill = context_fill::measure(&content, Owner::Own);
+    let pct_used = fill.pct_used();
     let usage_tail = read_usage_tail(&content, USAGE_TAIL_LEN);
 
     Ok(ContextInfo {
-        tokens_used,
-        tokens_total: window_tokens,
-        tokens_remaining,
+        tokens_used: fill.tokens_used,
+        tokens_total: fill.window.tokens,
+        tokens_remaining: fill.tokens_remaining(),
         pct_used,
-        pct_remaining,
-        model,
-        method,
+        pct_remaining: 100u64.saturating_sub(pct_used),
+        method: fill.method.as_str().to_string(),
+        model: fill.model.unwrap_or_else(|| UNKNOWN_MODEL.to_string()),
         session,
-        window_source: window.source,
+        window_source: fill.window.source,
         transcript: transcript.to_string_lossy().to_string(),
         usage_tail,
     })
@@ -165,28 +152,23 @@ fn context_from_transcript(transcript: PathBuf) -> Result<ContextInfo> {
 ///      even when the shell cwd has drifted from the project — the failure the
 ///      `wrap` / `context-status` skills hit when they run the gauge from
 ///      wherever the agent's shell happens to sit;
-///   3. finally, the `project_dir` / `CLAUDE_PROJECT_DIR` / cwd slug plus the
-///      newest transcript in that project (the original heuristic, preserved).
+///   3. finally, with no session id at all, the `project_dir` /
+///      `CLAUDE_PROJECT_DIR` / cwd slug plus the newest transcript in that
+///      project.
+///
+/// A session id that names no transcript is an error, never a reason to fall
+/// back to step 3: the newest transcript in the project can be another
+/// session's, and its fill would be reported as this one's (#1361).
 fn resolve_transcript(
     project_dir: Option<&str>,
     session_id: Option<&str>,
     env_session_id: Option<&str>,
     projects_root: &Path,
 ) -> Result<PathBuf> {
-    if let Some(sid) = session_id {
+    let env_session_id = env_session_id.filter(|s| !s.is_empty() && project_dir.is_none());
+    if let Some(sid) = session_id.or(env_session_id) {
         return claude_sessions::find_transcript_in(projects_root, None, sid)
             .ok_or_else(|| anyhow::anyhow!("No transcript found for session: {sid}"));
-    }
-
-    // No explicit --project: trust the environment's session id first. Only
-    // fall through to the cwd heuristic if it is absent or its transcript is
-    // missing, so behaviour outside a live session is unchanged.
-    if project_dir.is_none() {
-        if let Some(sid) = env_session_id.filter(|s| !s.is_empty()) {
-            if let Some(transcript) = claude_sessions::find_transcript_in(projects_root, None, sid) {
-                return Ok(transcript);
-            }
-        }
     }
 
     let project = project_dir
@@ -278,53 +260,9 @@ pub fn run(project: Option<&str>, session: Option<&str>, json_out: bool) -> Resu
 
 // ── Internals ──────────────────────────────────────────────────
 
-/// The most recent *real* assistant model in the transcript.
-///
-/// Sentinel turns (`<synthetic>`, written for interrupts and API errors) are
-/// skipped, not returned: an interrupt does not change which model the session is
-/// running, and treating the sentinel as the model would resolve a live 1M session
-/// to the 200K default. Nine transcripts in local history end on one.
-fn detect_model(content: &str) -> String {
-    claude_sessions::usage::last_model(content).unwrap_or_else(|| UNKNOWN_MODEL.to_string())
-}
-
-/// Sentinel `detect_model` returns when the transcript holds no assistant turn
+/// The model `ContextInfo` names when the transcript holds no assistant turn
 /// yet — the launch race. It is the *absence* of a model, not a model id.
 pub(crate) const UNKNOWN_MODEL: &str = "unknown";
-
-/// Resolve the window for a transcript's detected model through the one resolver
-/// (ADR-166). The `"unknown"` sentinel is an absent model, not a model named
-/// "unknown", so it is passed as `None`.
-fn resolve_window(content: &str) -> context_window::ContextWindow {
-    let model = detect_model(content);
-    let known = (model != UNKNOWN_MODEL).then_some(model.as_str());
-    context_window::resolve(known)
-}
-
-fn read_token_usage(content: &str) -> (u64, String) {
-    // The newest turn's API usage: cache reads reflect the context sent.
-    if let Some(tokens) = claude_sessions::usage::last_context_tokens(content) {
-        return (tokens, "api".to_string());
-    }
-
-    // Fallback: estimate from transcript bytes
-    let file_size = content.len() as u64;
-
-    // Find last summary position
-    let mut last_summary_end: u64 = 0;
-    let mut pos: u64 = 0;
-    for line in content.lines() {
-        if line.contains("\"type\":\"summary\"") {
-            last_summary_end = pos + line.len() as u64 + 1;
-        }
-        pos += line.len() as u64 + 1;
-    }
-
-    let active_bytes = file_size.saturating_sub(last_summary_end);
-    // Conservative: ~6.3 transcript JSON bytes per token
-    let estimated = active_bytes * 10 / 63;
-    (estimated, "bytes".to_string())
-}
 
 /// The last `n` assistant messages that carry usage, oldest first. Sentinel
 /// turns (`<synthetic>`) carry no usage and are skipped by the usage check.
@@ -477,15 +415,16 @@ mod tests {
     }
 
     #[test]
-    fn env_session_id_with_missing_transcript_falls_through() {
-        // project_dir=None reaches the env branch; a non-empty env id whose
-        // transcript doesn't exist must fall through to the project heuristic,
-        // which errors here because the empty projects root has no match. (An
-        // empty root guarantees the fallback errors regardless of the ambient
-        // cwd/CLAUDE_PROJECT_DIR the heuristic reads.)
-        let root = temp_projects_root(line!(), &[]);
+    fn env_session_id_with_missing_transcript_errors_and_does_not_guess() {
+        // #1361: a session id names one transcript. When it is not found, the
+        // newest transcript of the project may be any session's, so reading it
+        // would report another session's fill as this one's. The project here
+        // holds such a transcript, where the heuristic would find it.
+        let project = crate::util::project_root().unwrap_or_else(|| ".".to_string());
+        let slug = claude_sessions::project_slug(&project);
+        let root = temp_projects_root(line!(), &[(slug.as_str(), "someone-else")]);
         let err = resolve_transcript(None, None, Some("ghost-sid"), &root).unwrap_err();
-        assert!(err.to_string().contains("No active transcript"));
+        assert!(err.to_string().contains("No transcript found for session: ghost-sid"), "{err}");
         std::fs::remove_dir_all(&root).ok();
     }
 

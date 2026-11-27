@@ -47,18 +47,22 @@ When a sensor discloses on the event lane, the sensor host writes its lines only
 
 ## `context`
 
-The sensor that watches the session itself rather than the world (ADR-113). Each poll runs `ways context --json` and reads the current token usage.
+The sensor that watches the session itself rather than the world. Each poll measures the sensor host's own session transcript with `ways_core::context_fill`, the measurement `ways context` prints: the newest turn's API token usage over the model's window. Its percent is the one `ways context` shows. A host with no session id reads nothing, since the newest transcript in a project can belong to another session.
 
-**Tier crossings.** Crossing into a tier emits once per session:
+**Tier crossings.** A tier runs from its start to the next tier's start, and its message is true at every percent in that range: each agent-ways action (todos at 75%, memory at 80%, the compaction checkpoint at 85%) starts a tier, so no message calls an action ahead once the fill has passed it. A tier emits when the fill first reaches it. Only the tier the fill is in emits, and reaching it spends the tiers below, so a reading that lands past two tiers reports the higher one alone:
 
 | % used | Magnitude | Gist of the message |
 |---|---|---|
-| 50% | 1.5 | halfway; keep going if on track, scope the next stages if barely started |
-| 65% | 3.0 | agent-ways will capture todos (75%) and memory (80%) shortly |
-| 83% | 4.0 | the compaction checkpoint fires at 85%; finish the current task and sync |
-| 90% | 5.0 | stop or compact now; quality degrades past here, and auto-compact is off |
+| 50–64% | 1.5 | over half the window is used; keep going if on track, scope the next stages if barely started |
+| 65–74% | 3.0 | agent-ways will capture todos (75%) and memory (80%) shortly |
+| 75–79% | 3.0 | past the todos capture; memory is captured at 80% and the compaction checkpoint follows at 85% |
+| 80–84% | 4.0 | past the memory capture; the compaction checkpoint fires at 85%, so finish the current task and sync |
+| 85–89% | 4.0 | past the compaction checkpoint; finish the current task and sync |
+| 90% and up | 5.0 | stop or compact now; quality degrades past here, and auto-compact is off |
 
-The line reads `context at N% — <message>`. When the burn rate is known it adds `(burning V%/min`, and below 90% also `, ~M min to critical` when that estimate is under an hour. The 90% line also names the way to read: ``Use `ways show attend context-pressure --session $CLAUDE_SESSION_ID` for reflection guidance``.
+**Re-arming.** `/compact` keeps the session id, and a restarted sensor host restores the tiers it had spent. When the fill falls at least 5 points under a spent tier's start, that tier is spent no longer and emits again when the fill climbs back. A fill that dips a point or two under a tier's start does not repeat it.
+
+The line reads `context at N% — <message>`. When the burn rate is known it adds `(burning V%/min`, and below 90% also `, ~M min to critical` when that estimate is under an hour. The 85% and 90% lines also name the way to read: ``Use `ways show attend context-pressure --session $CLAUDE_SESSION_ID` for reflection guidance``.
 
 **Velocity spikes.** Burning more than 2% a minute with more than 5 points of change since the previous reading emits `context velocity spike: X% in last N min (V%/min)` at 2.0.
 
@@ -188,5 +192,6 @@ The sensor does not capture output.
 - **ADR-113** — attend and the first context sensor
 - **ADR-117** — sensor crate extraction and feature flags
 - **ADR-136** — the event and message lanes
+- **ADR-166** — the one resolver for a model's context window, which the context sensor divides by
 - **ADR-403** — sensors as files under one spec
 - **ADR-416** — the sensor host, the presence-only peers sensor, the update check and the `ways-update` sensor
