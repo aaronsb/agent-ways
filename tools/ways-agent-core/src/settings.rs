@@ -119,7 +119,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Int { min: 1, max: crate::profile::MAX_TIMEOUT_MS as i64 },
         default: DefaultValue::Fn(|b| shipped_field(b, "timeout_ms")),
         doc: "The judge's deadline in milliseconds on the prompt and state lanes; past it the gate fails open.",
-        long: "A call takes about 0.6 s plus 0.1 s per candidate. Every request of a scan runs within it. The tool lanes use tool_timeout_ms.",
+        long: "These lanes send one request per scan. A request takes about 0.5 s plus 0.11 s per candidate, and the shipped 14 max_candidates leave about 0.7 s of the 2,800 ms for a slow call. The tool lanes use tool_timeout_ms.",
         ..BASE
     },
     KeySpec {
@@ -155,8 +155,8 @@ const KEYS: &[KeySpec] = &[
         path: &["profiles", "*", "max_candidates"],
         kind: POSITIVE,
         default: DefaultValue::Fn(|b| shipped_field(b, "max_candidates")),
-        doc: "Candidates judged per request on the prompt and state lanes; more candidates take more requests.",
-        long: "Taken in the matcher's order. Past this many the next ones go in a further request within the same deadline, sent only while what is left of it can hold that request; the rest pass unjudged. Judge latency grows with each candidate. The tool lanes use tool_candidates.",
+        doc: "The most candidates the prompt and state lanes' one request carries.",
+        long: "Taken in the matcher's order. A candidate past it gets no verdict and passes as the matcher decided. Each candidate adds about 0.11 s to a request; the shipped 14 cover about 97% of prompt scans. Raise it together with timeout_ms. The tool lanes use tool_candidates.",
         ..BASE
     },
     KeySpec {
