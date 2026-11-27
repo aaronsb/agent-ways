@@ -37,7 +37,7 @@ A plan with more than one card is a parent issue with sub-issues. Dependency lin
 1. **Find the ready cards:** sub-issues with no open blocker.
 2. **Pick a wave:** the ready cards whose file sets barely overlap.
 3. **Run the wave:** one worktree per card, and one agent per card where the work is delegated (subagents/agent-teams).
-4. **Merge one at a time:** the lead merges each card and runs the gates after each merge, then picks the next wave.
+4. **Merge one at a time:** the lead merges each card and does not re-run its gates, because the card's worker ran the gates its change can reach. The full suite runs once on the wave candidate, the tree with every card of the wave merged. Then the lead picks the next wave. The lead's role is in subagents/lead.
 
 A sweep (prose, strings, formatting, renames across many areas) starts only after the areas it covers have stopped changing, and runs one agent per area. A sweep that runs while code is still changing keeps bringing the same conflicts back. Stages bound by review, and the release, run one card at a time.
 
@@ -62,4 +62,6 @@ When you plan a card, write the paths or areas you expect it to touch in its iss
 - delivery/issues(softwaredev) — issues as the task list, blockedBy, residuals
 - delivery/groundwork/sequence(softwaredev) — holding a card while its area cannot be verified
 - subagents/agent-teams(meta) — one worktree and one owner per file
+- subagents/lead(meta) — the lead watches every stream and does not re-run gates
+- code/testing/gates/attention(softwaredev) — focal gates per card, the ambient pass on the wave candidate
 - workflows/fan-out(meta) — parallel workers with a shared contract and one writer

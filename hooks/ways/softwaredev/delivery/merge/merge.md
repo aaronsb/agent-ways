@@ -1,6 +1,6 @@
 ---
-description: Landing an increment to main — the review gate is a four-square decision, not one policy. Choose machine-review depth by complexity and blast-radius, choose the human gate by whether the work sets direction, fix every review finding the change owns before the merge instead of filing what was marked non-blocking, then merge and clean up. Route to the /merge skill.
-vocabulary: merge land increment ship it review gate code review findings fix remediate approve pull request pr blast radius complexity swarm single agent operator read direction architecture merge cleanup delete branch four square gate before merge reviewer codeowners swarm-gate dispatch non-blocking follow-up defer later disposition traced root cause fix now regression owned finding fix round review round
+description: Landing an increment to main — the review gate is a four-square decision, not one policy. Size each branch's review to the change, with deep review for a change that sets direction or has a high blast radius and the breadth review once on the integrated candidate, choose the human gate by whether the work sets direction, merge when the only unfinished checks are waiting for a runner, fix every review finding the change owns before the merge instead of filing what was marked non-blocking, then merge and clean up. Route to the /merge skill.
+vocabulary: merge land increment ship it review gate code review findings fix remediate approve pull request pr blast radius complexity swarm single agent focal ambient integration candidate wave candidate breadth review pending check waiting runner queued slow runner operator read direction architecture merge cleanup delete branch four square gate before merge reviewer codeowners swarm-gate dispatch non-blocking follow-up defer later disposition traced root cause fix now regression owned finding fix round review round
 pattern: /merge\b|merge (this|it|the pr)|land (this|it)|review.{0,20}(fix|and merge)|fix the findings|ship (it|this)|squash.?merge|rebase.?merge
 commands: gh pr (merge|checks)
 refire: 0.15
@@ -26,17 +26,21 @@ Every project sets its own review policy, and the strict ones encode it mechanic
 
 Classify the increment on two axes and pick the path:
 
-|                          | machine review: **light** (small, contained diff) | machine review: **deep / swarm** (complex, high blast-radius) |
+|                          | machine review: **light** (small, contained diff) | machine review: **deep** (sets direction, or high blast-radius) |
 |--------------------------|----------------------------------------------------|---------------------------------------------------------------|
-| **human gate: none** (routine, or already read) | **run it** — a quick `code-review` (or skip) → merge | **swarm-gate** — fan review across dimensions, adversarially verify → agent-gated merge |
-| **human gate: required** (sets direction, or unread one-way door) | **review + offer** — single-agent review → "want to read before I merge?" | **full gate** — swarm review **and** operator approval before merge |
+| **human gate: none** (routine, or already read) | **run it** — a quick `code-review` (or skip) → merge | **deep gate** — one deep review of the change, adversarially verified → agent-gated merge |
+| **human gate: required** (sets direction, or unread one-way door) | **review + offer** — single-agent review → "want to read before I merge?" | **full gate** — deep review **and** operator approval before merge |
 
-- **The X axis** is driven by **complexity and blast-radius**: diff size, number of files, core-vs-leaf, test coverage, reversibility. A large change to a core path gets a swarm of reviewers, and a small change to a leaf gets a single review.
+- **The X axis** is driven by **complexity and blast-radius**: diff size, number of files, core-vs-leaf, test coverage, reversibility. A large change to a core path gets a deep review, and a small change to a leaf gets a quick one.
 - **The Y axis** is driven by **whether the work sets direction** — an ADR that steers architecture lands in the bottom row no matter how small the diff — and by **whether the operator has already read it**. If they wrote it or reviewed it live, the human gate is already satisfied.
 
 When the classification is unclear, **raise it with the operator** instead of picking a corner silently. Inside a `/goal` loop, lean toward the corners without a human gate; outside one, ask which corner applies.
 
 In every corner, a request to merge is a request for the review that corner names. Start the reviewer without asking permission again, and say in a clause what the review buys. The question to raise is *which corner* applies; *whether to review* is already settled. See ADR-175.
+
+## Breadth review runs on the integrated candidate
+
+Review on each branch is focal: it is sized to the change, and a re-review after a fix is sized to the fix. The breadth review fans reviewers across dimensions and adversarially verifies their findings. It runs once on the integrated candidate: the integration branch, the wave candidate, or the range a release collects before its bump. Defects that live between branches, and wrong focal calls, show up there (code/testing/gates/attention). A review swarm on every branch is not the default.
 
 ## Version bumps merge on green CI
 
@@ -45,6 +49,14 @@ A release bump PR whose diff is only the package's version line and its lockfile
 ## Green CI is a command
 
 Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .bucket=="skipping")'` prints `true`. Run it as its own command and read the result before `gh pr merge`. Do not parse the text table. A pipeline's exit status is its last command's, so `gh pr checks 5 | cut -f1 && gh pr merge 5` merges whatever the checks say. A repository with no checks has no green CI to merge under; `gh pr checks` exits 1 there. Trust a guard script once you have seen it refuse a red case. After a merge or an auto-merge request, a hook names any check that was not green; tell the operator when it does.
+
+A check only waiting for a runner does not gate a merge, and a failed check does. Where runners are known to be slow or flaky, count as green a pending check whose name matches them, and nothing else:
+
+```bash
+gh pr checks <n> --json name,bucket -q '[.[] | select(.bucket != "pending" or (.name | test("<slow-runner-pattern>") | not))] | all(.bucket=="pass" or .bucket=="skipping")'
+```
+
+A matching check that fails still blocks. Record each check passed over as discovered, waiting for a runner (code/testing/gates). A required check on a protected branch still holds the merge.
 
 ## Remediate before you merge
 
@@ -80,6 +92,7 @@ No check fails while records drift. An audit in August 2026 found seventeen ADRs
 - delivery/github(softwaredev) — PR creation, merge strategy, and post-merge cleanup discipline.
 - delivery/commits(softwaredev) — the commit quality the PR is built from.
 - delivery/release(softwaredev) — the heavier sibling: publishing a versioned release.
+- delivery/ci(softwaredev) — one CI run per tree, and checks that wait for a runner.
 - delivery/groundwork/sequence(softwaredev) — a hold for an area that cannot yet be verified, decided before the four-square classifies the review.
 - develop(meta) — the loop that this way finishes.
 - code-reviewer (subagent, `agents/code-reviewer.md`) — the reviewer `merge` spawns at the gate; the built-in `/code-review` is the operator's manual equivalent.

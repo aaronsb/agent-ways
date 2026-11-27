@@ -66,7 +66,7 @@ Enter plan mode and think through work collision **before** creating tasks. Defe
 1. Start sequential tasks first (critical path)
 2. Launch parallelizable tasks together when dependencies are met
 3. Review worktree changes before integrating
-4. Run tests after each integration point, not just at the end
+4. Run the focal gates for each card, the checks its change can reach, and the full suite once on each wave candidate (code/testing/gates/attention)
 EOF
 else
   # Lightweight hint — don't dump tables for small/simple projects
