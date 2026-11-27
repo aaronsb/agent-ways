@@ -47,13 +47,13 @@ When a sensor discloses on the event lane, the sensor host writes its lines only
 
 ## `context`
 
-The sensor that watches the session itself rather than the world (ADR-113). Each poll runs `ways context --json` and reads the current token usage.
+The sensor that watches the session itself rather than the world (ADR-113). Each poll measures the sensor host's own session transcript with `ways_core::context_fill`, the measurement `ways context` prints: the newest turn's API token usage over the model's window (ADR-166). Its percent is the one `ways context` shows. A host with no session id reads nothing, since the newest transcript in a project can belong to another session.
 
-**Tier crossings.** Crossing into a tier emits once per session:
+**Tier crossings.** Each tier emits once per session, when the fill first reaches it. Only the tier the fill is in emits, and reaching it spends the tiers below, so a reading that lands past two tiers reports the higher one alone:
 
 | % used | Magnitude | Gist of the message |
 |---|---|---|
-| 50% | 1.5 | halfway; keep going if on track, scope the next stages if barely started |
+| 50% | 1.5 | over half the window is used; keep going if on track, scope the next stages if barely started |
 | 65% | 3.0 | agent-ways will capture todos (75%) and memory (80%) shortly |
 | 83% | 4.0 | the compaction checkpoint fires at 85%; finish the current task and sync |
 | 90% | 5.0 | stop or compact now; quality degrades past here, and auto-compact is off |
