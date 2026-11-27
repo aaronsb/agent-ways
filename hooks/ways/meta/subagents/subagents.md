@@ -55,7 +55,7 @@ Ask in every brief for the same return shape, placed at the top of the report, a
 
 A blocked or failed worker still returns the whole shape. What it finished is where the next attempt starts. A report that stops mid-sentence was cut off; ask the worker for the rest before acting on it.
 
-Owned findings a worker returns are the orchestrator's to fix before the work integrates (delivery/merge, ADR-614). A finding in another worker's files goes to that worker, or the orchestrator fixes it. A split of files between workers is not a reason to file the finding for later. Only a finding the change does not own becomes an issue.
+Owned findings a worker returns are the lead's to fix before the work integrates (delivery/merge). A finding in another worker's files goes to that worker, or the lead fixes it. The lead is the session that starts workers and merges their work (subagents/lead). A split of files between workers is not a reason to file the finding for later. Only a finding the change does not own becomes an issue.
 
 ## Brief Fidelity
 
@@ -82,12 +82,12 @@ For read-only fan-out (`Explore`, or `general-purpose` told to read only), state
 
 ## Planting and Re-review Briefs
 
-A brief that has the worker plant a defect to prove a test catches it (core.md) names the restore steps:
+A brief that has the worker plant a defect to prove a test catches it names the restore steps. The rule itself is in code/testing/gates.
 
 - Back the file up, plant, run the test, move the backup into place: `cp f f.bak`, edit `f`, test, `mv f.bak f`. `git checkout`, `git restore` and `git stash` discard the worker's uncommitted edits along with the plant.
 - Run `touch f` after the `mv`. The moved file keeps the backup's older mtime, so mtime-based build tools (cargo, make) skip the rebuild and run the binary built with the plant. A test that stays red after the plant is removed is the tell.
 
-A re-review after a fix is sized to the fix. A one-function fix gets that function's tests and the crate's suite. The full gate set runs once, before the push.
+A re-review after a fix is sized to the fix. A one-function fix gets that function's tests and the crate's suite. A worker runs the focal gates its change reaches. The full gate set runs once per tree at integration, on the wave candidate or in the PR's CI, and not once per worker or per branch (code/testing/gates/attention).
 
 ## When NOT to Use
 
@@ -141,3 +141,5 @@ The distinction: did the subagent do what its contract says it does, or did it a
 - subagents/authorization(meta) — who may ask for a spawn, the suggested CLAUDE.md line and the independence spawn
 - subagents/briefs(meta) — what a brief carries for a worker that inherits nothing
 - subagents/agent-teams(meta) — several agents or sessions on one repository, and shared-checkout rules
+- subagents/lead(meta) — the lead's ambient attention, and what it leaves to workers
+- code/testing/gates/attention(softwaredev) — focal gates per change, and the full pass once per tree

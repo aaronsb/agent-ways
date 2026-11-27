@@ -1,6 +1,6 @@
 ---
 description: Writing the prompt or instructions for a subagent before sending it off, or working out why one came back wrong, given that it inherits none of this conversation, memory or corrections. The brief carries the user's writing and send rules, the named model and skills, the shared contract verbatim, the files it owns and the layout it needs.
-vocabulary: brief good instructions write the prompt for a subagent delegate hand off send an agent off subagent came back with garbage wrong didn't know the layout missed context inherits nothing writing rules never send drafts only named model skill contract verbatim owned files absolute paths batches headless
+vocabulary: brief good instructions write the prompt for a subagent delegate hand off send an agent off subagent came back with garbage wrong didn't know the layout missed context inherits nothing writing rules never send drafts only named model skill contract verbatim owned files absolute paths batches headless focal gates correct running worker stop restart
 pattern: \bbriefs? (for|to) (the |each |every |a )?(sub)?agents?\b|\bheadless (claude|cc)\b|\bfor an(other)? agent to (execute|run)\b
 refire: 0.15
 scope: agent, subagent
@@ -19,10 +19,13 @@ A subagent, workflow agent or headless run starts with nothing from this session
 - **The shared contract, verbatim**: the API, data shape or output format that parallel workers must agree on.
 - **The files the worker owns**, the scope it stays inside, and the repository layout it needs to find them.
 - **Absolute paths** in shell commands. The worker's working directory can reset between calls.
+- **The focal gates.** Name the gates the change reaches, and say that the full suite runs at integration, not in the worker (code/testing/gates/attention).
 - **Foreground builds and gates.** Tell the worker to run them in the foreground with a raised Bash timeout, never to end a turn waiting on a background job, and to read a started job's output file. A Monitor or `run_in_background` notice reaches the lead's queue, so a worker that ends its turn to wait is never woken.
 - **One task.** Chaining two goals in one brief gets one of them done badly.
 
 A worker that goes idle saying it will wait for an event needs a message from the lead to wake it. A message sent to a working worker arrives when its turn ends; a message to an idle worker wakes it.
+
+To correct a running worker, stop it and restart it with one complete brief. Several corrections sent as messages each reach the worker at the end of a turn, after it has built on the brief they correct, so the work carries every superseded version.
 
 For research and judgment work, add to the return shape the parent lists a confidence level with its reason, and the caveats, stated before the evidence.
 
@@ -45,12 +48,15 @@ For a goal condition another agent will run toward, use the goal-author skill.
 | "I'll describe the contract in my own words" | Two workers paraphrase it two ways. Paste it verbatim. |
 | "It's a messaging task, but the agent knows not to send" | Write "never send" in the brief. |
 | "I'll start the gates in the background and wait" | The notice goes to the lead, so the worker sleeps through it. Run them in the foreground. |
+| "I'll send it a quick correction" | It arrives after the worker has built on the old brief. Stop it and restart it with one complete brief. |
+| "Have the worker run the full suite" | Name the focal gates. The full suite runs once at integration. |
 | "Rerun the whole batch to be safe" | Count the valid results and rerun only the gaps. |
 
 ## See Also
 
 - subagents(meta) — parent: brief fidelity, the return shape and depth
 - subagents/agent-teams(meta) — several agents on one repository
+- subagents/lead(meta) — the lead that writes the brief and watches the worker
 - workflows(meta) — scripted multi-agent runs that use these briefs
 - goals(meta) — goal mode and the condition it runs toward
 - writing/plain(writing) — the plain-writing rules a prose-writing worker receives

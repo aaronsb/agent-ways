@@ -29,11 +29,13 @@ A workflow can start dozens of agents and spend a large amount of tokens, so **r
 
 ## Worked example: the deliver workflow
 
-`develop → pr → review → remediate → merge` suits a workflow. Each unit of work passes through the stages on its own. The *review* fans out across dimensions (bugs, security, reuse), and an adversarial check verifies each finding. Each finding the unit owns is fixed in its branch before the merge, by the table in `delivery/merge`, and filing an issue does not count as a fix. The four-square in `delivery/merge` **gates the merge**: a person approves when the work sets direction. The step that cannot be undone is the *release*, which comes after the merge (see the autonomy design note). The workflow saves wall-clock time and reviews more thoroughly than one agent does.
+`develop → pr → review → remediate → merge` suits a workflow. Each unit of work passes through the stages on its own. The *review* of a unit is focal and sized to the change: a light review for a small, contained diff, and a deep one for a unit that sets direction or has a high blast radius. The review that fans out across dimensions (bugs, security, reuse), with an adversarial check of each finding, runs once on the integrated candidate, where the defects that live between branches show up. Each finding the unit owns is fixed in its branch before the merge, by the table in `delivery/merge`, and filing an issue does not count as a fix. The four-square in `delivery/merge` **gates the merge**: a person approves when the work sets direction. The step that cannot be undone is the *release*, which comes after the merge (see the autonomy design note). The workflow saves wall-clock time, and the review across dimensions covers every unit together instead of repeating per unit.
 
 ## See also
 
 - subagents(meta) — single delegation, the rung just below a workflow
+- subagents/lead(meta) — the lead's role while the workflow's units run
+- code/testing/gates/attention(softwaredev) — focal checks per unit, and the ambient pass on the integrated candidate
 - workflows/fan-out(meta) — child: running a fan-out with shared contracts, serial writes and one report
 - the autonomy design note — the substrate ladder and gate taxonomy in full
 - choices(meta) — surfacing the curated decision at a gate
