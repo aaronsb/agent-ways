@@ -50,10 +50,10 @@ A release bump PR whose diff is only the package's version line and its lockfile
 
 Green CI means `gh pr checks <n> --json bucket -q 'all(.[]; .bucket=="pass" or .bucket=="skipping")'` prints `true`. Run it as its own command and read the result before `gh pr merge`. Do not parse the text table. A pipeline's exit status is its last command's, so `gh pr checks 5 | cut -f1 && gh pr merge 5` merges whatever the checks say. A repository with no checks has no green CI to merge under; `gh pr checks` exits 1 there. Trust a guard script once you have seen it refuse a red case. After a merge or an auto-merge request, a hook names any check that was not green; tell the operator when it does.
 
-A check only waiting for a runner does not gate a merge, and a failed check does. Where runners are known to be slow or flaky, count as green a pending check whose name matches them, and nothing else:
+A check only waiting for a runner does not gate a merge, and a failed check does. Where runners are known to be slow or flaky, count as green a check whose name matches them and that is still queued, and nothing else. `gh` puts a running check (`state` `IN_PROGRESS`) in the `pending` bucket too, and a running check still gates:
 
 ```bash
-gh pr checks <n> --json name,bucket -q '[.[] | select(.bucket != "pending" or (.name | test("<slow-runner-pattern>") | not))] | all(.bucket=="pass" or .bucket=="skipping")'
+gh pr checks <n> --json name,state,bucket -q '[.[] | select(.bucket != "pending" or .state == "IN_PROGRESS" or (.name | test("<slow-runner-pattern>") | not))] | all(.bucket=="pass" or .bucket=="skipping")'
 ```
 
 A matching check that fails still blocks. Record each check passed over as discovered, waiting for a runner (code/testing/gates). A required check on a protected branch still holds the merge.
