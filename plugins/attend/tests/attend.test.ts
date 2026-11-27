@@ -1863,6 +1863,44 @@ describe('session changes through engine events alone', () => {
     expect(h.status()?.afterCompaction).toBe(true)
   })
 
+  // A session boundary lapses the notices queued before it (#1368): a
+  // compaction by any route the mod reads, and a /clear.
+  const lapses = (h: { argvs: string[][] }) => h.argvs.filter(a => a.slice(1).join(' ') === 'message lapse --events').length
+
+  test('a compaction lapses the queued notices; a /compact that left the fill reported does not', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, autocompact: null, contextTokens: 90_000 })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.command.run({ command: 'compact', args: '' } as never)
+    expect(lapses(h)).toBe(0)
+    h.world.contextTokens = undefined
+    await $.command.run({ command: 'compact', args: '' } as never)
+    expect(lapses(h)).toBe(1)
+  })
+
+  test('a fill that falls by half lapses the queued notices', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await measured($, 150_000)
+    expect(lapses(h)).toBe(0)
+    await measured($, 30_000)
+    expect(lapses(h)).toBe(1)
+  })
+
+  test('a /clear lapses the queued notices, and a /resume does not', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.session.end({ reason: 'resume', sessionId: 's1' } as never)
+    expect(lapses(h)).toBe(0)
+    await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+    expect(lapses(h)).toBe(1)
+  })
+
   test('a context fill that falls by half, as an automatic compaction leaves it, brings the preamble back', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drains: string[] = []

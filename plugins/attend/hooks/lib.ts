@@ -149,6 +149,13 @@ export function compactedArgv(failed?: string): string[] {
   return [ATTEND, 'keepwarm', 'compacted', ...(failed === undefined ? [] : ['--failed', oneLine(failed)])]
 }
 
+/** A session boundary, a compaction or a /clear: the session's pending
+ *  event-lane notices lapse unread, since each describes a context the model
+ *  no longer holds. A peer's message stays queued (#1368). */
+export function lapseEventsArgv(): string[] {
+  return [ATTEND, 'message', 'lapse', '--events']
+}
+
 /** The wrap's reply sent over attend: one message, its first line the
  *  handoff line attend wrote, to `#name` as a channel post and to anything
  *  else as a direct message (ADR-414 item 6). */

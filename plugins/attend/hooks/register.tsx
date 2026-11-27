@@ -61,6 +61,7 @@ import {
   frameInbound,
   compactFocus,
   compactedArgv,
+  lapseEventsArgv,
   goalArgv,
   isOpenChannel,
   nativeThresholdFrom,
@@ -468,9 +469,12 @@ async function isFillCleared($: $): Promise<boolean> {
   }
 }
 
-/** The next delivery shows the preamble in full. */
+/** The next delivery shows the preamble in full, and the notices that
+ *  queued before the compaction lapse unread: they describe a context the
+ *  model no longer holds. A peer's message stays queued. */
 async function markCompacted($: $) {
   await updateStatus($, s => ({ ...s, afterCompaction: true }))
+  await run($, lapseEventsArgv())
 }
 
 // ── the sensor host ────────────────────────────────────────────────────
@@ -1392,7 +1396,10 @@ export const register: Register = on => {
   // policy plugin sends those past the plugins a person installs. An exit, a
   // logout or a -p run's end changes nothing here; at process start
   // session.start alone reads the record.
-  on('session.end', ($, e, next) => {
+  on('session.end', async ($, e, next) => {
+    // A /clear is a boundary too: notices queued for the ended session lapse
+    // before the new one reads them. Its peer messages still follow.
+    if (e.reason === 'clear') await run($, lapseEventsArgv())
     if (mod.isStarted && mod.startWatch && (e.reason === 'clear' || e.reason === 'resume')) {
       mod.isMoveListened = false
       recordMove(mod, e.sessionId, e.reason, mod.active)

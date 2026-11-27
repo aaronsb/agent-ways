@@ -21,6 +21,7 @@ pub const LEAVE: &str = "Leave a channel";
 pub const CHANNELS: &str = "List every channel, marking the ones this session is in";
 
 pub const LISTEN: &str = "Turn listening on or off for this session without joining a channel, or show it (default: status)";
+pub const LAPSE: &str = "Mark this session's pending event-lane notices read at a session boundary, delivering none of them";
 pub const UNREAD: &str = "Count this session's unread messages by room, marking none of them read";
 
 /// Every message verb with its description, by its CLI path (ADR-413).

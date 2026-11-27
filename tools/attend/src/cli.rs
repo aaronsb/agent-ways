@@ -121,6 +121,9 @@ pub(crate) enum MessageCmd {
     #[command(about = describe::UNREAD)]
     Unread(JsonArgs),
 
+    #[command(about = describe::LAPSE)]
+    Lapse(LapseArgs),
+
     // `with_limits` writes this verb's help with the limits it applies.
     /// Reap signal files whose owning project is gone, and prune empty project dirs
     Cleanup(CleanupArgs),
@@ -400,6 +403,16 @@ pub(crate) struct JsonArgs {
     /// Print the result as one JSON document
     #[arg(long)]
     pub(crate) json: bool,
+}
+
+/// What `attend message lapse` lapses.
+#[derive(Args)]
+pub(crate) struct LapseArgs {
+    /// Lapse the pending event-lane notices: git, processes, presence,
+    /// context, the update check and any other sensor's. A peer's message
+    /// stays queued. The attend mod runs this at a compaction or a /clear
+    #[arg(long, required = true)]
+    pub(crate) events: bool,
 }
 
 #[derive(Args)]
@@ -951,7 +964,7 @@ mod tests {
         let names = |c: &clap::Command| c.get_subcommands().map(|s| s.get_name().to_string()).collect::<Vec<_>>();
         let (declared, written) = (Cli::command(), crate::cli_command());
         assert_eq!(names(&written), names(&declared));
-        assert_eq!(names(&at(&written, "message")), ["send", "reply", "inbox", "unread", "cleanup", "delete", "tombstone"]);
+        assert_eq!(names(&at(&written, "message")), ["send", "reply", "inbox", "unread", "lapse", "cleanup", "delete", "tombstone"]);
     }
 
     #[test]
