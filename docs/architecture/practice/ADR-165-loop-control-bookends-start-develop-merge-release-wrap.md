@@ -93,6 +93,8 @@ Five load-bearing choices:
    itself invoke plan mode (skills/hooks cannot fire `/` commands); it prepares the
    ground and hands the operator the trigger.
 
+   > Amended 2026-11-26 by ADR-417: a skill still cannot fire `/compact`, but the attend mod can compact. In relay mode it compacts after a wrap with the wrap's handoff as instructions, then submits a turn that resumes the work, so `wrap` no longer always ends by handing the operator the trigger.
+
 3. **`/develop` is a borrowing-router, not an orchestrator.** It establishes the
    loop, selects the front order by where the uncertainty lives, lays the TaskList,
    then delegates to the reviewer (the `code-reviewer` subagent), `/merge`, and
