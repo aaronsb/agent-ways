@@ -121,7 +121,8 @@ export function resumedArgv(failed?: string): string[] {
 
 /** A `/goal` the operator typed: set (active) or cleared (none). */
 export function goalArgv(active: boolean): string[] {
-  return [ATTEND, 'keepwarm', 'goal', active ? 'active' : 'none']
+  const state = active ? 'active' : 'none'
+  return [ATTEND, 'keepwarm', 'goal', state]
 }
 
 /** A resumed turn ended with a `relay: stop <reason> ...` line. */
