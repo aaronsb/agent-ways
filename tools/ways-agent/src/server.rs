@@ -360,7 +360,9 @@ impl State {
             return Err("no_key".to_string());
         };
         self.verified(p.provider, &key, &source, &p.model)?;
-        let deadline = Duration::from_millis(p.timeout_ms);
+        // The hook says how long it waits for this request, what is left of
+        // its lane's budget; a hook that does not say gets the profile's.
+        let deadline = Duration::from_millis(req.deadline_ms.unwrap_or(p.timeout_ms).min(profile::MAX_TIMEOUT_MS));
         let _slot = self.acquire(p.concurrency, deadline.saturating_sub(begun.elapsed()))?;
         let remaining = deadline.saturating_sub(begun.elapsed());
         if remaining.is_zero() {
@@ -497,7 +499,7 @@ impl Prepared<'_> {
                 .candidates
                 .iter()
                 .zip(p_yes)
-                .map(|(Candidate { id, .. }, p_yes)| Verdict { id: id.clone(), p_yes })
+                .map(|(Candidate { id, .. }, p_yes)| Verdict { id: id.clone(), p_yes, critique: None })
                 .collect(),
             latency_ms: 0,
             call: Some(priced(usage)),
@@ -572,7 +574,7 @@ mod tests {
     #[test]
     fn an_empty_candidate_list_falls_back_without_a_call() {
         let state = State::new();
-        let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![], engine: None, min_turns: None };
+        let req = JudgeRequest { session: "s".into(), tool: "t".into(), turns: vec![], candidates: vec![], engine: None, min_turns: None, deadline_ms: None };
         assert!(matches!(state.judge(req), Reply::Fallback { reason, .. } if reason == "no_candidates"));
     }
 
@@ -595,6 +597,7 @@ mod tests {
             candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
             engine: Some("anthropic".into()),
             min_turns: None,
+            deadline_ms: None,
         };
         let held = State::settings_at(&path, req.engine.as_deref(), anthropic_key).unwrap().unwrap();
         // The key path from here on: prepare_with refuses only claude-code
@@ -617,6 +620,7 @@ mod tests {
             candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
             engine: None,
             min_turns: None,
+            deadline_ms: None,
         };
         for mode in ["enforce", "shadow"] {
             let user: profile::UserLayer = serde_yaml::from_str(&format!("engine: claude-code\nmode: {mode}\n")).unwrap();

@@ -87,6 +87,7 @@ pub fn state(
         scope: scope.clone(),
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
+        command: None,
     };
     let turns = || match query.map(str::trim).filter(|q| !q.is_empty() && !envelope_turn) {
         Some(q) => vec![ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: q.to_string() }],

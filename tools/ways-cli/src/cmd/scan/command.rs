@@ -96,11 +96,12 @@ pub fn command(
         scope: scope.clone(),
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
+        command: Some(judged::audit_command(cmd)),
     };
 
     let hit_of: std::collections::HashMap<&str, &BashHit> = hits.iter().map(|h| (h.id.as_str(), h)).collect();
     let mut shown: HashSet<String> = HashSet::new();
-    let turns = || judged::tool_turns(session_id, &judged::bash_call(cmd, description));
+    let turns = || judged::tool_turns(session_id, &judged::bash_call(cmd, description, &command.segments, &judged::tldr_summaries()));
     judged::run(&lane, &scan, &judge_candidates, turns, gate::TOOL_WAIT, |c| {
         if let Some((check, score)) = judged::check_of(&c.key).and_then(|id| matched_checks.iter().find(|(w, _)| w.id == id)) {
             let out = capture_show_check(&check.id, session_id, "bash", *score, Some(&mut budget));
@@ -179,22 +180,28 @@ fn check_hits<'c>(
     out
 }
 
-/// A Bash call as the `commands:` regexes read it (ADR-188 item 3a): its
-/// operative segments, parsed once per call. A regex runs against each
-/// segment's own text, so `^gh` matches after `git push &&`, and one
-/// program's arguments cannot satisfy a pattern meant for another. It also
-/// runs against the text from the program word, so `^gh` matches
-/// `GH_TOKEN=x gh …` and `timeout 60 gh …`. Heredoc bodies, navigation
-/// (`cd`, `echo`, assignments) and filters after a pipe are not matched.
+/// A Bash call parsed once into its ordered segments. A `commands:` regex
+/// runs against each operative segment's own text, so `^gh` matches after
+/// `git push &&`, and one program's arguments cannot satisfy a pattern
+/// meant for another. It also runs against the text from the program word,
+/// so `^gh` matches `GH_TOKEN=x gh …` and `timeout 60 gh …`. Heredoc
+/// bodies, navigation (`cd`, `echo`, assignments) and filters after a pipe
+/// are not matched. The judge reads every segment described.
+///
+/// References:
+/// - ADR-188 item 3a: `commands:` per operative segment.
 #[derive(Default)]
 pub(super) struct ShellCommand {
-    operative: Vec<Segment>,
+    pub(super) segments: Vec<Segment>,
 }
 
 impl ShellCommand {
     pub(super) fn parse(cmd: &str) -> Self {
-        let operative = command_describer::parse(cmd).into_iter().filter(Segment::is_operative).collect();
-        ShellCommand { operative }
+        ShellCommand { segments: command_describer::parse(cmd) }
+    }
+
+    fn operative(&self) -> impl Iterator<Item = &Segment> {
+        self.segments.iter().filter(|s| s.is_operative())
     }
 
     /// The first match of a `commands:` regex in any operative segment,
@@ -202,8 +209,7 @@ impl ShellCommand {
     /// an invalid pattern.
     pub(super) fn span(&self, pattern: &str) -> Option<String> {
         let re = compile_trigger(pattern)?;
-        self.operative
-            .iter()
+        self.operative()
             .find_map(|s| re.find(&s.text).or_else(|| re.find(s.program_text())))
             .map(|m| capped_span(m.as_str()))
     }

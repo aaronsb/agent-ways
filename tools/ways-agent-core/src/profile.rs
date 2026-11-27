@@ -210,9 +210,20 @@ pub struct Profile {
     pub max_turn_chars: usize,
     /// Provider calls the agent runs at once, across all sessions.
     pub concurrency: usize,
-    /// Candidates judged per request, taken in the matcher's order. Judge
-    /// latency grows with each candidate, so the rest pass unjudged.
+    /// Candidates judged per request on the prompt and state lanes, taken
+    /// in the matcher's order; past it the next ones go in a further request
+    /// within the same deadline. Judge latency grows with each candidate.
     pub max_candidates: usize,
+    /// The judge's deadline on a tool lane (command, file, tool, task,
+    /// post-tool), which sends one request per call. The hook cuts it to
+    /// what its own bound holds.
+    #[serde(default = "default_tool_timeout_ms")]
+    pub tool_timeout_ms: u64,
+    /// The most candidates a tool lane's one request carries, in the
+    /// matcher's order. A candidate past it gets no verdict: a semantic one
+    /// is not shown, any other is shown as the matcher decided.
+    #[serde(default = "default_tool_max_candidates")]
+    pub tool_max_candidates: usize,
     /// USD per million input tokens, for pricing a call whose provider does
     /// not report its cost. Unset: the model's list price where agent-ways
     /// ships one ([`crate::cost::list_price`]), else the cost is unknown.
@@ -224,16 +235,36 @@ pub struct Profile {
     pub price_out_per_mtok: Option<f64>,
 }
 
+/// The shipped tool-lane deadline. A request takes about 515 ms plus 112 ms
+/// per candidate under the claude-code engine, so 3 s holds about 22
+/// candidates, enough for 97.8% of the command lane's scans in a week of
+/// records (#1372).
+pub const DEFAULT_TOOL_TIMEOUT_MS: u64 = 3000;
+
+/// The shipped cap on a tool lane's one request: what
+/// [`DEFAULT_TOOL_TIMEOUT_MS`] holds.
+pub const DEFAULT_TOOL_MAX_CANDIDATES: usize = 22;
+
+fn default_tool_timeout_ms() -> u64 {
+    DEFAULT_TOOL_TIMEOUT_MS
+}
+
+fn default_tool_max_candidates() -> usize {
+    DEFAULT_TOOL_MAX_CANDIDATES
+}
+
 impl Profile {
     fn validate(&self, name: &str) -> Result<()> {
         if !(0.0..=1.0).contains(&self.threshold) {
             bail!("profile '{name}': threshold {} is outside 0..1", self.threshold);
         }
-        if self.timeout_ms == 0 || self.timeout_ms > MAX_TIMEOUT_MS {
-            bail!("profile '{name}': timeout_ms {} is outside 1..{MAX_TIMEOUT_MS}", self.timeout_ms);
+        for (key, ms) in [("timeout_ms", self.timeout_ms), ("tool_timeout_ms", self.tool_timeout_ms)] {
+            if ms == 0 || ms > MAX_TIMEOUT_MS {
+                bail!("profile '{name}': {key} {ms} is outside 1..{MAX_TIMEOUT_MS}");
+            }
         }
-        if self.turns == 0 || self.max_turn_chars == 0 || self.concurrency == 0 || self.max_candidates == 0 {
-            bail!("profile '{name}': turns, max_turn_chars, concurrency and max_candidates must be at least 1");
+        if [self.turns, self.max_turn_chars, self.concurrency, self.max_candidates, self.tool_max_candidates].contains(&0) {
+            bail!("profile '{name}': turns, max_turn_chars, concurrency, max_candidates and tool_max_candidates must be at least 1");
         }
         if [self.price_in_per_mtok, self.price_out_per_mtok].into_iter().flatten().any(|p| !p.is_finite() || p < 0.0) {
             bail!("profile '{name}': prices must be zero or more");
@@ -276,6 +307,10 @@ pub struct ProfilePatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_candidates: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_max_candidates: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub price_in_per_mtok: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_out_per_mtok: Option<f64>,
@@ -293,6 +328,8 @@ impl ProfilePatch {
             max_turn_chars: self.max_turn_chars.unwrap_or(base.max_turn_chars),
             concurrency: self.concurrency.unwrap_or(base.concurrency),
             max_candidates: self.max_candidates.unwrap_or(base.max_candidates),
+            tool_timeout_ms: self.tool_timeout_ms.unwrap_or(base.tool_timeout_ms),
+            tool_max_candidates: self.tool_max_candidates.unwrap_or(base.tool_max_candidates),
             price_in_per_mtok: self.price_in_per_mtok.or(base.price_in_per_mtok),
             price_out_per_mtok: self.price_out_per_mtok.or(base.price_out_per_mtok),
         }

@@ -340,6 +340,7 @@ fn scan_prompt_surface(
         scope: &scope,
         hook_event,
         sink: &session::log_event,
+        command: None,
     };
     let turns = gate::turns(query, response_context);
     let mut gate = gate::apply(&pending, turns.clone(), gate::PROMPT_WAIT, &gate_log);
@@ -371,6 +372,7 @@ fn scan_prompt_surface(
         scope: scope.clone(),
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
+        command: None,
     };
     judged::detach_held(&judge_lane, held, turns, &scan_id);
 
@@ -667,7 +669,7 @@ mod tests {
         let sink = |f: &[(&str, &str)]| {
             events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect())
         };
-        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink, command: None };
         let mut blocked = gate::test_blocked("p", &lc);
         let pending = vec![
             gate::Pending { id: "p", description: "", trigger: gate::Trigger::Keyword },
@@ -704,7 +706,7 @@ mod tests {
     /// ways `show` was asked for.
     fn admit(hits: &[Hit<PromptPayload>], mut gate: gate::Gate) -> (serde_json::Value, Vec<String>) {
         let sink = |_: &[(&str, &str)]| {};
-        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink, command: None };
         let mut record = decision::Record::for_test();
         let mut asked = Vec::new();
         admit_hits(hits, &mut gate, &[], &lc, &mut record, |h| {
@@ -716,7 +718,7 @@ mod tests {
 
     fn gate_of(verdicts: &[(&str, f64)], mode: ways_agent_core::profile::Mode) -> gate::Gate {
         let sink = |_: &[(&str, &str)]| {};
-        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink, command: None };
         gate::test_gate(verdicts, mode, &lc)
     }
 
