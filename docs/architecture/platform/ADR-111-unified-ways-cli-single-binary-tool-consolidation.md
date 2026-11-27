@@ -12,6 +12,10 @@ basis:
 agent:
   name: Claude
   model: unrecorded
+considered:
+  - operator: aaronsb
+    said: "basically aarch64-apple-darwin is best effort"
+    via: operator in session, 2026-11-27, after ways-agent-v0.14.1's darwin-arm64 leg sat queued
 status: accepted
 date: 2026-03-30
 deciders:
@@ -198,3 +202,7 @@ Same FFI benefit as Rust + `cc`, but CGo cross-compilation is harder than Rust's
 ## Extension: `attend` adopts the same pattern (2026-05-09)
 
 The `attend` binary (ADR-113) initially shipped a hand-rolled argv dispatcher with per-command help text written as free-form `println!` calls. As the surface grew to ~14 subcommands, the lack of a uniform help/argument-parsing layer started to bite — `--help` worked on some commands, errored as "unknown subcommand" on others, and silently ran the command on a third group. Rather than introduce a parallel CLI convention, `attend` adopts the clap-derive structure established here: a `Cli` struct, a `Commands` enum, doc comments as the source of truth for help text, and the same `agent_fmt::Banner` special-casing for bare invocation. External reference docs (`docs/cli/attend.md`) are generated from the same `Cli` definition via `clap-markdown`, wired into the project Makefile so the runtime help text and the published reference cannot drift. This decision retroactively confirms the ADR-111 pattern as the canonical CLI shape across the workspace.
+
+## Amendments
+
+- 2026-11-27, to Decision §5, on the operator's decision after the ways-agent-v0.14.1 tag got no release because its darwin-arm64 leg sat queued for over an hour: darwin-arm64 is best effort. A tag publishes its GitHub Release once linux-x86_64, linux-aarch64 and darwin-x86_64 have built and the tests on Linux runners have passed, with `checksums.txt` over those binaries. The darwin-arm64 binary attaches to the release when its build completes, and its line joins `checksums.txt`. The tests on macOS runners no longer gate the release. A failed or never-scheduled darwin-arm64 leg leaves the release without that binary. Until it attaches, the downloader on darwin-arm64 installs the newest release that carries one.

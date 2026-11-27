@@ -62,7 +62,7 @@ A merge to `main` also starts the test suite again on a tree its PR already pass
 
 Components are the six suite binaries in `tools/suite-bins`: `ways`, `ways-audit`, `ways-mcp`, `ways-agent`, `attend`, `attend-chat`. `way-embed` versions through its own Makefile.
 
-Pushing the tag is the one outward step. `build-<c>.yml` then builds every platform and creates the GitHub Release with per-platform binaries and `checksums.txt`. A cancelled runner can leave a platform out, so check that the Release lists an asset for each of linux-x86_64, linux-aarch64, darwin-x86_64 and darwin-arm64.
+Pushing the tag is the one outward step. `build-<c>.yml` then builds every platform. It creates the GitHub Release with `checksums.txt` once linux-x86_64, linux-aarch64 and darwin-x86_64 have built and the tests on Linux runners have passed. The darwin-arm64 build is best effort: its binary attaches to the Release when a macOS runner finishes it, and the attach adds its line to `checksums.txt`. A Release without a darwin-arm64 asset means that build is still queued or failed, so check the tag's run before cutting anything new.
 
 Tags are signed with the operator's SSH key (`gpg.format=ssh`, `tag.gpgsign=true`), which ssh-agent holds, so `publish-release` runs from an agent's shell once the operator has asked for the release. When signing fails or waits on a passphrase, stop and hand the operator the command. Check the pushed tag with `git tag -v <c>-vX.Y.Z`.
 
