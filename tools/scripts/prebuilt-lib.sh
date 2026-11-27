@@ -194,14 +194,10 @@ prebuilt_install() (
     # an older release.
     [[ -n "$installed" ]] && version_at_least "$installed" "${tag#"${comp}-v"}" && keep_installed
   fi
-  [[ -n "$installed" ]] && echo "Replacing ${comp} ${installed} with ${tag}" >&2
 
   mkdir -p "$out_dir" || exit 1
   stage=$(mktemp -d "${out_dir}/.${comp}.XXXXXX") || exit 1
   trap 'rm -rf "$stage"' EXIT
-
-  echo "Platform: ${platform}" >&2
-  echo "Release:  ${tag}" >&2
 
   if ! assets=$(retry gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name'); then
     echo "error: could not read assets of ${tag} after retries (network/gh/auth?)." >&2
@@ -213,7 +209,7 @@ prebuilt_install() (
   # takes the newest release that carries this platform's binary.
   if [[ "$requested" == latest ]] && ! grep -qx -- "$bin_name" <<<"$assets" \
       && older=$(latest_tag_for_prefix "$repo" "${comp}-v" "$bin_name") && [[ -n "$older" ]]; then
-    echo "${tag} has no ${platform} binary yet; it attaches when its build completes. Using ${older}." >&2
+    echo "${tag} has no ${platform} binary; using ${older}." >&2
     tag="$older"
     [[ -n "$installed" ]] && version_at_least "$installed" "${tag#"${comp}-v"}" && keep_installed
     if ! assets=$(retry gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name'); then
@@ -222,6 +218,9 @@ prebuilt_install() (
       exit 1
     fi
   fi
+  [[ -n "$installed" ]] && echo "Replacing ${comp} ${installed} with ${tag}" >&2
+  echo "Platform: ${platform}" >&2
+  echo "Release:  ${tag}" >&2
   if ! grep -qx -- "$bin_name" <<<"$assets"; then
     echo "No pre-built binary for ${platform} in release ${tag}." >&2
     echo "Available binaries:" >&2

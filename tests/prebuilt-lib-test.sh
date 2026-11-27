@@ -205,7 +205,16 @@ JSON
   got=$(prebuilt_install ways latest "$out" "$REPO" "make ways" 2>"$FAKE/err")
   check "a release without this platform's binary yet installs the newest that has it" "$out/ways:ways 1.10.0" \
     "$got:$("$out/ways" --version 2>/dev/null)"
-  check "and says which release it used" "yes" "$(yn grep -q "ways-v1.13.0 has no $platform binary yet" "$FAKE/err")"
+  check "and says which release it used" "yes" "$(yn grep -qx "ways-v1.13.0 has no $platform binary; using ways-v1.10.0." "$FAKE/err")"
+  check "and prints the release it installs, not the newest" "Release:  ways-v1.10.0" "$(grep '^Release:' "$FAKE/err")"
+  out="$FAKE/out-pending-old"
+  mkdir -p "$out"
+  printf '#!/bin/sh\necho "ways 1.2.0 (old)"\n' > "$out/ways"
+  chmod +x "$out/ways"
+  prebuilt_install ways latest "$out" "$REPO" "make ways" >/dev/null 2>"$FAKE/err"
+  check "a binary replaced on the fallback names the release it installs" "Replacing ways 1.2.0 with ways-v1.10.0" \
+    "$(grep '^Replacing' "$FAKE/err")"
+  out="$FAKE/out-pending"
   : > "$FAKE/calls"
   got=$(prebuilt_install ways latest "$out" "$REPO" "make ways" 2>/dev/null)
   check "a binary at that release's version is kept" "$out/ways" "$got"
