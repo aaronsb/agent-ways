@@ -20,7 +20,7 @@ Three things go wrong when an end-of-session wrap is done by feel:
 
 ## The compaction caveat
 
-Neither a way nor a skill can trigger `/compact` — Claude Code forbids invoking `/` commands programmatically. So `/wrap` *prepares* everything and hands the user a ready-to-run `/compact <focus>` line. Don't claim the session was compacted; you set it up, the user pulls the trigger.
+Neither a way nor a skill can run `/compact`, because Claude Code does not let either invoke a slash command. In handoff mode, the default, `/wrap` prepares everything and hands the user a ready-to-run `/compact <focus>` line, and the user runs it. In relay mode (`mods.attend.continuity.relay: on`), `/wrap` ends with a relay marker line instead, and the attend mod compacts the conversation with the handoff and then starts a turn that resumes the work. In both modes something other than the agent runs the compaction, so don't claim the session was compacted.
 
 ## Relation to the automatic sibling
 
