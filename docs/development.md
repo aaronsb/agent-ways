@@ -123,7 +123,7 @@ Each TUI has a scenario script that reaches its screen states with real keys at 
 
 - **ADR-driven:** architectural changes get an ADR first (`docs/scripts/adr new …`); reference the ADR number in the branch and commits. Status flips to `Accepted` once the implementation lands.
 - **Branch → PR → review → merge.** Even solo. The `code-reviewer` pass has caught real "the code claims X but does Y" bugs that green tests didn't.
-- **Releases are per component, in two steps** (ADR-150). `make cut-release COMPONENT=<name> LEVEL=patch|minor|major` opens a version-bump PR. After it merges, `make publish-release COMPONENT=<name> PUSH=1` tags it, and CI builds the platform artifacts and the GitHub Release. Components are the six suite binaries. The `release` skill walks through it.
+- **Releases are versioned per component and cut in two steps** (ADR-150). `make cut-release COMPONENT="<name> <name>…" LEVEL=patch|minor|major` opens one version-bump PR for every listed component. After it merges, `make publish-release COMPONENT="<name> <name>…" PUSH=1` tags each one, and CI builds the platform artifacts and the GitHub Release for each tag. Components are the six suite binaries. Release Mechanics in the project-health way (`.claude/ways/meta/project-health/`) has the details, and the `release` skill walks through it.
 - **Paths have one location.** `paths::cache_root()` and `events_log()` resolve to the XDG location only; the pre-1.0 fallbacks were removed (ADR-506). Do not add a read of an old name or path for compatibility.
 
 ## See also
