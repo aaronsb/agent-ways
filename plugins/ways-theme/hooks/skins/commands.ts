@@ -40,7 +40,14 @@
 // list item far more often than it hands the span over, and a cut there
 // splits the sentence and its emphasis across blocks. A span with prose
 // beside it, of any form, stays in its line inside the frame and wraps with
-// the text.
+// the text. The line must also end its paragraph: the line after it is
+// blank, missing, or opens a block (a list item, a heading, a quote, a table
+// row or a fence). A paragraph that runs on past the span, `Run` / span /
+// `to finish.` or a bold phrase across the three, keeps the span in it.
+//
+// A line that continues a quote or a table lazily, with no blank line and no
+// other block since the quote's or the row's line, is part of that block, so
+// neither a lone span nor a suggestion line on it is lifted.
 //
 // A suggestion, shell or slash, is one of three forms:
 //
@@ -68,9 +75,9 @@
 // after it, prose such as `! This is not a command` or a TeX log's
 // `! Undefined control sequence.`, a `/` inside a sentence, a span with
 // prose beside it on its line, a path, a span whose content starts
-// otherwise, and anything inside other markdown: a quote, a table row, link
-// text, an HTML comment (a `<!--` inside a code span
-// opens none), an indented code block (four columns past the open list
+// otherwise, and anything inside other markdown: a quote or a table row,
+// its lazy continuation lines included, link text, an HTML comment (a `<!--`
+// inside a code span opens none), an indented code block (four columns past the open list
 // item's content, or past the margin outside a list, after a blank line), and
 // a fence still streaming. The same markdown keeps a `span` block in its
 // place. The copied text is the suggestion with its `! ` or its `/`, as the
@@ -121,6 +128,11 @@ const MARKER_ONLY = /^[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]*)?$/
 const PUNCTUATION_ONLY = /^[\s.,;:!?)\]]*$/
 /** A table row, where a shell continuation stops. */
 const TABLE_ROW = /^[ \t]*\|/
+/** A quote's line or a table's row, whose block a following line may continue lazily. */
+const QUOTE_OR_ROW = /^[ \t]*[>|]/
+/** A line that opens a block, so the paragraph before it ends: a list item, a
+ *  heading, a quote, a table row or a fence. */
+const BLOCK_START = /^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|#{1,6}(?:[ \t]|$)|[>|]|`{3}|~{3})/
 /** A list item's opening: its indentation, its marker and the spaces after it. */
 const LIST_ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)\S/
 /** A quick test before the split: a line or a span that starts a suggestion, or a fence. */
@@ -167,6 +179,10 @@ function loneSpan(line: string): RegExpMatchArray | null {
   return span !== undefined && MARKER_ONLY.test(line.slice(0, span.index)) && PUNCTUATION_ONLY.test(line.slice(span.index + span[0].length)) ? span : null
 }
 
+/** Whether a paragraph ends before `next`, the line after one: it is blank,
+ *  there is none, or it opens a block. */
+const endsParagraph = (next: string | undefined): boolean => next === undefined || next.trim() === '' || BLOCK_START.test(next)
+
 /** `line` with its code spans taken out, so a `<!--` inside one opens no comment. */
 const outsideSpans = (line: string): string => line.replace(SPAN, '')
 
@@ -204,6 +220,10 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
 
   let isComment = false
   let isIndented = false
+  // Whether the line continues a quote or a table: one came before it with no
+  // blank line and no other block between, so CommonMark and GFM read the
+  // line as part of that block.
+  let isContained = false
   // The content column of the list item still open, or null outside a list.
   let item: number | null = null
   for (let i = 0; i < lines.length; i++) {
@@ -214,6 +234,9 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
       continue
     }
     const isAfterBlank = i === 0 || lines[i - 1]!.trim() === ''
+    if (line.trim() === '') isContained = false
+    else if (QUOTE_OR_ROW.test(line)) isContained = true
+    else if (BLOCK_START.test(line)) isContained = false
     const fence = FENCE.exec(line)
     if (fence !== null) {
       isIndented = false
@@ -251,7 +274,7 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
 
     const whole = LINE.exec(line)
     const form = whole === null ? null : suggestionForm(whole[1]!, isCommand)
-    if (whole !== null && form !== null) {
+    if (whole !== null && form !== null && !isContained) {
       const taken = [whole[1]!]
       let end = i
       const continues = () => form === 'shell' && CONTINUES.test(lines[end]!) && end + 1 < lines.length && lines[end + 1]!.trim() !== '' && !TABLE_ROW.test(lines[end + 1]!)
@@ -261,7 +284,7 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
       continue
     }
 
-    const span = loneSpan(line)
+    const span = isContained || !endsParagraph(lines[i + 1]) ? null : loneSpan(line)
     const content = span === null ? null : spanContent(span[2]!)
     const spanForm = content === null ? null : (suggestionForm(content, isCommand) ?? (isWide(content, width, item ?? 0) ? 'span' : null))
     if (spanForm === null) prose.push(line)

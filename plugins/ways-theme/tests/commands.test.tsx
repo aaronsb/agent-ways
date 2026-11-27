@@ -396,6 +396,26 @@ describe('slash commands', () => {
     expect(copyPieces(text, 80, undefined, withGoal)).toEqual([{ kind: 'text', text }])
   })
 
+  test('a span alone on a line that the paragraph runs on past stays in the paragraph', () => {
+    for (const text of ['**Use this\n`/compact x`\nto finish**', 'Run\n`/compact x`\nto finish.', 'Run\n`! git status`\nto see.', `Run\n\`${'x'.repeat(60)}\`\nto see.`]) {
+      expect(copyPieces(text, 76)).toEqual([{ kind: 'text', text }])
+    }
+  })
+
+  test('a span alone on a line that ends its paragraph is lifted: a blank line, the end, or a block after it', () => {
+    for (const after of ['', '\n', '\n\nDone.', '\n- next', '\n```\ncode\n```', '\n# Next', '\n> quoted']) {
+      expect(slashes(`Run:\n\`/compact x\`${after}`)).toEqual(['/compact x'])
+    }
+  })
+
+  test('a lazy continuation of a quote or a table keeps a lone span, or a command line, in it', () => {
+    for (const text of ['> Run this:\n`/compact x`', '| a | b |\n|---|---|\n`/compact x`', '| a | b |\n|---|---|\nfoo\n`! git status`', '> Run this:\n! git status', '> Run this:\n/compact']) {
+      expect(copyPieces(text, 76).every(piece => piece.kind === 'text')).toBe(true)
+    }
+    expect(slashes('> Quoted.\n\n`/compact x`')).toEqual(['/compact x'])
+    expect(slashes('| a |\n|---|\n- `/compact x`')).toEqual(['/compact x'])
+  })
+
   test('a bare name on a line of its own or as a list item, and a fence of one line with no language', () => {
     expect(copyPieces('Then:\n/compact  \nDone.')).toEqual([
       { kind: 'text', text: 'Then:' },
