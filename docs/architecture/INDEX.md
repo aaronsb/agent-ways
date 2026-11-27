@@ -46,7 +46,7 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-166](./ways/ADR-166-single-source-of-truth-for-model-context-window-resolution.md) | Single source of truth for model context-window resolution | accepted |
 | [ADR-174](./ways/ADR-174-progressive-core-decoration-guidance-and-the-core-re-disclosure-gap.md) | Progressive core — decoration guidance and the core re-disclosure gap | accepted |
 | [ADR-183](./ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md) | Single-language localization tuning: the English anchor as a peer | accepted |
-| [ADR-188](./ways/ADR-188-one-tool-call-lane-keyed-by-tool-type-and-a-bash-surface-that-is-parsed-described-and-judged.md) | One tool-call lane keyed by tool type, and a Bash surface that is parsed, described and judged | proposed |
+| [ADR-188](./ways/ADR-188-one-tool-call-lane-keyed-by-tool-type-and-a-bash-surface-that-is-parsed-described-and-judged.md) | One tool-call lane keyed by tool type, and a Bash surface that is parsed, described and judged | accepted |
 | [ADR-189](./ways/ADR-189-session-introspection-implementation-plan.md) | Session introspection implementation plan | accepted |
 | [ADR-190](./ways/ADR-190-the-lexical-gate-as-a-conditional-threshold.md) | The lexical gate as a conditional threshold | accepted |
 | [ADR-191](./ways/ADR-191-the-tool-use-channel-is-a-signal-problem-lookbehind-chunk-spread-and-winner-confirmation.md) | The tool-use channel is a signal problem: lookbehind, chunk-spread, and winner confirmation | accepted |
