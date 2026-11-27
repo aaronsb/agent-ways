@@ -9,7 +9,13 @@ import type { AttendStatus, KeepaliveRow } from '../types/index.d.ts'
 
 import {
   DEFAULT_CONFIG,
+  RELAY_MARKER,
   compactedArgv,
+  nativeThresholdFrom,
+  relayAtTokens,
+  relayMarkerOf,
+  relayStopOf,
+  rowAfterResume,
   keepaliveSegment,
   isUnknownFlag,
   policyArgv,
@@ -145,6 +151,8 @@ type World = {
   oldAttend?: boolean
   /** A hook skips `$.session.compact` with this reason. */
   compactFails?: string
+  /** `autoCompactThreshold` in the usage breakdown; absent leaves it out. */
+  nativeAt?: number
   /** The skill listing the usage breakdown carries; absent leaves it out. */
   skills?: { name: string; pluginName?: string }[]
   /** `autoCompactEnabled` in the merged settings; `throws` makes the read fail. */
@@ -349,7 +357,8 @@ function host(on: On, world: World) {
   on('session.usage', () => {
     if (world.autocompact === undefined) throw new Error('usage unavailable')
     const skills = world.skills === undefined ? {} : { skills: { totalSkills: world.skills.length, includedSkills: world.skills.length, tokens: 0, skillFrontmatter: world.skills.map(k => ({ source: 'userSettings', tokens: 1, ...k })) } }
-    const breakdown = world.autocompact === null ? undefined : { isAutoCompactEnabled: world.autocompact, ...skills }
+    const native = world.nativeAt === undefined ? {} : { autoCompactThreshold: world.nativeAt }
+    const breakdown = world.autocompact === null ? undefined : { isAutoCompactEnabled: world.autocompact, ...native, ...skills }
     const fill = world.contextTokens === undefined ? {} : { tokens: world.contextTokens }
     return { value: { startedAt: T0, context: { breakdown, ...fill }, rateLimits: [] } } as never
   })
@@ -375,7 +384,7 @@ function host(on: On, world: World) {
     const cmd = argv.slice(1).join(' ')
     // The keepalive policy runs only where ways says enabled: true.
     if (argv[0] === 'ways' && world.waysFails) return { ...ok(), exitCode: 1, stderr: 'ways: settings unreadable' }
-    if (argv[0] === 'ways') return ok(configJson({ 'keepalive.enabled': true, ...world.config }))
+    if (argv[0] === 'ways') return ok(configJson({ 'continuity.keepalive': true, ...world.config }))
     if (cmd.startsWith('listen') && world.noListen) return { ...ok(), exitCode: 2, stderr: "error: unrecognized subcommand 'listen'" }
     if (cmd.startsWith('listen beat --mod') && world.noModFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--mod' found" }
     if (cmd.includes('--host') && world.noHostFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--host' found" }
@@ -386,7 +395,7 @@ function host(on: On, world: World) {
       return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--skills' found" }
     }
     if (cmd.startsWith('keepwarm check --policy')) {
-      const q = world.policy ?? [decision({ policy: false, state: 'off', reason: 'mods.attend.keepalive.enabled is false' })]
+      const q = world.policy ?? [decision({ policy: false, state: 'off', reason: 'mods.attend.continuity.keepalive is false' })]
       return ok(q.length > 1 ? q.shift()! : q[0]!)
     }
     if (cmd.startsWith('message send') && world.sendRefused) return { ...ok(), exitCode: 1, stderr: world.sendRefused }
@@ -545,6 +554,8 @@ describe('configuration', () => {
       headlessPoll: false,
       keepalive: false,
       marginMinutes: 10,
+      relay: false,
+      relayAtPct: 75,
     })
   })
 
@@ -563,9 +574,9 @@ describe('configuration', () => {
   })
 
   test('the keepalive policy fails closed: only an explicit true runs it', () => {
-    expect(parseConfig(configJson({ 'keepalive.enabled': true })).keepalive).toBe(true)
+    expect(parseConfig(configJson({ 'continuity.keepalive': true })).keepalive).toBe(true)
     expect(parseConfig(configJson({ listening: 'active' })).keepalive).toBe(false)
-    expect(parseConfig(configJson({ 'keepalive.enabled': 'yes' })).keepalive).toBe(false)
+    expect(parseConfig(configJson({ 'continuity.keepalive': 'yes' })).keepalive).toBe(false)
     expect(parseConfig('not json').keepalive).toBe(false)
   })
 
@@ -1199,7 +1210,7 @@ describe('a session whose cache has lapsed', () => {
   test('keepwarm still wakes on its own line', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const line = 'keepwarm: 50m idle, the prompt cache lapses in 10m on 200k tokens. Reply with one word and no tools.'
-    const h = host(on, { config: { listening: 'active', keepwarm: 'on', 'keepalive.enabled': false }, drains: [DRAIN_EMPTY, ...cold], keepwarm: line })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'on', 'continuity.keepalive': false }, drains: [DRAIN_EMPTY, ...cold], keepwarm: line })
     await $.session.start(INTERACTIVE)
     await typed($)
     await clock.advance(10_000)
@@ -1887,7 +1898,7 @@ describe('session changes through engine events alone', () => {
 describe('keepwarm', () => {
   test('on, with the keepalive policy off: an active session runs the plain check and submits the wake line', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active', 'keepalive.enabled': false }, keepwarm: 'keepwarm: one word, no tools\n' })
+    const h = host(on, { config: { listening: 'active', 'continuity.keepalive': false }, keepwarm: 'keepwarm: one word, no tools\n' })
     await $.session.start(INTERACTIVE)
     await clock.advance(2_000)
     expect(h.ran('keepwarm check')).toBe(true)
@@ -2659,6 +2670,225 @@ describe('keepalive policy', () => {
   })
 })
 
+// Relay mode (ADR-417): the fill trigger, the marker, the compaction with
+// the handoff, the resume, the stops, and /goal.
+describe('relay mode', () => {
+  const S = T0 / 1000
+  const RELAY = { 'continuity.relay': 'on' }
+  const ID = '20261126T214012Z-s1abcdef'
+  const MARKER = `relay: continue tasks=2 goal=none wrap=${ID} head=e6bbfbdd`
+  const WRAP = `wrap: context at 80% (160k of 200k), past the relay threshold of 75%.\nThe operator is away. This wrap is in relay mode with wrap id ${ID}.`
+  const RESUME = 'relay: the conversation was compacted after a wrap; this is relay 1 of 5 since the operator\'s last prompt. Read /work/agent-ways/.claude/handoff.wrap.md.'
+  const INSTRUCTIONS = 'Summarize this session as the handoff below; keep its TASKS and DO NEXT whole.\n\n2026-11-26 e6bbfbdd wrap=' + ID
+  const route = (o: Record<string, unknown> = {}) => ({
+    dest: 'transcript', file: '/state/wrap/s1.md', to: 'aaron', after: 'relay', after_keepalives: 0,
+    handoff: 'handoff: continuation prompt from Chaucer-alpha (agent-ways), wrapped at 07:30 while its operator was away.', ...o,
+  })
+  const relayed = (o: Record<string, unknown>) => decision({ relay: true, max_relays: 5, ...o })
+  const wrap = relayed({ action: 'wrap', text: WRAP, state: 'wrapped', wrap: route(), wrap_id: ID })
+  const compact = relayed({ action: 'compact', text: INSTRUCTIONS, resume: RESUME, state: 'compacted', wrap: route() })
+  const waiting = relayed({ state: 'wrapped', reason: "waiting for the wrap's answer" })
+  const policyChecks = (h: ReturnType<typeof host>) => h.argvs.filter(a => a.slice(1, 4).join(' ') === 'keepwarm check --policy')
+
+  async function turn($: Engine, id: string, text: string, answer: string) {
+    await $.turn.start({ text, turnId: id } as never)
+    await $.turn.complete({ turnId: id, reason: 'answer', answer, durationMs: 1, isAborted: false } as never)
+  }
+
+  async function rowSegment($: Engine): Promise<string | undefined> {
+    const ui = await $.ui.mount(BAND as never)
+    const found = (await ui.find({ text: /⟳/ } as never)) as unknown as { text?: string } | undefined
+    await ui.unmount()
+    return found?.text
+  }
+
+  /** Session start, then the first check (which answers `first`). */
+  async function started($: Engine, clock: ReturnType<typeof mock.clock>) {
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+  }
+
+  test('a turn whose end leaves the fill past the threshold asks attend with the fill, and its wrap goes in with autocompact on', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: true, nativeAt: 180_000, policy: [decision({ relay: true }), wrap] })
+    await started($, clock)
+    await turn($, 't1', 'do the work', 'done')
+    await measured($, 140_000)
+    await clock.advance(2_000)
+    expect(policyChecks(h).length).toBe(1)
+    await turn($, 't2', 'more work', 'done')
+    await measured($, 160_000)
+    await clock.advance(2_000)
+    expect(policyChecks(h)[1]).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'on', '--skills=', '--fill', '160000', '--window', '200000', '--native-at', '180000'])
+    expect(h.submitted).toEqual([WRAP])
+  })
+
+  test('the wrap\'s marker goes to attend; attend\'s compact compacts with the handoff and then the resume goes in', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [wrap, compact, relayed({ state: 'resumed', relay_count: 1 })] })
+    await started($, clock)
+    expect(h.submitted).toEqual([WRAP])
+    await turn($, 'tw', framedPluginPrompt('attend', WRAP), `Continuation prompt written.\n\n${MARKER}`)
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'transcript', '--detail', '', '--marker', MARKER])
+    expect(h.compacts).toEqual([])
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'compacted'])
+    expect(h.submitted).toEqual([WRAP, RESUME])
+    expect(h.origins[1]).toEqual({ kind: 'plugin', name: 'attend' })
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'resumed'])
+    expect(await rowSegment($)).toMatch(/⟳ relay 1\/5/)
+    expect(h.ran('message send')).toBe(false)
+  })
+
+  test('a compaction a hook skips gets no resume, and attend hears why', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: false, compactFails: 'a hook said no', policy: [wrap, compact, relayed({ state: 'stopped', relay_stop: 'compaction failed' })] })
+    await started($, clock)
+    await turn($, 'tw', framedPluginPrompt('attend', WRAP), MARKER)
+    await clock.advance(2_000)
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'compacted', '--failed', 'skipped: a hook said no'])
+    expect(h.submitted).toEqual([WRAP])
+    expect(h.ran('keepwarm resumed')).toBe(false)
+    expect(h.logs.some(l => l.includes("the relay's compaction failed"))).toBe(true)
+  })
+
+  test('a turn that starts between the wrap\'s answer and the compaction defers it to that turn\'s end', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [wrap, compact, relayed({ state: 'resumed', relay_count: 1 })] })
+    await started($, clock)
+    await turn($, 'tw', framedPluginPrompt('attend', WRAP), MARKER)
+    await $.turn.start({ text: 'a peer message', turnId: 'tp' } as never)
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([])
+    await $.turn.complete({ turnId: 'tp', reason: 'answer', answer: 'noted', durationMs: 1, isAborted: false } as never)
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(h.submitted).toEqual([WRAP, RESUME])
+  })
+
+  test('an operator prompt while attend judges the wrap compacts nothing', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    let release = () => {}
+    const world: World = { config: RELAY, autocompact: false, policy: [wrap, compact] }
+    const h = host(on, world)
+    await started($, clock)
+    await turn($, 'tw', framedPluginPrompt('attend', WRAP), MARKER)
+    world.hold = new Promise<void>(r => (release = r))
+    await clock.advance(1_500)
+    await typed($, 'back now')
+    release()
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([])
+    expect(h.submitted).toEqual([WRAP])
+    expect(h.ran('keepwarm reset')).toBe(true)
+  })
+
+  test('a stop compacts with the handoff, submits no resume, and sends the reply to the operator with the handoff line', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const stopMarker = `relay: stop decision tasks=2 goal=none wrap=${ID} head=e6bbfbdd`
+    const handoff = 'handoff: continuation prompt from Chaucer-alpha (agent-ways), wrapped at 07:30 while its operator was away. The relay stopped: the wrap reported stop decision.'
+    const stop = relayed({ action: 'compact', text: INSTRUCTIONS, resume: null, state: 'stopped', relay_stop: 'decision', send_handoff: true, wrap: route({ handoff }) })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [wrap, stop, relayed({ state: 'stopped', relay_stop: 'decision' })] })
+    await started($, clock)
+    const reply = `DECISIONS: 1. which database.\n${stopMarker}`
+    await turn($, 'tw', framedPluginPrompt('attend', WRAP), reply)
+    await clock.advance(2_000)
+    const sends = h.argvs.filter(a => a[1] === 'message' && a[2] === 'send')
+    expect(sends).toEqual([['attend', 'message', 'send', '--to', 'aaron', '--', `${handoff}\n${reply}`]])
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(h.submitted).toEqual([WRAP])
+    expect(await rowSegment($)).toMatch(/⟳ relay stopped: decision/)
+  })
+
+  test('a /wrap that ends with the marker is reported as a wrap of its own', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [decision({ relay: true }), compact] })
+    await started($, clock)
+    await typed($, '/wrap')
+    await turn($, 't1', '/wrap', `Handoff written.\n\`${MARKER}\``)
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'transcript', '--detail', '', '--marker', MARKER])
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+  })
+
+  test('with relay off a marker is no wrap and nothing is reported', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, policy: [decision()] })
+    await started($, clock)
+    await turn($, 't1', '/wrap', MARKER)
+    expect(h.ran('keepwarm wrapped')).toBe(false)
+  })
+
+  test('a resumed turn that ends with a stop line stops the relay and its reply goes to the operator', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const handoff = 'handoff: from Chaucer-alpha. The relay stopped: the agent stopped the relay: doubt, the tests contradict the plan.'
+    const stopped = relayed({ state: 'stopped', relay_stop: 'doubt', send_handoff: true, wrap: route({ handoff }) })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [wrap, compact, stopped] })
+    await started($, clock)
+    await turn($, 'tw', framedPluginPrompt('attend', WRAP), MARKER)
+    await clock.advance(2_000)
+    const reply = 'Read the handoff.\nrelay: stop doubt: the tests contradict the plan'
+    await turn($, 'tr', framedPluginPrompt('attend', RESUME), reply)
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'stopped', 'doubt', '--detail', 'the tests contradict the plan'])
+    await clock.advance(2_000)
+    const sends = h.argvs.filter(a => a[1] === 'message' && a[2] === 'send')
+    expect(sends).toEqual([['attend', 'message', 'send', '--to', 'aaron', '--', `${handoff}\n${reply}`]])
+  })
+
+  test('a /goal typed is reported active, and /goal clear none', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [decision({ relay: true })] })
+    await started($, clock)
+    await $.command.run({ command: 'goal', args: 'all tests pass on main' } as never)
+    await $.command.run({ command: 'goal', args: '' } as never)
+    await $.command.run({ command: 'goal', args: 'clear' } as never)
+    await clock.advance(10)
+    expect(h.argvs.filter(a => a[2] === 'goal')).toEqual([['attend', 'keepwarm', 'goal', 'active'], ['attend', 'keepwarm', 'goal', 'none']])
+  })
+
+  test('with relay on, a dormant session with autocompact on still runs the policy and its prompts reset attend', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: true, policy: [decision({ relay: true, next_at: S + 50 * 60 })] })
+    await started($, clock)
+    expect(policyChecks(h)[0]?.slice(0, 7)).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'on'])
+    await typed($)
+    expect(h.ran('keepwarm reset')).toBe(true)
+  })
+
+  test('the pure pieces: the marker, the stop line, the threshold, the native threshold, the argv and the row', () => {
+    expect(relayMarkerOf(`text\n\n  ${MARKER}  \n`)).toBe(MARKER)
+    expect(relayMarkerOf(`\`${MARKER}\``)).toBe(MARKER)
+    expect(relayMarkerOf(`${MARKER}\nand more`)).toBeUndefined()
+    expect(relayMarkerOf(MARKER.replace('head=e6bbfbdd', 'head=E6BBFBDD'))).toBeUndefined()
+    expect(RELAY_MARKER.test(`relay: stop later tasks=1 goal=none wrap=${ID} head=e6bbfbdd`)).toBe(false)
+    expect(relayStopOf('x\nrelay: stop decision which database')).toEqual({ reason: 'decision', detail: 'which database' })
+    expect(relayStopOf(`relay: stop empty tasks=0 goal=none wrap=${ID} head=e6bbfbdd`)).toBeUndefined()
+    expect(relayStopOf('relay: stop maybe')).toBeUndefined()
+    const c = parseConfig(configJson({ 'continuity.relay': 'on', 'continuity.relay_at_pct': 60 }))
+    expect([c.relay, c.relayAtPct]).toEqual([true, 60])
+    expect(parseConfig(configJson({ 'continuity.relay': 'yes' })).relay).toBe(false)
+    expect(relayAtTokens(DEFAULT_CONFIG, 1_000_000, 'off')).toBe(750_000)
+    expect(relayAtTokens(DEFAULT_CONFIG, 1_000_000, 'on', 700_000)).toBe(650_000)
+    expect(relayAtTokens(DEFAULT_CONFIG, 1_000_000, 'off', 700_000)).toBe(750_000)
+    expect(nativeThresholdFrom({ context: { breakdown: { isAutoCompactEnabled: true, autoCompactThreshold: 167_000 } } })).toBe(167_000)
+    expect(nativeThresholdFrom({ context: { breakdown: { isAutoCompactEnabled: false } } })).toBeUndefined()
+    expect(policyArgv('off', { names: ['wrap'], isPartial: false }, false, { tokens: 1, window: 2 })).toEqual([
+      'attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off', '--skills=wrap', '--fill', '1', '--window', '2',
+    ])
+    expect(policyArgv('off', null, true, { tokens: 1, window: 2 })).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'off'])
+    const d = parseKeepaliveDecision(relayed({ state: 'resumed', relay_count: 2 }))!
+    expect([d.state, d.relayCount]).toEqual(['resumed', 2])
+    const k = keepaliveRowOf(d, null)!
+    expect(keepaliveSegment(k, T0)).toBe('⟳ relay 2/5')
+    expect(keepaliveSegment(keepaliveRowOf(parseKeepaliveDecision(relayed({ state: 'stopped', relay_stop: '5 of 5' }))!, null)!, T0)).toBe('⟳ relay stopped: 5 of 5')
+    expect(keepaliveSegment(rowAfterResume(k, 3, 5)!, T0)).toBe('⟳ relay 3/5')
+    expect(rowAfterPrompt(k)?.relayCount).toBe(0)
+    expect(maySubmit({ epochThen: 1, epochNow: 1, running: 0, isPolicy: true, gate: 'on', isRelay: true })).toBe(true)
+    expect(maySubmit({ epochThen: 1, epochNow: 1, running: 0, isPolicy: true, gate: 'on' })).toBe(false)
+  })
+})
+
 // The policy's pure pieces in lib.ts, apart from the mod's hooks.
 describe('keepalive policy: the pure pieces', () => {
   const route = { dest: 'file', file: '/s/wrap/s1.md', to: 'aaron', after: 'lapse', afterKeepalives: 0, handoff: 'handoff: from A (p), wrapped at 07:30 while its operator was away.' } as const
@@ -2747,7 +2977,7 @@ describe('keepalive policy: the pure pieces', () => {
   })
 
   test('the row: the segment alone while dormant and shown, beside the peers while active', () => {
-    const k: KeepaliveRow = { state: 'running', count: 2, max: 8, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true }
+    const k: KeepaliveRow = { state: 'running', count: 2, max: 8, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: 41 * 60, wrapsAt: '21:40', wrappedAt: null, idle: null, isRefused: false, isShown: true, relayCount: 0, maxRelays: 0, relayStop: null }
     const base: AttendStatus = { mode: 'dormant', listening: null, peers: 3, unread: 1, channels: ['#room'], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null, hostStopped: false, hostFor: null }
     expect(rowText({ ...base, keepalive: k }, 0)).toBe('⟳ 2/8 · next 41m · wrap ~21:40')
     expect(rowText({ ...base, keepalive: rowAfterPrompt(k) }, 0)).toBeUndefined()
@@ -2799,7 +3029,7 @@ describe('keepalive policy: the pure pieces', () => {
   test('the row after the wrap counts its keepalives and names the compaction', () => {
     const k: KeepaliveRow = {
       state: 'wrapped', count: 8, max: 8, afterCount: 1, afterMax: 3, compactsAt: '10:50', compactedAt: null,
-      nextAt: 41 * 60, wrapsAt: null, wrappedAt: '07:30', idle: null, isRefused: false, isShown: true,
+      nextAt: 41 * 60, wrapsAt: null, wrappedAt: '07:30', idle: null, isRefused: false, isShown: true, relayCount: 0, maxRelays: 0, relayStop: null,
     }
     expect(keepaliveSegment(k, 0)).toBe('⟳ wrapped 07:30 · 1/3 · next 41m · compact ~10:50')
     expect(keepaliveSegment({ ...k, afterMax: 0, nextAt: null }, 0)).toBe('⟳ wrapped 07:30')
@@ -2812,7 +3042,7 @@ describe('keepalive policy: the pure pieces', () => {
 
   test('the row says why the policy is idle: under the 50k floor, the 5m tier, no request yet', () => {
     const base: AttendStatus = { mode: 'dormant', listening: null, peers: 0, unread: 0, channels: [], deliveries: 0, afterCompaction: false, turnsSinceFull: 0, heldNote: null, cacheLapsed: false, keepalive: null, move: null, hostStopped: false, hostFor: null }
-    const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true })
+    const idle = (o: Record<string, unknown>) => keepaliveRowOf(parseKeepaliveDecision(decision({ count: 0, max: 1, ...o }))!, { state: 'running', count: 0, max: 1, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true, relayCount: 0, maxRelays: 0, relayStop: null })
     expect(rowText({ ...base, keepalive: idle({ idle: 'under 50k' }) }, 0)).toBe('⟳ 0/1 · idle: under 50k')
     expect(rowText({ ...base, keepalive: idle({ idle: '5m tier' }) }, 0)).toBe('⟳ 0/1 · idle: 5m tier')
     expect(rowText({ ...base, keepalive: idle({ idle: 'no request yet' }) }, 0)).toBe('⟳ 0/1 · idle: no request yet')
