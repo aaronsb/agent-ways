@@ -192,6 +192,12 @@ pub struct Policy {
     /// - ADR-417 item 3: the PreCompact hook asks attend for the last wrap id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_wrap_id: Option<String>,
+    /// The id of the last wrap whose marker the relay judged, which also
+    /// outlives the operator's prompts: a `/wrap`'s marker that repeats it
+    /// wrote no new handoff. Apart from [`Policy::last_wrap_id`], which a
+    /// wrap's own record of its id sets before its marker is judged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judged_wrap_id: Option<String>,
     /// The relay marker the wrap's reply ended with, as the mod reported it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub marker: Option<String>,
@@ -246,7 +252,14 @@ impl Policy {
 /// the goal stay: the PreCompact hook still checks the handoff against the
 /// id, and a prompt does not end a goal.
 pub fn reset(p: &mut Policy, now: u64) {
-    *p = Policy { operator_at: Some(now), gate: p.gate.take(), last_wrap_id: p.last_wrap_id.take(), goal: p.goal.take(), ..Policy::default() };
+    *p = Policy {
+        operator_at: Some(now),
+        gate: p.gate.take(),
+        last_wrap_id: p.last_wrap_id.take(),
+        judged_wrap_id: p.judged_wrap_id.take(),
+        goal: p.goal.take(),
+        ..Policy::default()
+    };
 }
 
 /// A relay's resume went in (`attend keepwarm resumed`): the relay count
@@ -265,6 +278,7 @@ pub fn resumed(p: &mut Policy, now: u64) {
         skill_seen: p.skill_seen,
         old_host: p.old_host,
         last_wrap_id: p.last_wrap_id.take(),
+        judged_wrap_id: p.judged_wrap_id.take(),
         goal: p.goal.take(),
         relays: p.relays + 1,
         resumed_at: Some(now),
@@ -415,9 +429,11 @@ pub fn stop_line(line: &str) -> Option<&'static str> {
     STOP_REASONS.iter().find(|r| **r == word).copied()
 }
 
-/// `attend keepwarm wrap-id --record <id>`: a handoff-mode wrap names its
-/// id, which becomes the session's last. False, recording nothing, for an
-/// id the marker could not carry.
+/// `attend keepwarm wrap-id --record <id>`: the wrap skill names its wrap's
+/// id in either mode, a handoff-mode wrap's included, and it becomes the
+/// session's last. A relay marker is still judged against the wrap judged
+/// before it ([`Policy::judged_wrap_id`]), which this leaves alone. False,
+/// recording nothing, for an id the marker could not carry.
 ///
 /// References:
 /// - ADR-417 item 3: the PreCompact hook asks attend for the last wrap's id.
@@ -1466,7 +1482,8 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
     if p.trigger.as_deref() == Some("wrap") && !cfg.relay {
         let p = &mut state.policy;
         if let Some(m) = p.marker.as_deref().and_then(Marker::parse) {
-            p.last_wrap_id = Some(m.wrap);
+            p.last_wrap_id = Some(m.wrap.clone());
+            p.judged_wrap_id = Some(m.wrap);
         }
         p.relay = false;
         p.marker = None;
@@ -1482,9 +1499,10 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
     let Some(m) = Marker::parse(&line) else {
         return Some(stop(state, cfg, site, "no marker", "the wrap's relay marker does not parse".into(), false, now));
     };
-    // A `/wrap`'s marker that repeats the last wrap's id wrote no new
-    // handoff: a resumed turn that ends with the previous wrap's marker.
-    if p.wrap_id.is_none() && p.last_wrap_id.as_deref() == Some(m.wrap.as_str()) {
+    // A `/wrap`'s marker that repeats the id of the wrap judged before it
+    // wrote no new handoff: a resumed turn that ends with the previous
+    // wrap's marker.
+    if p.wrap_id.is_none() && p.judged_wrap_id.as_deref() == Some(m.wrap.as_str()) {
         let why = format!("the marker repeats wrap {}, which an earlier wrap already used", m.wrap);
         return Some(stop(state, cfg, site, "stale handoff", why, false, now));
     }
@@ -1496,6 +1514,7 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
         let p = &mut state.policy;
         p.wrap_id = Some(m.wrap.clone());
         p.last_wrap_id = Some(m.wrap.clone());
+        p.judged_wrap_id = Some(m.wrap.clone());
     }
     let Some(handoff) = site.handoff.clone().filter(|h| h.wrap_id.as_deref() == Some(m.wrap.as_str())) else {
         let why = format!("the handoff's first line does not carry wrap={}", m.wrap);

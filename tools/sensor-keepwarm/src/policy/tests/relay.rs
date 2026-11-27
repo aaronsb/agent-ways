@@ -316,6 +316,25 @@ fn a_handoff_mode_wrap_records_its_id_over_a_relay_wrap_s() {
     assert_eq!(s.state.policy.last_wrap_id.as_deref(), Some(b));
 }
 
+/// The skill records its id in either mode. In relay mode the record comes
+/// before the marker, which is still this wrap's own, not stale; a marker
+/// that repeats the id of the wrap judged before it still is.
+#[test]
+fn a_recorded_id_does_not_make_its_own_relay_marker_stale() {
+    let mut s = Session::new(MONDAY, 300_000);
+    let a = "20261012T0010Z-sid1abcd";
+    assert!(record_wrap_id(&mut s.state.policy, a));
+    s.answer(Some(&marker(None, "none", a)), MONDAY + 10 * MIN);
+    let d = s.check_at(&relay(), Gate::Off, &site_with(Some(a)), MONDAY + 10 * MIN);
+    assert_eq!(d.action, Action::Compact, "{d:?}");
+    compacted(&mut s.state.policy, None, MONDAY + 11 * MIN);
+    resumed(&mut s.state.policy, MONDAY + 11 * MIN);
+    s.turn(MONDAY + 12 * MIN);
+    s.answer(Some(&marker(None, "none", a)), MONDAY + 13 * MIN);
+    let d = s.check_at(&relay(), Gate::Off, &site_with(Some(a)), MONDAY + 13 * MIN);
+    assert_eq!((d.action, d.relay_stop.as_deref()), (Action::None, Some("stale handoff")), "{d:?}");
+}
+
 /// The compaction is recorded when the mod reports it ran, not when it is
 /// asked for: a check that asked for one and heard no report asks again,
 /// as when a turn started before the mod could compact.

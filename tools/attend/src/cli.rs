@@ -767,8 +767,8 @@ pub enum KeepwarmCmd {
     /// tell whether .claude/handoff.wrap.md is fresh
     WrapId {
         /// Record ID as this session's last wrap instead: the wrap skill
-        /// names a handoff-mode wrap's id this way (a relay wrap's id comes
-        /// from its marker)
+        /// names each wrap's id this way, so a handoff-mode wrap, which
+        /// ends with no relay marker, is recorded too
         #[arg(long, value_name = "ID")]
         record: Option<String>,
     },
