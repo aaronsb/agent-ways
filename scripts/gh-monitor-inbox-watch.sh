@@ -12,9 +12,8 @@
 #
 # This is the session-scoped, opt-in home for notification awareness — the
 # thing that this project established is a Monitor concern, not an ambient
-# attend sensor (ADR-137). The reason->tier filter is lifted from the example
-# sensor tools/attend/examples/gh-notifications.sh; the magnitude floats are
-# dropped here because Monitor lines are plain text, not attend's mag|text.
+# attend sensor. The reason->tier filter maps each notification
+# reason to a tier; Monitor lines are plain text, so they carry no magnitude.
 #
 # Env: GH_MONITOR_INTERVAL  poll seconds (default 60 — matches GitHub's
 #                           X-Poll-Interval header on the notifications API)
@@ -30,6 +29,10 @@
 # `gh api --include` exposes the ETag header. At a 60s interval the `since=`
 # approach here stays comfortably within rate limits, so this is pure
 # efficiency, not correctness.
+#
+# References:
+# - ADR-137: GitHub notification watching is a Monitor concern, not an attend
+#   sensor.
 
 set -uo pipefail
 

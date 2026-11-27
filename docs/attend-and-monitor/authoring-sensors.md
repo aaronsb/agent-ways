@@ -350,7 +350,7 @@ The `sensors:` section of `$XDG_CONFIG_HOME/attend/config.yaml` and `.claude/att
 | `-<name>:` | `enabled: false` in `<name>.yaml` |
 | `<name>: { script: <path> }` or `+<name>:` | `<name>.yaml` with `kind: command`, `argv: [bash, <path>]` and `output: lines`, plus the old cadence fields |
 
-The scripts under `tools/attend/examples/` (`xdg-downloads.sh`, `gh-notifications.sh`) keep the `magnitude|description` contract, so each becomes a `lines` command sensor that way.
+The script under `tools/attend/examples/` (`xdg-downloads.sh`) keeps the `magnitude|description` contract, so it becomes a `lines` command sensor that way.
 
 ## Design rules of thumb
 
