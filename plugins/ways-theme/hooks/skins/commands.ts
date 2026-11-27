@@ -44,10 +44,14 @@
 //   useful` or `/dev and /proc` is prose. A lead-in sentence on the line
 //   before stays prose.
 // - An inline code span whose content, less the one space CommonMark strips
-//   from each side, is a suggestion, arguments and all. The line is cut
-//   there: the prose before the span, the suggestion, the prose after it. A
-//   list marker alone before the span, and punctuation alone after it, go
-//   with the span. A `span` block cuts its line the same way.
+//   from each side, is a suggestion, arguments and all. A shell one cuts the
+//   line there: the prose before the span, the suggestion, the prose after
+//   it. A slash one counts only alone on its line, as the closing
+//   `/compact ...` of a wrap is: a reply names a command in a sentence, a
+//   bold phrase or a list item far more often than it hands one over, and a
+//   cut there splits the sentence and its emphasis across blocks. A list
+//   marker alone before the span, and punctuation alone after it, go with the
+//   span. A `span` block cuts its line the same way.
 // - A closed fence whose code is one suggestion. For a shell one the fence
 //   has no language or a shell's (markdown.ts, SHELLS), the first line is a
 //   suggestion, and every line before the last ends in a continuation, `\`,
@@ -61,8 +65,9 @@
 // Nothing else is a suggestion: a `!` inside a sentence ("that's it!"),
 // `!=`, `!!`, `!important`, an image (`![alt](src)`), `!` with no space
 // after it, prose such as `! This is not a command` or a TeX log's
-// `! Undefined control sequence.`, a `/` inside a sentence, a path, a span
-// whose content starts otherwise, and anything inside other markdown: a
+// `! Undefined control sequence.`, a `/` inside a sentence, a slash
+// command's span with prose beside it on its line, a path, a span whose
+// content starts otherwise, and anything inside other markdown: a
 // quote, a table row, link text, an HTML comment (a `<!--` inside a code span
 // opens none), an indented code block (four columns past the open list
 // item's content, or past the margin outside a list, after a blank line), and
@@ -254,7 +259,9 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
     let at = 0
     for (const span of QUOTE_OR_ROW.test(line) ? [] : line.matchAll(SPAN)) {
       const content = spanContent(span[2]!)
-      const form = suggestionForm(content, isCommand) ?? (isWide(content, width, item ?? 0) ? 'span' : null)
+      const isAlone = MARKER_ONLY.test(line.slice(0, span.index)) && PUNCTUATION_ONLY.test(line.slice(span.index + span[0].length))
+      const suggested = suggestionForm(content, isCommand)
+      const form = (suggested === 'slash' && !isAlone ? null : suggested) ?? (isWide(content, width, item ?? 0) ? 'span' : null)
       if (form === null || isLinkText(span.index)) continue
       const before = line.slice(at, span.index)
       const isFirst = at === 0

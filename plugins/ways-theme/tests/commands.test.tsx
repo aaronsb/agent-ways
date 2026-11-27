@@ -6,7 +6,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On, RenderElement } from 'claude-code'
 
-import { copyPieces, fenceCopy, holdsCopy } from '../hooks/skins/commands.ts'
+import { copyPieces, fenceCopy, holdsCopy, notRoot } from '../hooks/skins/commands.ts'
 import { LABELS } from '../hooks/skins/copy-rows.tsx'
 import type { Label } from '../hooks/skins/copy-rows.tsx'
 import type { Copy } from '../hooks/skins/commands.ts'
@@ -358,12 +358,40 @@ const SLASH_REPLY = `The handoff is written. When you are ready:\n\n\`${SLASH}\`
 const slashes = (text: string) => copyPieces(text).flatMap(piece => (piece.kind === 'copy' && piece.form === 'slash' ? [piece.text] : []))
 
 describe('slash commands', () => {
-  test('an inline span: the prose before it, the command, the prose after it', () => {
-    expect(copyPieces('Run `/compact keep the handoff` now.')).toEqual([
-      { kind: 'text', text: 'Run' },
+  test('a span alone on its line is the command; a list marker before it and punctuation after it go with it', () => {
+    expect(copyPieces('Run it:\n\n`/compact keep the handoff`.')).toEqual([
+      { kind: 'text', text: 'Run it:' },
       { kind: 'copy', form: 'slash', text: '/compact keep the handoff', raw: '`/compact keep the handoff`' },
-      { kind: 'text', text: 'now.' },
     ])
+    expect(slashes('- `/review`\n2. `/mcp`')).toEqual(['/review', '/mcp'])
+  })
+
+  // The reply in the operator's screenshot of 2026-11-26: `/goal` named in
+  // prose, a table and a bold list item, which cut the reply at each one.
+  const GOAL_REPLY = [
+    'So relay is the continuity layer and `/goal` is the condition layer. They should compose rather than compete.',
+    '',
+    '| | `/goal` | Relay (ADR-417) |',
+    '|---|---|---|',
+    '| The condition | an end state written in advance | implicit: the open task list |',
+    '',
+    '1. **What a relay does under an active `/goal`.** The wrap already restates the goal in the handoff.',
+    '2. Does `/goal`\'s own loop already continue after a compaction?',
+    '',
+    '`/goal` is the condition layer, and relay the continuity layer.',
+  ].join('\n')
+  const withGoal = (name: string) => name === 'goal' || notRoot(name)
+
+  test('a span inside a sentence stays in it, whatever the command list says', () => {
+    for (const isCommand of [notRoot, withGoal]) {
+      expect(copyPieces('Run `/compact keep the handoff` now.', 80, undefined, isCommand)).toEqual([{ kind: 'text', text: 'Run `/compact keep the handoff` now.' }])
+      expect(copyPieces(GOAL_REPLY, 120, undefined, isCommand)).toEqual([{ kind: 'text', text: GOAL_REPLY }])
+    }
+  })
+
+  test('a span inside bold leaves the bold whole', () => {
+    const text = '1. **What a relay does under an active `/goal`.** The wrap restates it.'
+    expect(copyPieces(text, 80, undefined, withGoal)).toEqual([{ kind: 'text', text }])
   })
 
   test('a bare name on a line of its own or as a list item, and a fence of one line with no language', () => {
@@ -377,7 +405,7 @@ describe('slash commands', () => {
   })
 
   test('a name may hold digits, `:` and `-`, and a bare name ends the span', () => {
-    expect(slashes('`/plugin:skill-2 go` and `/clear`.')).toEqual(['/plugin:skill-2 go', '/clear'])
+    expect(slashes('`/plugin:skill-2 go`\n\n`/clear`.')).toEqual(['/plugin:skill-2 go', '/clear'])
   })
 
   test('arguments count in a span or a fence, never on a line of their own', () => {
@@ -448,7 +476,7 @@ describe('slash commands', () => {
   const listedSlashes = (text: string) => copyPieces(text, 80, undefined, listed).flatMap(piece => (piece.kind === 'copy' && piece.form === 'slash' ? [piece.text] : []))
 
   test('with the command list read, a name it lists is a command', () => {
-    expect(listedSlashes('Run `/review` on it.\n\n/compact\n\n```\n/compact keep it\n```')).toEqual(['/review', '/compact', '/compact keep it'])
+    expect(listedSlashes('Run it:\n\n`/review`\n\n/compact\n\n```\n/compact keep it\n```')).toEqual(['/review', '/compact', '/compact keep it'])
   })
 
   for (const text of ['The handler for `/health` returns 200.', 'A GET on `/users` lists them.', '- `/health`: liveness probe', '/health', '- /users', '```\n/health\n```']) {
@@ -461,7 +489,7 @@ describe('slash commands', () => {
   test('a reply drawn after the list is read lifts only the commands it lists', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS), commands: ['compact', 'review'] })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(full('The handler for `/health` returns 200. Run `/review` on it.'))
+    const ui = await $.ui.mount(full('The handler for `/health` returns 200. Run:\n\n`/review`\n\n`/health`'))
     for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
     const tree = await ui.drawn()
     await ui.unmount()
@@ -472,7 +500,7 @@ describe('slash commands', () => {
   test('where the list cannot be read, a name that is no directory counts', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS), commands: null })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(full('Run `/review` on it, not `/nix`.'))
+    const ui = await $.ui.mount(full('Run:\n\n`/review`\n\n`/nix`'))
     for (const button of await ui.findAll({ type: 'Button', text: /^\s*Copy\s*$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toEqual(['/review'])
@@ -723,7 +751,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
   test('a `!` command still copies as before beside a slash command and a fence', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(full('One:\n\n! git status\n\nthen `/clear`, and:\n\n```sh\nls -la\n```'))
+    const ui = await $.ui.mount(full('One:\n\n! git status\n\nthen:\n\n`/clear`\n\nand:\n\n```sh\nls -la\n```'))
     for (const button of (await ui.findAll({ type: 'Button' })).filter(button => /^copy-\d+(-native)?$/.test(button.key ?? ''))) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toEqual(['! git status', '/clear', 'ls -la'])
@@ -732,7 +760,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
 
 /** A reply holding one block of each kind a copy control offers forms for. */
 const TABLE = ['| name | note |', '|---|---|', '| **a, b** | say "hi" |', '| [link](https://x.example) | *it*<br>two |'].join('\n')
-const BLOCKS = ['! git status', '', 'then `/clear`.', '', '```sh\nls -la\n```', '', TABLE, '', `Then \`${LONG}\` clears them.`].join('\n')
+const BLOCKS = ['! git status', '', 'then:\n`/clear`.', '', '```sh\nls -la\n```', '', TABLE, '', `Then \`${LONG}\` clears them.`].join('\n')
 const CSV = 'name,note\n"a, b","say ""hi"""\nlink,"it\ntwo"'
 const TEXT = 'name  note\na, b  say "hi"\nlink  it two'
 const ACCENT = setupOf(MIAMI_NIGHTS as never).skin.palette.user
@@ -813,7 +841,7 @@ describe('the forms a block copies', () => {
     await ui.press({ key: 'copy-reply-markdown' })
     await ui.press({ key: 'copy-reply-text' })
     await ui.unmount()
-    expect(h.copies).toEqual([BLOCKS, ['! git status', 'then', '/clear', 'ls -la', TEXT, 'Then', LONG, 'clears them.'].join('\n\n')])
+    expect(h.copies).toEqual([BLOCKS, ['! git status', 'then:', '/clear', 'ls -la', TEXT, 'Then', LONG, 'clears them.'].join('\n\n')])
   })
 })
 
