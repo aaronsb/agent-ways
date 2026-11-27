@@ -16,6 +16,9 @@ considered:
   - operator: aaronsb
     said: "basically aarch64-apple-darwin is best effort"
     via: operator in session, 2026-11-27, after ways-agent-v0.14.1's darwin-arm64 leg sat queued
+  - operator: aaronsb
+    said: "macos is best effort, in general."
+    via: operator in session, 2026-11-27, after darwin-x86_64 was named as the remaining macOS gate on releases
 status: accepted
 date: 2026-03-30
 deciders:
@@ -205,4 +208,4 @@ The `attend` binary (ADR-113) initially shipped a hand-rolled argv dispatcher wi
 
 ## Amendments
 
-- 2026-11-27, to Decision §5, on the operator's decision after the ways-agent-v0.14.1 tag got no release because its darwin-arm64 leg sat queued for over an hour: darwin-arm64 is best effort. A tag publishes its GitHub Release once linux-x86_64, linux-aarch64 and darwin-x86_64 have built and the tests on Linux runners have passed, with `checksums.txt` over those binaries. The darwin-arm64 binary attaches to the release when its build completes, and its line joins `checksums.txt`. The tests on macOS runners no longer gate the release. A failed or never-scheduled darwin-arm64 leg leaves the release without that binary. Until it attaches, the downloader on darwin-arm64 installs the newest release that carries one.
+- 2026-11-27, to Decision §5, on the operator's decisions after the ways-agent-v0.14.1 tag got no release because its darwin-arm64 leg sat queued for over an hour: macOS is best effort. The operator first made darwin-arm64 best effort, and later the same day, with darwin-x86_64 named as the remaining macOS gate, made macOS best effort in general. A tag publishes its GitHub Release once linux-x86_64 and linux-aarch64 have built and the tests on Linux runners have passed, with `checksums.txt` over those binaries. The darwin-x86_64 and darwin-arm64 binaries attach to the release together once both macOS builds and the tests on macOS runners have passed, and their lines join `checksums.txt`. A failed or never-scheduled macOS leg keeps both binaries off the release until a rerun. Until they attach, the downloader on a Mac installs the newest release that carries its platform's binary.

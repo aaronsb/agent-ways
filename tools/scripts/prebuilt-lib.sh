@@ -204,9 +204,9 @@ prebuilt_install() (
     echo "  Falling back to build-from-source: ${hint}" >&2
     exit 1
   fi
-  # A best-effort platform's binary (darwin-arm64) attaches to its release
-  # after the release is published. Until then, a request for the latest
-  # takes the newest release that carries this platform's binary.
+  # A best-effort platform's binary (darwin-x86_64 or darwin-arm64) attaches
+  # to its release after the release is published. Until then, a request for
+  # the latest takes the newest release that carries this platform's binary.
   if [[ "$requested" == latest ]] && ! grep -qx -- "$bin_name" <<<"$assets" \
       && older=$(latest_tag_for_prefix "$repo" "${comp}-v" "$bin_name") && [[ -n "$older" ]]; then
     echo "${tag} has no ${platform} binary; using ${older}." >&2

@@ -191,8 +191,8 @@ JSON
   check "an unreachable API fails the install" "1" "$?"
 
   # The newest release still waits for this platform's binary, which a
-  # best-effort build attaches later: a request for the latest takes the
-  # newest release that carries it.
+  # best-effort (macOS) build attaches later: a request for the latest takes
+  # the newest release that carries it.
   cat > "$FAKE/releases-page-1.json" <<JSON
 [
   {"tag_name": "ways-v1.13.0", "draft": false, "prerelease": false, "assets": [{"name": "ways-linux-other"}]},

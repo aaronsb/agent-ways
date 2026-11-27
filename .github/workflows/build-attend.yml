@@ -69,6 +69,6 @@ jobs:
       test: |
         cargo test --manifest-path tools/Cargo.toml -p attend -p attend-presence --no-fail-fast
       release-notes: |-
-        Pre-built attend binaries for linux-x86_64, linux-aarch64 and darwin-x86_64; the darwin-arm64 binary attaches when its build completes.
+        Pre-built attend binaries for linux-x86_64 and linux-aarch64; the macOS binaries (darwin-x86_64, darwin-arm64) attach when their builds complete.
 
         Build from source: `make attend`
