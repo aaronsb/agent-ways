@@ -61,8 +61,21 @@ pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
 // ── Prices ─────────────────────────────────────────────────────
 
 /// Dollars per million tokens: cache read, 1-hour cache write, output.
-/// List prices, September 2026. The 1-hour write is twice the base
-/// input rate; cache reads are a tenth of it except on Fable 5.1.
+///
+/// Keepwarm prices two things with this table: a ping, which is one cache
+/// read of the whole context, and a cold write of it, which is what a
+/// lapsed cache costs on the next turn. The ratio of the two decides how
+/// many pings are worth paying before a fresh start from the handoff is
+/// cheaper.
+///
+/// These are the Claude API list prices as read on 2026-11-27, and they
+/// go stale when prices change; the date says when they were last right.
+/// The 1-hour write is twice the base input rate. A cache read is a tenth
+/// of it on most models, a twentieth on Opus 5.5 and Sonnet 5.5, and a
+/// fortieth on Fable 5.1 and Fable 5.2.
+///
+/// References:
+/// - ADR-418: the stay-warm rule built on the read-to-write ratio.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Price {
     pub read: f64,
@@ -72,10 +85,13 @@ pub struct Price {
 
 /// Longer family names first: a model id matches the first row it contains.
 const PRICES: &[(&str, Price)] = &[
+    ("fable-5-2", Price { read: 0.2, write_1h: 16.0, output: 40.0 }),
     ("fable-5-1", Price { read: 0.25, write_1h: 20.0, output: 50.0 }),
     ("fable-5", Price { read: 1.0, write_1h: 20.0, output: 50.0 }),
+    ("opus-5-5", Price { read: 0.2, write_1h: 8.0, output: 20.0 }),
     ("opus-5", Price { read: 0.5, write_1h: 10.0, output: 25.0 }),
     ("opus-4", Price { read: 0.5, write_1h: 10.0, output: 25.0 }),
+    ("sonnet-5-5", Price { read: 0.1, write_1h: 4.0, output: 10.0 }),
     ("sonnet-5", Price { read: 0.2, write_1h: 4.0, output: 10.0 }),
     ("sonnet", Price { read: 0.3, write_1h: 6.0, output: 15.0 }),
     // Haiku 5.5 at the <=100K-prompt rate card ($0.10/$0.50 per MTok input/output);
@@ -924,6 +940,11 @@ mod tests {
 
     #[test]
     fn prices_match_family_longest_first() {
+        assert_eq!(price_of("claude-fable-5-2").unwrap(), Price { read: 0.2, write_1h: 16.0, output: 40.0 });
+        assert_eq!(price_of("claude-opus-5-5").unwrap(), Price { read: 0.2, write_1h: 8.0, output: 20.0 });
+        assert_eq!(price_of("claude-sonnet-5-5").unwrap(), Price { read: 0.1, write_1h: 4.0, output: 10.0 });
+        assert_eq!(price_of("Claude Opus 5.5").unwrap().write_1h, 8.0);
+        assert_eq!(price_of("claude-opus-5").unwrap().read, 0.5);
         assert_eq!(price_of("claude-fable-5-1").unwrap().read, 0.25);
         assert_eq!(price_of("claude-fable-5").unwrap().read, 1.0);
         assert_eq!(price_of("claude-sonnet-5").unwrap().write_1h, 4.0);
