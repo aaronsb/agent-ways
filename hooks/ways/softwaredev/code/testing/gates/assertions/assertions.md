@@ -19,7 +19,7 @@ A gate that executes and asserts can still prove nothing. The assertion compares
 
 ## Mock assertions and change-detector tests
 
-The canonical vacuous assertion is `expect(mock).toHaveBeenCalledTimes(1)`. It passes for the right call, and it keeps passing when the code calls the collaborator once for an unrelated, wrong reason. The rule for when a count is the behavior is in code/testing/mocking. Assert instead on what the input determines: the destination, the content, or the argument the code derived.
+The canonical vacuous assertion is `expect(mock).toHaveBeenCalledTimes(1)`, and the rule for when a count is the behavior is in code/testing/mocking. Assert instead on what the input determines: the destination, the content, or the argument the code derived.
 
 ```js
 // The input is a disk reading of 91%; the subject is what the code builds from it.

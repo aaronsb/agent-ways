@@ -11,7 +11,7 @@ At agent pace, CI's wall-clock time is the longest wait in the loop, so every du
 
 ## One run per tree
 
-A tree is the exact content of a commit's files, named by its tree hash (`git rev-parse HEAD^{tree}`). A tree that passed is not tested again by a later push, merge or bump of the same tree. A local run counts as that tree's run, and is repeated only when the tree changed. Each pipeline that tests everything on its own is complete, and together they repeat the same work on the critical path, which is suboptimization (Deming): each part is tuned at the cost of the whole.
+A tree is the exact content of a commit's files, named by its tree hash (`git rev-parse HEAD^{tree}`). A tree that passed is not tested again by a later push, merge or bump of the same tree. A local run counts as that tree's run, and is repeated only when the tree changed. Pipelines that each test everything on their own repeat the same work on the critical path, the suboptimization that code/testing/gates/attention describes.
 
 - **Test result caching.** Store each passing result under the tree hash, and have the workflow look the key up before it runs. On a hit, the job reports a pass and stops. Key a workflow on the tree hash of the paths it reads (`git rev-parse HEAD:<path>`), so a change elsewhere in the repository does not invalidate its result.
 - **Merge queues.** A merge queue runs presubmit testing on the combined tree of the target branch and the pull request, then merges exactly that tree. The postsubmit run on the target branch then sees a tree that already passed, and the cache answers it.
@@ -27,7 +27,7 @@ A tree is the exact content of a commit's files, named by its tree hash (`git re
 
 ## Checks that only wait for a runner
 
-A check that is only waiting for a runner does not gate a merge, and a failed check does. delivery/merge has the command that reads the checks this way, and the waiting check is recorded as discovered (code/testing/gates).
+A check on a runner known to be slow or flaky that is only waiting does not gate a merge. Any other pending check still gates, because a pending check may be running, and a failed check gates. delivery/merge has the command that reads the checks this way, and the waiting check is recorded as discovered (code/testing/gates).
 
 ## Infrastructure for parallel gates
 
@@ -47,7 +47,7 @@ These apply wherever several gates run at once, on a local host or on a CI runne
 |---|---|
 | "Main should run its own full suite to be safe" | If main's tree is the tree that passed on the pull request, the second run tests nothing new. |
 | "The lockfile touches everything, so everything should rebuild" | Only the workflows that build from the changed entries can be affected by them. |
-| "The macOS runner is still queued, so the PR is not green" | A queued check has not failed. Record it as discovered and merge on the checks that ran. |
+| "The macOS runner is still queued, so the PR is not green" | A queued check on a runner known to be slow has not failed. Record it as discovered and merge on the checks that ran; a pending check on any other runner still gates. |
 | "More parallel gates finish sooner" | Past the core count, each gate runs slower and timeouts start to fail. |
 
 ## See Also

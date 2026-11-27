@@ -41,6 +41,7 @@ Before the push, run each row below that the change reaches. Leave a row the cha
 | Command | Checks |
 |---|---|
 | `cargo test --manifest-path tools/Cargo.toml -p <crate>` | the crate you changed |
+| `cargo test --manifest-path tools/Cargo.toml -p ways -p ways-core` | a change under `hooks/ways` or to a way's vocabulary; the committed probe samples under `tests/probes` derive from the golden sidecars, so a corpus change can fail them. Regenerate them with `ways author golden --ways-dir hooks/ways --probes` (also `--joined` and `--pleasantry`) |
 | `cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features` | attend without its sensors, as CI runs it, when attend changes |
 | `cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features --features sensor-keepwarm` | attend with keepwarm only, as CI runs it, when attend changes |
 | `make lint` | clippy over the workspace, `-D warnings`, when Rust code changes |

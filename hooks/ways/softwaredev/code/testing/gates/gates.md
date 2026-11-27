@@ -42,7 +42,7 @@ A check you author counts what it examined and fails when that count is zero ins
 | Leaf logic, contracts unchanged, affected path known | Cheap static gates plus the focused unit or integration tests on that path |
 | Shared module | Static gates, the module's own suite, and the suites of its callers |
 | Public interface or persisted format | The full battery on the boundary: contract tests, integration, neighboring regression suites |
-| Auth, security, data migration, concurrency, central abstraction | Broad system gates: the full suite, security scan, end-to-end on critical flows, manual review |
+| Auth, security, data migration, concurrency, central abstraction | Every suite the change reaches across the system, a security scan, end-to-end tests on critical flows, and manual review. The full suite still runs once at integration. |
 | Affected scope uncertain | The row above your best guess. Uncertainty buys breadth. |
 
 Escalate one row the moment a local change turns out to touch a shared surface. Run the cheap syntactic gates first and proceed to slower ones only when they pass. A broad battery on a provably local change spends attention and wall clock for nothing.

@@ -16,7 +16,7 @@ The lead is the session that starts workers, watches them and merges their work.
 - The task list.
 - Sensor reports and peer messages, which attend delivers to the session (environment/attend).
 
-From these, the lead decides which change needs a worker next, briefs that worker in one complete brief (subagents/briefs), and merges the work when it is ready (delivery/merge). It also decides review depth. A deep review goes to a change that sets direction or has a high blast radius, and the breadth of review comes once, at integration. A check that is only waiting for a runner does not hold a merge; a failed check does (delivery/ci).
+From these, the lead decides which change needs a worker next, briefs that worker in one complete brief (subagents/briefs), and merges the work when it is ready (delivery/merge). It also decides review depth. A deep review goes to a change that sets direction or has a high blast radius, and the breadth of review comes once, at integration. A check on a runner known to be slow or flaky that is only waiting does not hold a merge; other pending checks and failed checks do (delivery/merge has the command).
 
 ## What the lead does not do
 

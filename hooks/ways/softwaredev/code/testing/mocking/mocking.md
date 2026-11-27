@@ -32,7 +32,7 @@ In-memory implementations (fakes) are more reliable than mock libraries:
 
 ## Call Counts
 
-Assert a mock's call count only when the count is the behavior the code promises, such as exactly one charge per order, or no retry after a permanent error. Any other count passes for the right call and keeps passing when the code calls the collaborator the same number of times for a wrong reason. Assert on the destination, the content, or the argument the code derived instead. What to assert in its place, and the change-detector test that copies hardcoded arguments into the test, are in code/testing/gates/assertions.
+Assert a mock's call count only when the count is the behavior the code promises, such as exactly one charge per order, or no retry after a permanent error. Any other count passes for the right call and keeps passing when the code calls the collaborator for a wrong reason. What to assert instead, and the change-detector test, are in code/testing/gates/assertions.
 
 ## See Also
 

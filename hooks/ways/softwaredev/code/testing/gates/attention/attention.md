@@ -27,7 +27,7 @@ The lead, the agent that steers the workers, holds ambient attention and does no
 
 ## One run per tree
 
-A tree that passed is not tested again by a later push, merge or bump of the same tree. A local run counts as that tree's run, and is repeated only when the tree changed. Test result caching keyed by tree hash and merge queues are the mechanisms; delivery/ci covers them and the rule for a check that is still waiting for a runner.
+One run per tree is the rule that a tree which passed is not tested again, and delivery/ci covers it.
 
 ## An honest suite
 
