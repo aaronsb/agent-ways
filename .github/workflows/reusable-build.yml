@@ -9,14 +9,14 @@ name: Build a component
 # The platforms split in two. The gating platforms, and the tests on Linux
 # runners, must pass before the release is published. The best-effort
 # platforms (darwin-arm64 by default) and the tests on macOS runners do not
-# gate it: a best-effort binary attaches to the published release when its
-# build completes, and a failed or never-scheduled leg leaves the release as
-# it is. The macOS runner queue can hold a job for hours.
+# gate it: a best-effort binary attaches to the published release once its
+# build and the macOS tests pass, and a failed or never-scheduled leg leaves
+# the release as it is. The macOS runner queue can hold a job for hours.
 #
 #   plan -> build ------------+-> collect -> release -+-> attach-best-effort
 #        -> test -------------'                       |
-#        -> build-best-effort ------------------------'
-#        -> test-best-effort (nothing waits on it)
+#        -> build-best-effort ------------------------+
+#        -> test-best-effort -------------------------'
 
 on:
   workflow_call:
@@ -209,8 +209,9 @@ jobs:
       - name: Run tests
         run: ${{ inputs.test }}
 
-  # The tests on macOS runners. No job waits on this one, so a failure shows
-  # on the run and does not hold the release.
+  # The tests on macOS runners. Only attach-best-effort waits on this job, so
+  # a failure keeps the darwin-arm64 binary off the release and does not hold
+  # the release itself.
   test-best-effort:
     needs: plan
     if: inputs.test != '' && needs.plan.outputs.test_best_effort != '[]'
@@ -305,11 +306,14 @@ jobs:
             binaries/*
 
   # A best-effort binary joins the release this run published: upload it and
-  # add its line to the release's checksums.txt. A run of the workflow from
-  # before this job existed never attaches anything.
+  # add its line to the release's checksums.txt. The macOS runners are Apple
+  # Silicon, so a failed macOS test keeps the darwin-arm64 binary off the
+  # release; waiting for those tests delays the attach and never holds the
+  # release. A run of the workflow from before this job existed never
+  # attaches anything.
   attach-best-effort:
-    needs: [plan, release, build-best-effort]
-    if: ${{ !cancelled() && needs.release.result == 'success' && needs.build-best-effort.result == 'success' }}
+    needs: [plan, release, build-best-effort, test-best-effort]
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.build-best-effort.result == 'success' && (needs.test-best-effort.result == 'success' || needs.test-best-effort.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
