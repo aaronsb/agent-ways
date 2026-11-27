@@ -474,7 +474,14 @@ async function isFillCleared($: $): Promise<boolean> {
  *  model no longer holds. A peer's message stays queued. */
 async function markCompacted($: $) {
   await updateStatus($, s => ({ ...s, afterCompaction: true }))
-  await run($, lapseEventsArgv())
+  await lapseEvents($)
+}
+
+/** The boundary's lapse of the session's queued event notices; a failure is
+ *  logged, since the next drain would deliver what should have lapsed. */
+async function lapseEvents($: $) {
+  const r = await run($, lapseEventsArgv())
+  if (r.exitCode !== 0) $.ui.log(`attend: could not lapse the notices queued before the boundary (exit ${r.exitCode})`)
 }
 
 // ── the sensor host ────────────────────────────────────────────────────
@@ -1307,6 +1314,7 @@ export const register: Register = on => {
     gaveUp: undefined,
     isMoveListened: false,
     startWatch: undefined,
+    lapseEvents: undefined,
     contextTokens: undefined,
     heldNote: undefined,
     host: undefined,
@@ -1356,6 +1364,9 @@ export const register: Register = on => {
     // The move's watch runs on this hook's `$`: session.end's bound aborts
     // the waits of its own.
     mod.startWatch = () => watchMove($, mod)
+    // The lapse after a /clear likewise, not awaited: session.end's bound
+    // aborts an in-flight call of its own and the lapse would be lost.
+    mod.lapseEvents = () => void lapseEvents($)
     // The host's spawn, likewise: a tool call's `$` ends with its hook.
     // A host whose module unloaded has no one left to tell how it ended.
     mod.spawnHost = want => void runHost($, mod, want).catch(() => undefined)
@@ -1391,15 +1402,16 @@ export const register: Register = on => {
   // `resume` is the engine's word for it. The id that goes on shows later,
   // so this hook records the move as plain data and makes no call on its own
   // `$`, whose waits session.end's short bound aborts: mod.startWatch()
-  // schedules the watch (watchMove) on session.start's `$`. The mod
+  // schedules the watch (watchMove), and mod.lapseEvents() the lapse of the
+  // queued notices, on session.start's `$`. The mod
   // hooks no classic.* event: where an organization manages Claude Code, its
   // policy plugin sends those past the plugins a person installs. An exit, a
   // logout or a -p run's end changes nothing here; at process start
   // session.start alone reads the record.
-  on('session.end', async ($, e, next) => {
+  on('session.end', ($, e, next) => {
     // A /clear is a boundary too: notices queued for the ended session lapse
     // before the new one reads them. Its peer messages still follow.
-    if (e.reason === 'clear') await run($, lapseEventsArgv())
+    if (e.reason === 'clear') mod.lapseEvents?.()
     if (mod.isStarted && mod.startWatch && (e.reason === 'clear' || e.reason === 'resume')) {
       mod.isMoveListened = false
       recordMove(mod, e.sessionId, e.reason, mod.active)
