@@ -266,33 +266,24 @@ jobs:
     permissions:
       contents: write
     steps:
+      - &checkout-merge-script
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/ci-merge-checksums.sh
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v5
         with:
           name: ${{ inputs.component }}-all-platforms
           path: binaries
 
       # A release that exists already can hold a best-effort binary and its
-      # checksum line. The upload replaces checksums.txt, so this step keeps
+      # checksum line. The upload replaces checksums.txt, so the script keeps
       # the old lines for the files the upload does not replace.
-      - &merge-checksums
-        name: Merge with the release's checksums.txt
+      - name: Merge with the release's checksums.txt
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          cd binaries
-          rm -f checksums.txt
-          sha256sum -- * > ../checksums.new
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > ../assets.txt 2>/dev/null \
-              && grep -qx checksums.txt ../assets.txt; then
-            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt --output ../checksums.old
-            # sha256sum writes `<hash>  <name>`, or `<hash> *<name>` in binary mode.
-            awk 'NR == FNR { new[$2]; next } !($2 in new) && !(substr($2, 2) in new)' \
-              ../checksums.new ../checksums.old > ../checksums.kept
-            cat ../checksums.kept >> ../checksums.new
-          fi
-          sort -k2 ../checksums.new > checksums.txt
-          cat checksums.txt
+        run: scripts/ci-merge-checksums.sh "${GITHUB_REF#refs/tags/}" binaries
 
       - name: Create GitHub Release
         env:
@@ -323,17 +314,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - *checkout-merge-script
+
       - uses: actions/download-artifact@v5
         with:
           path: binaries
           pattern: ${{ needs.plan.outputs.best_effort_pattern }}
           merge-multiple: true
 
-      - *merge-checksums
-
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber binaries/*
+        run: scripts/ci-merge-checksums.sh --upload "${GITHUB_REF#refs/tags/}" binaries

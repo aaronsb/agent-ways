@@ -393,6 +393,7 @@ test-hooks:
 	@bash tests/release-bump-test.sh
 	@bash tests/prebuilt-lib-test.sh
 	@bash tests/download-prebuilt-test.sh
+	@bash tests/ci-merge-checksums-test.sh
 	@bash tests/gh-tasks-test.sh
 	@bash tests/workflow-crates-test.sh
 	@bash tests/workflow-crates-selftest.sh
