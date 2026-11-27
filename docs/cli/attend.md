@@ -720,7 +720,11 @@ Record that a resumed turn ended with a `relay: stop <reason>` line, which stops
 
 Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh
 
-**Usage:** `attend keepwarm wrap-id`
+**Usage:** `attend keepwarm wrap-id [OPTIONS]`
+
+###### **Options:**
+
+* `--record <ID>` — Record ID as this session's last wrap instead: the wrap skill names each wrap's id this way, so a handoff-mode wrap, which ends with no relay marker, is recorded too
 
 
 
