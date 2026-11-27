@@ -425,6 +425,8 @@ ways context --project <dir>  # resolve the transcript for another project
 ways context --json
 ```
 
+Without `--session` or `--project`, the session is the one the command runs in (`CLAUDE_CODE_SESSION_ID`). A session id that names no transcript is an error: `ways context` does not fall back to the project's newest transcript, which can belong to another session. With no session id at all, it reads the newest transcript of the project at `--project`, `CLAUDE_PROJECT_DIR` or the current directory.
+
 `--json` carries `window_source` beside `tokens_total` ([ADR-166](../architecture/ways/ADR-166-single-source-of-truth-for-model-context-window-resolution.md)): `model_table` (the model was recognized), `env_override` (`CLAUDE_CONTEXT_WINDOW` was set and beat detection), or `default` (the model was not recognized and a conservative 200K was assumed, so the percentage is a guess). `CLAUDE_CONTEXT_WINDOW` overrides detection on every model.
 
 ## `ways author`

@@ -149,28 +149,23 @@ fn context_from_transcript(transcript: PathBuf) -> Result<ContextInfo> {
 ///      even when the shell cwd has drifted from the project — the failure the
 ///      `wrap` / `context-status` skills hit when they run the gauge from
 ///      wherever the agent's shell happens to sit;
-///   3. finally, the `project_dir` / `CLAUDE_PROJECT_DIR` / cwd slug plus the
-///      newest transcript in that project (the original heuristic, preserved).
+///   3. finally, with no session id at all, the `project_dir` /
+///      `CLAUDE_PROJECT_DIR` / cwd slug plus the newest transcript in that
+///      project.
+///
+/// A session id that names no transcript is an error, never a reason to fall
+/// back to step 3: the newest transcript in the project can be another
+/// session's, and its fill would be reported as this one's (#1361).
 fn resolve_transcript(
     project_dir: Option<&str>,
     session_id: Option<&str>,
     env_session_id: Option<&str>,
     projects_root: &Path,
 ) -> Result<PathBuf> {
-    if let Some(sid) = session_id {
+    let env_session_id = env_session_id.filter(|s| !s.is_empty() && project_dir.is_none());
+    if let Some(sid) = session_id.or(env_session_id) {
         return claude_sessions::find_transcript_in(projects_root, None, sid)
             .ok_or_else(|| anyhow::anyhow!("No transcript found for session: {sid}"));
-    }
-
-    // No explicit --project: trust the environment's session id first. Only
-    // fall through to the cwd heuristic if it is absent or its transcript is
-    // missing, so behaviour outside a live session is unchanged.
-    if project_dir.is_none() {
-        if let Some(sid) = env_session_id.filter(|s| !s.is_empty()) {
-            if let Some(transcript) = claude_sessions::find_transcript_in(projects_root, None, sid) {
-                return Ok(transcript);
-            }
-        }
     }
 
     let project = project_dir
@@ -417,15 +412,16 @@ mod tests {
     }
 
     #[test]
-    fn env_session_id_with_missing_transcript_falls_through() {
-        // project_dir=None reaches the env branch; a non-empty env id whose
-        // transcript doesn't exist must fall through to the project heuristic,
-        // which errors here because the empty projects root has no match. (An
-        // empty root guarantees the fallback errors regardless of the ambient
-        // cwd/CLAUDE_PROJECT_DIR the heuristic reads.)
-        let root = temp_projects_root(line!(), &[]);
+    fn env_session_id_with_missing_transcript_errors_and_does_not_guess() {
+        // #1361: a session id names one transcript. When it is not found, the
+        // newest transcript of the project may be any session's, so reading it
+        // would report another session's fill as this one's. The project here
+        // holds such a transcript, where the heuristic would find it.
+        let project = crate::util::project_root().unwrap_or_else(|| ".".to_string());
+        let slug = claude_sessions::project_slug(&project);
+        let root = temp_projects_root(line!(), &[(slug.as_str(), "someone-else")]);
         let err = resolve_transcript(None, None, Some("ghost-sid"), &root).unwrap_err();
-        assert!(err.to_string().contains("No active transcript"));
+        assert!(err.to_string().contains("No transcript found for session: ghost-sid"), "{err}");
         std::fs::remove_dir_all(&root).ok();
     }
 

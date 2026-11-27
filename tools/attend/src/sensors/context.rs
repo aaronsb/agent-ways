@@ -49,15 +49,25 @@ struct Band {
 }
 
 /// Attend handles trajectory awareness. Ways handles threshold actions
-/// (todos@75%, memory@80%, checkpoint@85%). Attend's bands are early
-/// warnings *before* ways fires, plus velocity context that ways can't
-/// provide. Each band's wording holds for every percent up to the next.
+/// (todos@75%, memory@80%, checkpoint@85%). Attend's bands say where the
+/// fill stands against those actions, plus velocity context that ways can't
+/// provide. A band runs from its `at` up to the next band's, and its wording
+/// is true at every percent in that range: each ways action gets a band
+/// boundary, so no band calls an action ahead that a reading in it has
+/// already passed.
 const BANDS: &[Band] = &[
     Band { at: 50, magnitude: 1.5, says: "over half the context window is used — if the work's on track, keep going; if you've barely started, this is a calm moment to scope the next stages" },
     Band { at: 65, magnitude: 3.0, says: "agent-ways will capture todos (75%) and memory (80%) shortly" },
-    Band { at: 83, magnitude: 4.0, says: "compaction checkpoint fires at 85% — finish the current task and sync" },
+    Band { at: 75, magnitude: 3.0, says: "past the todos capture at 75%; agent-ways captures memory at 80%, and the compaction checkpoint follows at 85%" },
+    Band { at: 80, magnitude: 4.0, says: "past the memory capture at 80%; the compaction checkpoint fires at 85% — finish the current task and sync" },
+    Band { at: 85, magnitude: 4.0, says: "past the compaction checkpoint at 85% — finish the current task and sync" },
     Band { at: 90, magnitude: 5.0, says: "stop or compact right now — quality degrades past here, and auto-compact is off" },
 ];
+
+/// How far under a spent band's start the fill must fall before the band
+/// can sound again. A compaction falls far past it; a fill that wavers a
+/// point around a boundary does not repeat the band.
+const REARM_MARGIN: u64 = 5;
 
 /// The band `pct` falls in: the highest one it has reached.
 fn band_for(pct: u64) -> Option<&'static Band> {
@@ -145,6 +155,11 @@ impl Sensor for ContextSensor {
             Some(r) => r,
             None => return Vec::new(),
         };
+
+        // `/compact` keeps the session id, and a restarted host restores the
+        // spent bands, so a fill that has fallen well under a spent band
+        // re-arms it: the band sounds again when the fill climbs back.
+        self.disclosed_thresholds.retain(|&t| current.pct_shown + REARM_MARGIN > u64::from(t));
 
         // First poll: establish baseline
         if !self.baseline_established {
@@ -324,15 +339,89 @@ mod tests {
         let _ = std::fs::remove_dir_all(claude.root());
     }
 
+    /// Rewrite session `sid`'s transcript so it reads `tokens` of a 1M window.
+    fn set_fill(claude: &claude_sessions::ClaudeDir, project: &str, sid: &str, tokens: u64) {
+        let dir = claude.projects_dir().join(claude_sessions::project_slug(project));
+        std::fs::write(dir.join(format!("{sid}.jsonl")), turn("claude-opus-5-5", tokens)).unwrap();
+    }
+
     #[test]
     fn the_band_wording_fits_the_percent() {
         assert!(band_for(17).is_none());
         assert!(band_for(49).is_none());
         assert_eq!(band_for(50).unwrap().at, 50);
         assert_eq!(band_for(69).unwrap().at, 65);
-        assert_eq!(band_for(84).unwrap().at, 83);
         assert_eq!(band_for(97).unwrap().at, 90);
         assert!(!band_for(69).unwrap().says.contains("half"));
+    }
+
+    /// A host that starts late, at 78%, is past the todos capture at 75%:
+    /// its band must not announce that capture as coming.
+    #[test]
+    fn at_78_percent_the_todos_capture_is_not_ahead() {
+        let says = band_for(78).unwrap().says;
+        assert!(!says.contains("will capture todos"), "{says}");
+        assert!(!says.contains("shortly"), "{says}");
+    }
+
+    /// At 87% the compaction checkpoint at 85% has fired: the band must not
+    /// say it fires at 85%.
+    #[test]
+    fn at_87_percent_the_checkpoint_is_not_ahead() {
+        let says = band_for(87).unwrap().says;
+        assert!(!says.contains("fires at 85%"), "{says}");
+    }
+
+    /// `/compact` keeps the session id. After a compaction the bands sound
+    /// again as the fill climbs back: 84%, compact to 12%, refill to 84%.
+    #[test]
+    fn the_bands_rearm_after_a_compaction() {
+        let project = "/srv/ctx-rearm";
+        let claude = claude_dir("rearm", project, &[("own", turn("claude-opus-5-5", 840_000))]);
+        let mut sensor = ContextSensor::in_dir(Some("own"), claude.clone());
+        assert!(sensor.poll(&focus(project)).is_empty(), "baseline");
+        assert_eq!(sensor.poll(&focus(project)).len(), 1);
+        set_fill(&claude, project, "own", 120_000);
+        assert!(sensor.poll(&focus(project)).is_empty());
+        set_fill(&claude, project, "own", 840_000);
+        let said = sensor.poll(&focus(project));
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].1.starts_with("context at 84%"), "{}", said[0].1);
+        let _ = std::fs::remove_dir_all(claude.root());
+    }
+
+    /// A restarted host restores its spent bands; a session compacted while
+    /// the host was down gets them back on its first reading.
+    #[test]
+    fn restored_bands_above_the_fill_rearm() {
+        let project = "/srv/ctx-restore";
+        let claude = claude_dir("restore", project, &[("own", turn("claude-opus-5-5", 120_000))]);
+        let mut sensor = ContextSensor::in_dir(Some("own"), claude.clone());
+        let spent: Vec<(String, String)> =
+            ["50", "65", "75", "80"].iter().map(|t| ("disclosed_threshold".to_string(), t.to_string())).collect();
+        sensor.import_state(&spent);
+        assert!(sensor.poll(&focus(project)).is_empty(), "baseline");
+        set_fill(&claude, project, "own", 660_000);
+        let said = sensor.poll(&focus(project));
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].1.starts_with("context at 66%"), "{}", said[0].1);
+        let _ = std::fs::remove_dir_all(claude.root());
+    }
+
+    /// A fill that wavers a point under a band's start does not say the
+    /// band again.
+    #[test]
+    fn a_small_dip_does_not_rearm_a_band() {
+        let project = "/srv/ctx-dip";
+        let claude = claude_dir("dip", project, &[("own", turn("claude-opus-5-5", 660_000))]);
+        let mut sensor = ContextSensor::in_dir(Some("own"), claude.clone());
+        assert!(sensor.poll(&focus(project)).is_empty(), "baseline");
+        assert_eq!(sensor.poll(&focus(project)).len(), 1);
+        set_fill(&claude, project, "own", 640_000);
+        assert!(sensor.poll(&focus(project)).is_empty());
+        set_fill(&claude, project, "own", 660_000);
+        assert!(sensor.poll(&focus(project)).is_empty());
+        let _ = std::fs::remove_dir_all(claude.root());
     }
 
     /// A first report at 69% says the 65% band alone, and the 50% band
