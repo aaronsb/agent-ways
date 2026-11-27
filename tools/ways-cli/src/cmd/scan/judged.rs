@@ -764,28 +764,58 @@ const AUDIT_COMMAND_CHARS: usize = 80;
 
 /// A command as the judge's log lines and decision outcomes record it, so a
 /// misfire can be traced to the call: its first [`AUDIT_COMMAND_CHARS`]
-/// characters, with the value of every shell assignment (`GH_TOKEN=…`,
-/// `export KEY=…`), of every flag named for a credential (`--token`,
-/// `--password`, `--api-key`, …) and of an `Authorization:` or bearer
-/// header taken out first. Nothing else is changed.
+/// characters, cut only after every credential in the whole command is
+/// replaced with `…`, so a secret that straddles the cut leaves no prefix.
+/// The credentials taken out are the value of a shell assignment
+/// (`GH_TOKEN=…`, `export KEY=…`), of a flag named for a credential
+/// (`--token`, `--password`, `--api-key`, …), of a header whose name is
+/// `Authorization` or ends in `token`, `key`, `secret` or `auth`, and of a
+/// bearer token; the password in URL userinfo and in `curl -u user:pass`; a
+/// MySQL-family client's `-p` glued to its value and a registry login's
+/// `-p` value; and any token with a known key prefix (`sk-`, `ghp_`,
+/// `gho_`, `ghs_`, `github_pat_`, `glpat-`, `xox[abpr]-`, `AKIA…`).
+/// Nothing else is changed.
 pub(super) fn audit_command(command: &str) -> String {
     use std::sync::OnceLock;
-    static SECRETS: OnceLock<[regex::Regex; 3]> = OnceLock::new();
-    let [assignment, flag, header] = SECRETS.get_or_init(|| {
-        [
-            regex::Regex::new(r#"(^|[\s;&|(`])([A-Za-z_][A-Za-z0-9_]*=)("[^"]*"|'[^']*'|[^\s;&|)`]*)"#).expect("static regex"),
-            regex::Regex::new(r#"(?i)(--?(?:[a-z0-9]+[_-])*(?:token|secret|password|passwd|api[_-]?key|auth|credentials?)(?:[_-][a-z0-9_-]*)?)(=|\s+)("[^"]*"|'[^']*'|[^\s;&|)`-][^\s;&|)`]*)"#)
-                .expect("static regex"),
-            regex::Regex::new(r#"(?i)((?:authorization|x-api-key|api-key)\s*:\s*(?:(?:bearer|basic|token)\s+)?|bearer\s+)([^\s"';&|)`]+)"#)
-                .expect("static regex"),
+    static SECRETS: OnceLock<Vec<(regex::Regex, &'static str)>> = OnceLock::new();
+    let rules = SECRETS.get_or_init(|| {
+        let rule = |pattern: &str, with: &'static str| (regex::Regex::new(pattern).expect("static regex"), with);
+        vec![
+            // A shell assignment's value.
+            rule(r#"(^|[\s;&|(`])([A-Za-z_][A-Za-z0-9_]*=)("[^"]*"|'[^']*'|[^\s;&|)`]*)"#, "$1$2…"),
+            // A long or short flag named for a credential.
+            rule(
+                r#"(?i)(--?(?:[a-z0-9]+[_-])*(?:token|secret|password|passwd|api[_-]?key|auth|credentials?)(?:[_-][a-z0-9_-]*)?)(=|\s+)("[^"]*"|'[^']*'|[^\s;&|)`-][^\s;&|)`]*)"#,
+                "$1$2…",
+            ),
+            // A credential header, or a bare bearer token.
+            rule(
+                r#"(?i)((?:\bauthorization|\b[a-z0-9-]*(?:token|key|secret|auth))\s*:\s*(?:(?:bearer|basic|token)\s+)?|\bbearer\s+)([^\s"';&|)`]+)"#,
+                "$1…",
+            ),
+            // The password in URL userinfo.
+            rule(r#"(?i)(\b[a-z][a-z0-9+.-]*://[^\s/@:'"]+:)([^\s@/'"]+)@"#, "$1…@"),
+            // `curl -u user:pass`, `--user user:pass`.
+            rule(r#"((?:^|\s)(?:-u|--user)(?:\s+|=)?['"]?[^\s:'"]+:)([^\s'"]+)"#, "$1…"),
+            // A MySQL-family client's `-p` glued to its value; `-P` is a port.
+            rule(r#"(\b(?:mysql|mysqldump|mysqladmin|mysqlimport|mysqlshow|mysqlcheck|mysqlsh|mariadb|mariadb-dump)\b[^;&|]*?\s-p)([^\s;&|)`]+)"#, "$1…"),
+            // A container registry login's `-p` value.
+            rule(
+                r#"(\b(?:docker|podman|nerdctl|buildah|skopeo|oras|helm)\b[^;&|]*?\blogin\b[^;&|]*?\s-p)(\s+|=)?([^\s;&|)`-][^\s;&|)`]*)"#,
+                "$1$2…",
+            ),
+            // A token with a known key prefix, wherever it stands.
+            rule(r#"\b(sk-|ghp_|gho_|ghs_|github_pat_|glpat-|xox[abpr]-)[A-Za-z0-9_-]+"#, "$1…"),
+            rule(r#"\bAKIA[0-9A-Z]{16}\b"#, "AKIA…"),
         ]
     });
-    let text = assignment.replace_all(command, "$1$2…");
-    let text = flag.replace_all(&text, "$1$2…");
-    let text = header.replace_all(&text, "$1…");
+    let mut text = command.to_string();
+    for (pattern, with) in rules {
+        text = pattern.replace_all(&text, *with).into_owned();
+    }
     match text.char_indices().nth(AUDIT_COMMAND_CHARS) {
         Some((at, _)) => text[..at].to_string(),
-        None => text.into_owned(),
+        None => text,
     }
 }
 
@@ -1055,6 +1085,58 @@ mod tests {
         assert_eq!(audit_command("curl -H 'X-Api-Key: k1' u"), "curl -H 'X-Api-Key: …' u");
         assert_eq!(audit_command("git log --format=%H --author=aaron"), "git log --format=%H --author=aaron", "a plain flag value stays");
         assert_eq!(audit_command("gh auth login --with-token --github-token=t1"), "gh auth login --with-token --github-token=…");
+    }
+
+    /// Each credential shape the audit line must not carry, and commands
+    /// that look close to one but carry none.
+    #[test]
+    fn the_audit_command_redacts_every_credential_shape() {
+        let cases: &[(&str, &str)] = &[
+            ("curl -u admin:hunter2 https://x", "curl -u admin:… https://x"),
+            ("curl --user 'admin:hunter2' u", "curl --user 'admin:…' u"),
+            ("git clone https://user:ghp_abc@github.com/o/r", "git clone https://user:…@github.com/o/r"),
+            ("curl -H 'X-Auth-Token: abc' u", "curl -H 'X-Auth-Token: …' u"),
+            ("curl -H 'PRIVATE-TOKEN: glpat-x' u", "curl -H 'PRIVATE-TOKEN: …' u"),
+            ("curl -H 'x-client-secret: s1' u", "curl -H 'x-client-secret: …' u"),
+            ("curl -H 'Proxy-Auth: p1' u", "curl -H 'Proxy-Auth: …' u"),
+            (r#"curl -H "Authorization: Bearer abc.def" https://x"#, r#"curl -H "Authorization: Bearer …" https://x"#),
+            ("mysql -u root -phunter2 db", "mysql -u root -p… db"),
+            ("mariadb -phunter2", "mariadb -p…"),
+            ("docker login -p s3cr3t registry.io", "docker login -p … registry.io"),
+            ("docker login -u me --password x r", "docker login -u me --password … r"),
+            ("docker login --password=x r", "docker login --password=… r"),
+            ("echo sk-ant-api03-abcDEF123", "echo sk-…"),
+            ("echo sk-proj-abc123", "echo sk-…"),
+            ("echo ghp_abc123", "echo ghp_…"),
+            ("echo gho_abc123", "echo gho_…"),
+            ("echo ghs_abc123", "echo ghs_…"),
+            ("echo github_pat_11AB_cd", "echo github_pat_…"),
+            ("echo glpat-abc123", "echo glpat-…"),
+            ("echo xoxb-1-2-abc xoxp-9", "echo xoxb-… xoxp-…"),
+            ("aws s3 ls # AKIAIOSFODNN7EXAMPLE", "aws s3 ls # AKIA…"),
+            ("GH_TOKEN=ghp_abc123 gh pr create", "GH_TOKEN=… gh pr create"),
+            ("tool --token abc -v", "tool --token … -v"),
+            ("mkdir -p a/b", "mkdir -p a/b"),
+            ("git clone https://github.com/o/r", "git clone https://github.com/o/r"),
+            ("ls -la", "ls -la"),
+            ("mysql -P 3306 -p db", "mysql -P 3306 -p db"),
+            ("git push -u origin main", "git push -u origin main"),
+            ("docker run -p 8080:80 nginx", "docker run -p 8080:80 nginx"),
+            ("cargo test -p ways-core", "cargo test -p ways-core"),
+        ];
+        for (command, want) in cases {
+            assert_eq!(audit_command(command), *want, "{command}");
+        }
+    }
+
+    /// The cut comes after redaction, so a secret that starts before
+    /// character 80 and ends after it leaves no prefix in the line.
+    #[test]
+    fn a_secret_across_the_cut_leaves_no_prefix() {
+        let command = format!("{} ghp_{}", "x".repeat(74), "S".repeat(40));
+        let audit = audit_command(&command);
+        assert!(!audit.contains('S'), "{audit}");
+        assert!(audit.ends_with("ghp_…"), "{audit}");
     }
 
     type Lines = std::cell::RefCell<Vec<String>>;
