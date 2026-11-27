@@ -337,7 +337,7 @@ mod tests {
         let kept = s.matches("[OPEN] task").count();
         assert!(s.contains(&format!("(Tasks #{} to #100 are in /r/.claude/handoff.wrap.md; read them there.)", kept + 1)), "{}", &s[s.len() - 300..]);
         // A cut task is cut whole: no task line without its description.
-        let last = s.lines().filter(|l| l.starts_with('#')).last().unwrap();
+        let last = s.lines().rfind(|l| l.starts_with('#')).unwrap();
         let after = s.split(last).nth(1).unwrap();
         assert!(after.starts_with(&format!("\n  {}", "d".repeat(90))), "{}", &after[..40]);
     }
