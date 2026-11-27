@@ -15,13 +15,13 @@ agent-tui frame 80x25
 |│       max_tur│   claude-sonnet-5-5                            │es any model  │|
 |│       concurr└────────────────────────────────────────────────┘has aged is   │|
 |│       max_candidates    8                ││still offered.                    │|
-|│       price_in_per_mtok                  ││                                  │|
-|│       price_out_per_mtok                 ││value    claude-haiku-4-5         │|
-|│   ▸ openrouter                           ││type     one of claude-haiku-4-5 |│|
-|│   ▸ claude-code                          ││claude-haiku-4-5-20251001 |       │|
-|│ ▸ keys · provider       key              ││claude-opus-4-5 |                 │|
-|│ ▾ judge · state         value            ││claude-sonnet-5-5 (Enter picks)   │|
-|│     readiness           degraded !       ││default  claude-haiku-4-5         │|
+|│       tool_timeout_ms   3000             ││                                  │|
+|│       tool_candidates   16               ││value    claude-haiku-4-5         │|
+|│       price_in_per_mtok                  ││type     one of claude-haiku-4-5 |│|
+|│       price_out_per_mtok                 ││claude-haiku-4-5-20251001 |       │|
+|│   ▸ openrouter                           ││claude-opus-4-5 |                 │|
+|│   ▸ claude-code                          ││claude-sonnet-5-5 (Enter picks)   │|
+|│ ▸ keys · provider       key              ││default  claude-haiku-4-5         │|
 |└──────────────────────────────────────────┘└──────────────────────────────────┘|
 | pick   ↑↓ choose · Enter or click sets · Esc closes                            |
 styles
@@ -103,28 +103,23 @@ styles
  17  43-53  - - DIM
  17  79-79  - - DIM
  18   0-0   - - DIM
- 18   2-15  - - BOLD
  18  43-53  - - DIM
  18  79-79  - - DIM
  19   0-0   - - DIM
- 19   2-16  - - BOLD
  19  43-44  - - DIM
  19  79-79  - - DIM
  20   0-0   - - DIM
- 20   2-7   - - BOLD
- 20   8-18  - - DIM
- 20  26-28  - - DIM
+ 20   2-15  - - BOLD
  20  43-44  - - DIM
  20  79-79  - - DIM
  21   0-0   - - DIM
- 21   2-8   - - BOLD
- 21   9-16  - - DIM
- 21  26-30  - - DIM
+ 21   2-16  - - BOLD
  21  43-44  - - DIM
  21  79-79  - - DIM
  22   0-0   - - DIM
- 22  26-33  - - DIM
- 22  34-35  Red - BOLD
+ 22   2-7   - - BOLD
+ 22   8-18  - - DIM
+ 22  26-28  - - DIM
  22  43-53  - - DIM
  22  79-79  - - DIM
  23   0-79  - - DIM

@@ -19,7 +19,7 @@ const DAY_SECS: u64 = 86_400;
 
 /// Outcome results the section names, in column order. Any other result is
 /// still counted under its own name in the JSON.
-pub(crate) const RESULTS: [&str; 10] = [
+pub(crate) const RESULTS: [&str; 11] = [
     "fired",
     "redisclosed",
     "held_refire",
@@ -28,12 +28,13 @@ pub(crate) const RESULTS: [&str; 10] = [
     "near_miss",
     "judge_block",
     "ancestor_block",
+    "unjudged_block",
     "withheld_for_parent",
     "stashed",
 ];
 
 /// The human table's short headers for [`RESULTS`].
-const SHORT: [&str; 10] = ["fired", "redisc", "refire", "ctxcap", "kwgate", "near", "jblock", "ablock", "withheld", "stashed"];
+const SHORT: [&str; 11] = ["fired", "redisc", "refire", "ctxcap", "kwgate", "near", "jblock", "ablock", "ublock", "withheld", "stashed"];
 
 /// The reason a pull that still served the way carries: nothing was stamped
 /// only because the way has no refire curve.

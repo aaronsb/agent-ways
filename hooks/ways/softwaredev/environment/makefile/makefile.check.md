@@ -1,7 +1,7 @@
 ---
 description: intercept raw build, test, lint, publish commands when a Makefile exists
 vocabulary: npm run npm test npx pytest cargo build cargo test go build go test pip install docker build docker compose eslint prettier ruff tsc webpack vite jest mocha cargo publish npm publish twine
-commands: ^(npm|npx|pytest|cargo|go |pip |docker |eslint|prettier|ruff |tsc|webpack|vite|jest|mocha|twine)
+commands: ^(npm\s+(run|test|ci|install|publish|build)\b|npx\s+(eslint|prettier|tsc|jest|mocha|vite|webpack)\b|pytest\b|cargo\s+(build|test|clippy|publish|run|fmt|check)\b|go\s+(build|test|vet|run|install)\b|pip\s+install\b|docker\s+(build|compose)\b|eslint\b|prettier\b|ruff\s+(check|format)\b|tsc\b|webpack\b|vite\s+build\b|jest\b|mocha\b|twine\s+upload\b)
 scope: agent, subagent
 when:
   file_exists: Makefile

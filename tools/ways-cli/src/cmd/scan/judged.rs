@@ -53,6 +53,10 @@ pub(super) struct Lane {
     pub scope: String,
     pub project_dir: String,
     pub session_id: String,
+    /// The command lane's call as [`audit_command`] cuts it, which every
+    /// judge line and decision outcome of the scan carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
 }
 
 impl Lane {
@@ -76,6 +80,7 @@ impl Lane {
             scope: &self.scope,
             hook_event: &self.hook_event,
             sink,
+            command: self.command.as_deref(),
         }
     }
 }
@@ -234,6 +239,7 @@ pub(crate) fn post_tool(session_id: &str, project_dir: &str, hook_event: &str, t
         scope: crate::session::detect_scope(session_id),
         project_dir: project_dir.to_string(),
         session_id: session_id.to_string(),
+        command: None,
     };
     let call = format!("Used the {tool} tool.");
     run(&lane, &scan, &candidates, || tool_turns(session_id, &call), gate::TOOL_WAIT, |c| show(&c.key));
@@ -313,14 +319,23 @@ fn finish(lane: &Lane, judged: Judged, shown: &[Shown<'_>], tick: u64) {
         return;
     }
     let epoch = crate::session::get_epoch(&lane.session_id);
-    let mut record = decision::Record::begin_at(&lane.context(epoch), tick);
-    for (i, s) in shown.iter().enumerate() {
-        record.hit(&s.candidate.key, i + 1, &s.candidate.channel, s.candidate.p, s.result, Some(&judged.gate));
-    }
-    close_judge(&mut record, &judged.gate, &judged.turns);
+    let record = lane_record(decision::Record::begin_at(&lane.context(epoch), tick), lane, &judged, shown);
     let scan_id = record.scan_id().to_string();
     record.write();
     detach(lane, judged, shown, &scan_id);
+}
+
+/// `record` with each shown candidate's outcome, the command lane's call on
+/// every outcome, and the judge's block.
+fn lane_record(mut record: decision::Record, lane: &Lane, judged: &Judged, shown: &[Shown<'_>]) -> decision::Record {
+    for (i, s) in shown.iter().enumerate() {
+        record.hit(&s.candidate.key, i + 1, &s.candidate.channel, s.candidate.p, s.result, Some(&judged.gate));
+    }
+    if let Some(c) = &lane.command {
+        record.command(c);
+    }
+    close_judge(&mut record, &judged.gate, &judged.turns);
+    record
 }
 
 /// Writes the judge's block on a lane's record, the hook's own or the
@@ -623,6 +638,9 @@ fn detached_record(job: &Job, gate: &Gate, epoch: u64) -> decision::Record {
     for (i, e) in job.entries.iter().enumerate() {
         record.hit(&e.candidate.key, i + 1, &e.candidate.channel, None, &e.result, Some(gate));
     }
+    if let Some(c) = &job.lane.command {
+        record.command(c);
+    }
     close_judge(&mut record, gate, &job.turns);
     record
 }
@@ -708,26 +726,98 @@ pub(super) fn declared(way: &super::WayCandidate, channel: &str, scan: &Scan) ->
     }
 }
 
-/// The Bash call as the judge reads it: an `About to run:` line with the
-/// tool's description, then the command, cut to [`MAX_COMMAND_CHARS`] so a
-/// long heredoc does not push the description and the prose out of the
-/// profile's `max_turn_chars`.
+/// The Bash call as the judge reads it: the described block, an `About to
+/// run:` line with the tool's description and then one line per unit of
+/// the call, each segment with what its tldr page says it does, then the
+/// command itself, cut to [`MAX_COMMAND_CHARS`] so a long heredoc does not
+/// push the rest out of the profile's `max_turn_chars`. `segments` is the
+/// call's parse and `summaries` the tldr data; with none loaded, each
+/// segment reads as its program and subcommand alone.
 ///
 /// References:
-/// - ADR-188: the `About to run:` line that describes a Bash call.
-pub(super) fn bash_call(command: &str, description: Option<&str>) -> String {
-    let command = match command.char_indices().nth(MAX_COMMAND_CHARS) {
-        Some((at, _)) => format!("{}…", &command[..at]),
-        None => command.to_string(),
-    };
-    match description.map(str::trim).filter(|d| !d.is_empty()) {
-        Some(d) => format!("About to run: {d}\n$ {command}"),
-        None => format!("About to run:\n$ {command}"),
+/// - ADR-188 item 3c: the judge reads the ordered described block.
+/// - ADR-707: the block measured, and the judge reading it.
+pub(super) fn bash_call(command: &str, description: Option<&str>, segments: &[command_describer::Segment], summaries: &command_describer::Summaries) -> String {
+    let block = command_describer::described_block(description.unwrap_or(""), segments, summaries);
+    format!("{}\n$ {}", block.trim_end(), cut(command, MAX_COMMAND_CHARS))
+}
+
+/// The first `max` characters of `text`, with `…` when it was cut.
+fn cut(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        Some((at, _)) => format!("{}…", &text[..at]),
+        None => text.to_string(),
     }
 }
 
 /// The most of a command the judge reads.
 const MAX_COMMAND_CHARS: usize = 400;
+
+/// The tldr summaries the judge's described block reads, from the app's
+/// `catalog/commands/tldr/summaries.tsv`; none when the file is missing.
+pub(super) fn tldr_summaries() -> command_describer::Summaries {
+    command_describer::Summaries::load(&ways_core::paths::tldr_summaries()).unwrap_or_default()
+}
+
+/// The most of a command a judge line or decision outcome records.
+const AUDIT_COMMAND_CHARS: usize = 80;
+
+/// A command as the judge's log lines and decision outcomes record it, so a
+/// misfire can be traced to the call: its first [`AUDIT_COMMAND_CHARS`]
+/// characters, cut only after every credential in the whole command is
+/// replaced with `…`, so a secret that straddles the cut leaves no prefix.
+/// The credentials taken out are the value of a shell assignment
+/// (`GH_TOKEN=…`, `export KEY=…`), of a flag named for a credential
+/// (`--token`, `--password`, `--api-key`, …), of a header whose name is
+/// `Authorization` or ends in `token`, `key`, `secret` or `auth`, and of a
+/// bearer token; the password in URL userinfo and in `curl -u user:pass`; a
+/// MySQL-family client's `-p` glued to its value and a registry login's
+/// `-p` value; and any token with a known key prefix (`sk-`, `ghp_`,
+/// `gho_`, `ghs_`, `github_pat_`, `glpat-`, `xox[abpr]-`, `AKIA…`).
+/// Nothing else is changed.
+pub(super) fn audit_command(command: &str) -> String {
+    use std::sync::OnceLock;
+    static SECRETS: OnceLock<Vec<(regex::Regex, &'static str)>> = OnceLock::new();
+    let rules = SECRETS.get_or_init(|| {
+        let rule = |pattern: &str, with: &'static str| (regex::Regex::new(pattern).expect("static regex"), with);
+        vec![
+            // A shell assignment's value.
+            rule(r#"(^|[\s;&|(`])([A-Za-z_][A-Za-z0-9_]*=)("[^"]*"|'[^']*'|[^\s;&|)`]*)"#, "$1$2…"),
+            // A long or short flag named for a credential.
+            rule(
+                r#"(?i)(--?(?:[a-z0-9]+[_-])*(?:token|secret|password|passwd|api[_-]?key|auth|credentials?)(?:[_-][a-z0-9_-]*)?)(=|\s+)("[^"]*"|'[^']*'|[^\s;&|)`-][^\s;&|)`]*)"#,
+                "$1$2…",
+            ),
+            // A credential header, or a bare bearer token.
+            rule(
+                r#"(?i)((?:\bauthorization|\b[a-z0-9-]*(?:token|key|secret|auth))\s*:\s*(?:(?:bearer|basic|token)\s+)?|\bbearer\s+)([^\s"';&|)`]+)"#,
+                "$1…",
+            ),
+            // The password in URL userinfo.
+            rule(r#"(?i)(\b[a-z][a-z0-9+.-]*://[^\s/@:'"]+:)([^\s@/'"]+)@"#, "$1…@"),
+            // `curl -u user:pass`, `--user user:pass`.
+            rule(r#"((?:^|\s)(?:-u|--user)(?:\s+|=)?['"]?[^\s:'"]+:)([^\s'"]+)"#, "$1…"),
+            // A MySQL-family client's `-p` glued to its value; `-P` is a port.
+            rule(r#"(\b(?:mysql|mysqldump|mysqladmin|mysqlimport|mysqlshow|mysqlcheck|mysqlsh|mariadb|mariadb-dump)\b[^;&|]*?\s-p)([^\s;&|)`]+)"#, "$1…"),
+            // A container registry login's `-p` value.
+            rule(
+                r#"(\b(?:docker|podman|nerdctl|buildah|skopeo|oras|helm)\b[^;&|]*?\blogin\b[^;&|]*?\s-p)(\s+|=)?([^\s;&|)`-][^\s;&|)`]*)"#,
+                "$1$2…",
+            ),
+            // A token with a known key prefix, wherever it stands.
+            rule(r#"\b(sk-|ghp_|gho_|ghs_|github_pat_|glpat-|xox[abpr]-)[A-Za-z0-9_-]+"#, "$1…"),
+            rule(r#"\bAKIA[0-9A-Z]{16}\b"#, "AKIA…"),
+        ]
+    });
+    let mut text = command.to_string();
+    for (pattern, with) in rules {
+        text = pattern.replace_all(&text, *with).into_owned();
+    }
+    match text.char_indices().nth(AUDIT_COMMAND_CHARS) {
+        Some((at, _)) => text[..at].to_string(),
+        None => text,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -753,7 +843,7 @@ mod tests {
         ];
         let mut sent = Vec::new();
         let s = sink();
-        let lc = gate::LogContext { lane: "command", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "PreToolUse", sink: &s };
+        let lc = gate::LogContext { lane: "command", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "PreToolUse", sink: &s, command: None };
         let j = judge_with(Config::Enforce { held_sample: 0.0 }, &cands, vec![], || false, |pending, _| {
             sent = pending.iter().map(|p| p.id.to_string()).collect();
             gate::test_gate(&[("sem/way", 0.05), ("cmd/way", 0.9)], Mode::Enforce, &lc)
@@ -784,6 +874,7 @@ mod tests {
             scope: "agent".into(),
             project_dir: "/p".into(),
             session_id: "s".into(),
+            command: None,
         };
         let held = [candidate("held/way", Trigger::Semantic, false)];
         let open = [candidate("open/way", Trigger::Declared, true)];
@@ -842,6 +933,7 @@ mod tests {
             scope: "agent".into(),
             project_dir: "/p".into(),
             session_id: "s".into(),
+            command: None,
         };
         let open = [candidate("open/way", Trigger::Declared, true)];
         let shown = [Shown { candidate: &open[0], result: "shown" }];
@@ -868,6 +960,7 @@ mod tests {
             scope: "agent".into(),
             project_dir: "/p".into(),
             session_id: "s".into(),
+            command: None,
         };
         let gate = Gate { status: gate::Status::Judged { engine: "e".into(), model: "m".into(), judge_ms: 1 }, ..Gate::default() };
         let call = Turn { role: Role::Assistant, text: "About to run: x".into() };
@@ -897,16 +990,153 @@ mod tests {
         assert!(!j.blocked("a") && j.held.is_empty() && !j.detach_open);
     }
 
+    fn bash(cmd: &str, description: Option<&str>, summaries: &command_describer::Summaries) -> String {
+        bash_call(cmd, description, &command_describer::parse(cmd), summaries)
+    }
+
     #[test]
     fn the_call_follows_the_request_and_no_narration_is_sent() {
-        let call = bash_call("git commit -m x", Some("Commit the fix"));
-        assert_eq!(call, "About to run: Commit the fix\n$ git commit -m x");
+        let tldr = command_describer::Summaries::parse("git-commit\tCommit files to the repository.\n");
+        let call = bash("git commit -m x", Some("Commit the fix"), &tldr);
+        assert_eq!(call, "About to run: Commit the fix\ngit commit (Commit files to the repository)\n$ git commit -m x");
         let turns = with_call(vec![Turn { role: Role::User, text: "brief".into() }], &call);
         assert_eq!(turns, [Turn { role: Role::User, text: "brief".into() }, Turn { role: Role::Assistant, text: call.clone() }]);
         let alone = with_call(vec![], &call);
         assert_eq!(alone, [Turn { role: Role::Assistant, text: call }]);
-        let long = bash_call(&"x".repeat(1000), None);
-        assert!(long.chars().count() < 450 && long.ends_with('…'), "{long}");
+        let long = bash(&"x".repeat(1000), None, &tldr);
+        assert!(long.chars().count() < 1450 && long.ends_with('…'), "{long}");
+        assert!(long.lines().last().unwrap().chars().count() < 410, "the command line is cut: {long}");
+    }
+
+    /// The judge reads what each segment of the call does, in order, with
+    /// the command and its description beside it.
+    ///
+    /// References:
+    /// - ADR-188 item 3c: the judge reads the described block.
+    #[test]
+    fn the_judge_reads_the_described_block_beside_the_command() {
+        let tldr = command_describer::Summaries::parse(
+            "git-branch\tMain Git command for working with branches.\ngrep\tFind patterns in files using regular expressions.\n",
+        );
+        let call = bash("cd repo && git branch -D foo | grep x", Some("Delete the merged branch"), &tldr);
+        assert_eq!(
+            call,
+            "About to run: Delete the merged branch\n\
+             git branch (Main Git command for working with branches) | grep (Find patterns in files using regular expressions)\n\
+             $ cd repo && git branch -D foo | grep x"
+        );
+        // With no tldr data each segment reads as its program and subcommand.
+        let bare = bash("git show abc --stat", None, &command_describer::Summaries::default());
+        assert_eq!(bare, "About to run: \ngit show\n$ git show abc --stat");
+    }
+
+    /// #1372: each outcome row of a command-lane record carries the call's
+    /// first 80 characters, and a judged one the judge's critique when it
+    /// gave one; a semantic candidate the judge never saw names why.
+    #[test]
+    fn a_command_outcome_row_carries_the_command_and_the_critique() {
+        let cmd = format!("GH_TOKEN=ghp_x git branch -D foo && {}", "echo y; ".repeat(20));
+        let lane = Lane {
+            surface: decision::Surface::Command,
+            hook_event: "PreToolUse".into(),
+            scope: "agent".into(),
+            project_dir: "/p".into(),
+            session_id: "s".into(),
+            command: Some(audit_command(&cmd)),
+        };
+        let mut gate = Gate { status: gate::Status::Judged { engine: "claude-code".into(), model: "m".into(), judge_ms: 900 }, ..Gate::default() };
+        let critique = Some("the call deletes a branch; this way is about history rewrites".to_string());
+        gate.judgements.insert("history/way".into(), gate::Judgement { p_yes: 0.85, verdict: "pass", critique });
+        gate.judgements.insert("quiet/way".into(), gate::Judgement { p_yes: 0.9, verdict: "pass", critique: None });
+        gate.unjudged.insert("late/way".into(), "overflow".into());
+        let cands = [
+            candidate("history/way", Trigger::Semantic, true),
+            candidate("quiet/way", Trigger::Declared, true),
+            candidate("late/way", Trigger::Declared, true),
+        ];
+        let shown: Vec<Shown<'_>> = cands.iter().map(|c| Shown { candidate: c, result: "fired" }).collect();
+        let judged = Judged { gate, turns: vec![], detach_open: false, held: vec![], unhosted: false };
+        let v = lane_record(decision::Record::for_test(), &lane, &judged, &shown).to_json();
+        let rows = v["outcomes"].as_array().unwrap();
+        let want = "GH_TOKEN=… git branch -D foo && echo y; echo y; echo y; echo y; echo y; echo y; ";
+        assert_eq!(want.chars().count(), 80);
+        assert!(rows.iter().all(|o| o["command"] == want), "{v:#}");
+        assert_eq!(rows[0]["critique"], "the call deletes a branch; this way is about history rewrites");
+        assert!(rows[1].get("critique").is_none(), "no critique given, none recorded");
+        assert_eq!(rows[2]["unjudged"], "overflow");
+        // A lane with no command records none.
+        let quiet = Lane { command: None, ..lane };
+        let v = lane_record(decision::Record::for_test(), &quiet, &judged, &shown).to_json();
+        assert!(v["outcomes"].as_array().unwrap().iter().all(|o| o.get("command").is_none()));
+    }
+
+    /// A judge line and decision outcome record the call's first 80
+    /// characters, with no assignment value, credential flag or auth header.
+    #[test]
+    fn the_audit_command_keeps_the_text_and_drops_secret_values() {
+        assert_eq!(audit_command("git branch -D foo"), "git branch -D foo");
+        let long = format!("cargo test -p ways {}", "x".repeat(200));
+        assert_eq!(audit_command(&long).chars().count(), 80);
+        assert!(audit_command(&long).starts_with("cargo test -p ways xx"));
+        assert_eq!(audit_command("GH_TOKEN=ghp_abc123 gh pr create"), "GH_TOKEN=… gh pr create");
+        assert_eq!(audit_command("cd x && export API_KEY='s3 cr3t' && make"), "cd x && export API_KEY=… && make");
+        assert_eq!(audit_command("tool --token abc --password=hunter2 -v"), "tool --token … --password=… -v");
+        assert_eq!(audit_command(r#"curl -H "Authorization: Bearer abc.def" https://x"#), r#"curl -H "Authorization: Bearer …" https://x"#);
+        assert_eq!(audit_command("curl -H 'X-Api-Key: k1' u"), "curl -H 'X-Api-Key: …' u");
+        assert_eq!(audit_command("git log --format=%H --author=aaron"), "git log --format=%H --author=aaron", "a plain flag value stays");
+        assert_eq!(audit_command("gh auth login --with-token --github-token=t1"), "gh auth login --with-token --github-token=…");
+    }
+
+    /// Each credential shape the audit line must not carry, and commands
+    /// that look close to one but carry none.
+    #[test]
+    fn the_audit_command_redacts_every_credential_shape() {
+        let cases: &[(&str, &str)] = &[
+            ("curl -u admin:hunter2 https://x", "curl -u admin:… https://x"),
+            ("curl --user 'admin:hunter2' u", "curl --user 'admin:…' u"),
+            ("git clone https://user:ghp_abc@github.com/o/r", "git clone https://user:…@github.com/o/r"),
+            ("curl -H 'X-Auth-Token: abc' u", "curl -H 'X-Auth-Token: …' u"),
+            ("curl -H 'PRIVATE-TOKEN: glpat-x' u", "curl -H 'PRIVATE-TOKEN: …' u"),
+            ("curl -H 'x-client-secret: s1' u", "curl -H 'x-client-secret: …' u"),
+            ("curl -H 'Proxy-Auth: p1' u", "curl -H 'Proxy-Auth: …' u"),
+            (r#"curl -H "Authorization: Bearer abc.def" https://x"#, r#"curl -H "Authorization: Bearer …" https://x"#),
+            ("mysql -u root -phunter2 db", "mysql -u root -p… db"),
+            ("mariadb -phunter2", "mariadb -p…"),
+            ("docker login -p s3cr3t registry.io", "docker login -p … registry.io"),
+            ("docker login -u me --password x r", "docker login -u me --password … r"),
+            ("docker login --password=x r", "docker login --password=… r"),
+            ("echo sk-ant-api03-abcDEF123", "echo sk-…"),
+            ("echo sk-proj-abc123", "echo sk-…"),
+            ("echo ghp_abc123", "echo ghp_…"),
+            ("echo gho_abc123", "echo gho_…"),
+            ("echo ghs_abc123", "echo ghs_…"),
+            ("echo github_pat_11AB_cd", "echo github_pat_…"),
+            ("echo glpat-abc123", "echo glpat-…"),
+            ("echo xoxb-1-2-abc xoxp-9", "echo xoxb-… xoxp-…"),
+            ("aws s3 ls # AKIAIOSFODNN7EXAMPLE", "aws s3 ls # AKIA…"),
+            ("GH_TOKEN=ghp_abc123 gh pr create", "GH_TOKEN=… gh pr create"),
+            ("tool --token abc -v", "tool --token … -v"),
+            ("mkdir -p a/b", "mkdir -p a/b"),
+            ("git clone https://github.com/o/r", "git clone https://github.com/o/r"),
+            ("ls -la", "ls -la"),
+            ("mysql -P 3306 -p db", "mysql -P 3306 -p db"),
+            ("git push -u origin main", "git push -u origin main"),
+            ("docker run -p 8080:80 nginx", "docker run -p 8080:80 nginx"),
+            ("cargo test -p ways-core", "cargo test -p ways-core"),
+        ];
+        for (command, want) in cases {
+            assert_eq!(audit_command(command), *want, "{command}");
+        }
+    }
+
+    /// The cut comes after redaction, so a secret that starts before
+    /// character 80 and ends after it leaves no prefix in the line.
+    #[test]
+    fn a_secret_across_the_cut_leaves_no_prefix() {
+        let command = format!("{} ghp_{}", "x".repeat(74), "S".repeat(40));
+        let audit = audit_command(&command);
+        assert!(!audit.contains('S'), "{audit}");
+        assert!(audit.ends_with("ghp_…"), "{audit}");
     }
 
     type Lines = std::cell::RefCell<Vec<String>>;

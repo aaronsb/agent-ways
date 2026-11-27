@@ -125,7 +125,7 @@ The subagent switch withheld ways from a dispatched agent. Logged once per Task 
 
 ### `way_judged`
 
-The relevance gate (ADR-196) asked the judge about a way that matched on the prompt lane. One line per way judged.
+The relevance gate asked the judge about a way that matched, on any lane. One line per way judged.
 
 | Field | Meaning |
 |-------|---------|
@@ -136,7 +136,23 @@ The relevance gate (ADR-196) asked the judge about a way that matched on the pro
 | `mode`, `engine`, `model` | Gate mode, engine profile and judge model |
 | `judge_ms`, `gate_ms`, `candidates` | Judge latency, whole-gate latency, ways in the request |
 | `reason`, `ancestor` | On a way blocked because an ancestor was blocked: `reason` is `ancestor` and `ancestor` names it. These lines carry no latency or candidate count. |
+| `critique` | The judge's reason for its answer, when it gave one. The shipped judge's answer has no field for it, so current lines carry none. |
+| `command` | Command lane only: the first 80 characters of the call, with the value of each shell assignment, credential flag and auth header replaced by `…` |
+| `lane`, `agent_id` | The lane that asked and the calling agent |
 | `hook`, `scope`, `project`, `session` | Common fields |
+
+### `way_unjudged`
+
+A tool lane's candidate the judge gave no verdict, in enforce mode. One line per way. A tool lane sends one judge request per call, so a candidate gets no verdict when it was past the request's cap or its request failed.
+
+| Field | Meaning |
+|-------|---------|
+| `way` | The way, or `check:<id>` for a check |
+| `trigger` | What picked it: `semantic`, `keyword`, `strict` or `declared` |
+| `verdict` | `block` for a candidate only the embedding matcher picked, which is not shown; `pass` for any other, shown as the matcher decided |
+| `reason` | `overflow` when it was past `tool_candidates`, else the request's fallback reason, such as `deadline`, `deadline: unclaimed` or `model_error: aborted` |
+| `mode`, `command` | `enforce`, and on the command lane the call as `way_judged` records it |
+| `hook`, `lane`, `scope`, `project`, `session`, `agent_id` | Common fields |
 
 ### `judge_call`
 
@@ -154,7 +170,7 @@ One provider call made by the judge. `ways agent cost` sums these.
 
 ### `gate_fallback`
 
-The gate could not judge, so nothing was blocked. The gate fails open.
+One judge request could not be judged. On the prompt and state lanes nothing is blocked and the gate fails open. On a tool lane each of its candidates also logs `way_unjudged`, and in enforce mode a semantic one is not shown.
 
 | Field | Meaning |
 |-------|---------|

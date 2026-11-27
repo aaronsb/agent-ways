@@ -126,6 +126,15 @@ pub fn bin_root() -> PathBuf {
     data_root().join("bin")
 }
 
+/// The tldr page summaries the command describer reads:
+/// `$XDG_DATA/agent-ways/catalog/commands/tldr/summaries.tsv`.
+///
+/// References:
+/// - ADR-706 item 7: the tldr data the catalog ships.
+pub fn tldr_summaries() -> PathBuf {
+    data_root().join("catalog").join("commands").join("tldr").join("summaries.tsv")
+}
+
 // --- user ($XDG_CONFIG) ---
 
 /// The operator's own ways root: `$XDG_CONFIG/agent-ways/ways` (the new "user"

@@ -67,7 +67,8 @@ pub struct Outcome {
     pub way: String,
     /// `fired`, `redisclosed`, `held_refire`, `held_context_cap`,
     /// `keyword_gated`, `near_miss`, `judge_block`, `ancestor_block`,
-    /// `withheld_for_parent`, `stashed`, `not_fireable` or `error`.
+    /// `unjudged_block`, `withheld_for_parent`, `stashed`, `not_fireable` or
+    /// `error`.
     pub result: String,
     pub rank: Option<u32>,
     pub channel: Option<String>,
@@ -79,6 +80,14 @@ pub struct Outcome {
     pub threshold: Option<f64>,
     pub mode: Option<String>,
     pub ancestor: Option<String>,
+    /// The judge's reason, on a judged way when it gave one.
+    pub critique: Option<String>,
+    /// On a tool lane's way the judge gave no verdict: why, `overflow` or
+    /// its request's fallback reason.
+    pub unjudged: Option<String>,
+    /// On a command-lane outcome: the call's first 80 characters, with
+    /// assignment values and credentials taken out.
+    pub command: Option<String>,
     /// On a near miss: the smallest `tau_s - probability`.
     pub shortfall: Option<f64>,
     pub tau_s: Option<f64>,

@@ -57,6 +57,12 @@ pub struct JudgeRequest {
     /// - ADR-712 §4: a tool lane's judge input is the request and the call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_turns: Option<usize>,
+    /// The milliseconds this request may take, which the agent holds the
+    /// provider call to in place of the profile's `timeout_ms`: what is left
+    /// of the lane's budget when the hook sends it. `None` from a hook built
+    /// before #1372 leaves the profile's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_ms: Option<u64>,
 }
 
 /// Which agent answered: its version, the version of this shared crate it was
@@ -116,6 +122,10 @@ pub struct Judged {
 pub struct Verdict {
     pub id: String,
     pub p_yes: f64,
+    /// The judge's reason for its answer, when it gave one. The shipped
+    /// judge's answer schema has no field for it, so today none does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub critique: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -276,6 +286,7 @@ mod tests {
                 candidates: vec![Candidate { id: "a/b".into(), text: "a › b\nd".into() }],
                 engine: Some("anthropic".into()),
                 min_turns: Some(2),
+                deadline_ms: Some(2900),
             }),
         };
         let line = serde_json::to_string(&req).unwrap();

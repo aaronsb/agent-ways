@@ -158,6 +158,7 @@ pub fn task(
         scope: task_scope.to_string(),
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
+        command: None,
     };
     let scan = judged::Scan::begin(session_id);
     let turns = vec![ways_agent_core::judge::Turn { role: ways_agent_core::judge::Role::User, text: query.to_string() }];

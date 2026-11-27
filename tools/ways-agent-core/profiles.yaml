@@ -13,6 +13,14 @@
 # second addendum), so a request carries at most max_candidates, in the
 # matcher's order, and keeps under the deadline.
 #
+# A tool lane (command, file, tool, task, post-tool) sends one request per
+# call, of at most tool_candidates, within tool_timeout_ms. Under the
+# claude-code engine a request took about 515 ms plus 112 ms per candidate
+# over a week of records. 16 candidates take about 2,300 ms, which leaves
+# about 700 ms of the 3,000 ms deadline for a slow call. 22 would take about
+# 2,980 ms, the average alone filling the deadline, so a scan near that cap
+# would time out about half the time (#1372).
+#
 # `claude-code` judges inside Claude Code, through a ways mod module on the
 # session's own account (ADR-708). It holds no key and keeps the others'
 # settings until measured. Its model is pinned to Haiku 4.5, the key engines'
@@ -34,6 +42,8 @@ anthropic:
   max_turn_chars: 1200
   concurrency: 8
   max_candidates: 8
+  tool_timeout_ms: 3000
+  tool_candidates: 16
 
 openrouter:
   display_name: OpenRouter API key
@@ -45,6 +55,8 @@ openrouter:
   max_turn_chars: 1200
   concurrency: 8
   max_candidates: 8
+  tool_timeout_ms: 3000
+  tool_candidates: 16
 
 claude-code:
   display_name: Claude Code internal
@@ -56,3 +68,5 @@ claude-code:
   max_turn_chars: 1200
   concurrency: 8
   max_candidates: 8
+  tool_timeout_ms: 3000
+  tool_candidates: 16

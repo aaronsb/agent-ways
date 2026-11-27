@@ -75,6 +75,7 @@ pub fn file(
         scope: scope.clone(),
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
+        command: None,
     };
     let turns = || judged::tool_turns(session_id, &format!("About to edit: {filepath}"));
     judged::run(&lane, &scan, &judge_candidates, turns, gate::TOOL_WAIT, |c| {
