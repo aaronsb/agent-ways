@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1120" height="580" viewBox="0 0 1120 580" font-family="DejaVu Sans, Arial, sans-serif">
+<rect width="1120" height="580" fill="#ffffff"/>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#222"/></marker><marker id="ahn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0d7a6b"/></marker></defs>
+<text x="18" y="28" font-size="16" fill="#222">The states a session moves through at a work boundary</text>
+<line x1="30" y1="80" x2="70" y2="80" stroke="#0d7a6b" stroke-width="2"/>
+<text x="80" y="84" font-size="12" fill="#222">new in this record</text>
+<line x1="250" y1="80" x2="290" y2="80" stroke="#222" stroke-width="1.4"/>
+<text x="300" y="84" font-size="12" fill="#222">exists today (relay mode, amended thresholds)</text>
+<line x1="640" y1="80" x2="680" y2="80" stroke="#0d7a6b" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="690" y="84" font-size="12" fill="#222">into a new Claude Code session</text>
+<rect x="30" y="96" width="14" height="10" fill="#ffffff" stroke="#0d7a6b" stroke-width="2"/>
+<text x="52" y="105" font-size="12" fill="#222">new state</text>
+<rect x="140" y="96" width="14" height="10" fill="#ffffff" stroke="#222" stroke-width="1.4"/>
+<text x="162" y="105" font-size="12" fill="#222">state that exists today</text>
+<rect x="30" y="278" width="170" height="64" fill="#ffffff" stroke="#222" stroke-width="1.4" rx="8"/>
+<text x="115.0" y="304" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Working</text>
+<text x="115.0" y="323" font-size="11.5" fill="#555" text-anchor="middle">tasks in flight</text>
+<rect x="260" y="278" width="170" height="64" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
+<text x="345.0" y="304" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Boundary</text>
+<text x="345.0" y="323" font-size="11.5" fill="#555" text-anchor="middle">a piece of work landed</text>
+<rect x="490" y="278" width="170" height="64" fill="#ffffff" stroke="#222" stroke-width="1.4" rx="8"/>
+<text x="575" y="299" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Wrap, then judge</text>
+<text x="575" y="317" font-size="11.5" fill="#555" text-anchor="middle">handoff written; a clean</text>
+<text x="575" y="332" font-size="11.5" fill="#555" text-anchor="middle">model call decides</text>
+<rect x="710" y="138" width="170" height="64" fill="#ffffff" stroke="#222" stroke-width="1.4" rx="8"/>
+<text x="795.0" y="164" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Compacting</text>
+<text x="795.0" y="183" font-size="11.5" fill="#555" text-anchor="middle">compact with the handoff</text>
+<rect x="710" y="418" width="170" height="64" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
+<text x="795.0" y="444" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Armed exit</text>
+<text x="795.0" y="463" font-size="11.5" fill="#555" text-anchor="middle">warm while it pays</text>
+<rect x="920" y="418" width="180" height="64" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
+<text x="1010.0" y="444" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Finished</text>
+<text x="1010.0" y="463" font-size="11.5" fill="#555" text-anchor="middle">cache lapsed, transcript kept</text>
+<path d="M 200 310 H 256" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="230" y="300" font-size="12" fill="#222" text-anchor="middle">done</text>
+<path d="M 430 310 H 486" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="460" y="300" font-size="12" fill="#222" text-anchor="middle">tool</text>
+<path d="M 165 278 V 246 H 560 V 274" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
+<text x="362" y="238" font-size="12" fill="#222" text-anchor="middle">85% with no boundary yet: wrap mid-work</text>
+<path d="M 710 170 H 80 V 274" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
+<text x="400" y="162" font-size="12" fill="#222" text-anchor="middle">resume turn, tasks remain</text>
+<path d="M 660 294 L 712 206" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
+<text x="676" y="246" font-size="12" fill="#222" text-anchor="end">compact</text>
+<path d="M 660 326 L 712 414" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="680" y="384" font-size="12" fill="#222" text-anchor="end">stop</text>
+<path d="M 575 342 V 382 H 150 V 346" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="362" y="374" font-size="12" fill="#222" text-anchor="middle">continue: the wrap stands as a checkpoint</text>
+<path d="M 795 202 V 414" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
+<text x="805" y="312" font-size="12" fill="#222">no tasks left: no resume</text>
+<path d="M 880 450 H 916" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="900" y="390" font-size="12" fill="#222" text-anchor="middle">tick: nothing pending,</text>
+<text x="900" y="406" font-size="12" fill="#222" text-anchor="middle">or rent passes buy</text>
+<path d="M 770 482 V 528 H 115 V 346" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="440" y="520" font-size="12" fill="#222" text-anchor="middle">operator prompt: disarms, cache still warm</text>
+<path d="M 1010 482 V 562 H 60 V 346" fill="none" stroke="#0d7a6b" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ahn)"/>
+<text x="530" y="554" font-size="12" fill="#222" text-anchor="middle">a new session reads the handoff, or claude --resume reloads this one cold</text>
+</svg>

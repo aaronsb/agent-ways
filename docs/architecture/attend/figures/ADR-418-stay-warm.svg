@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1000" height="320" viewBox="0 0 1000 320" font-family="DejaVu Sans, Arial, sans-serif">
+<rect width="1000" height="320" fill="#ffffff"/>
+<text x="18" y="28" font-size="16" fill="#222">How long an armed exit stays warm, in keepwarm ticks</text>
+<text x="18" y="48" font-size="12" fill="#555">Drawn for a session at 35% of a 1M window (350k tokens), with a fresh start of 100k tokens. One tick is about 50 idle minutes.</text>
+<rect x="180" y="78" width="20" height="186" fill="#0d7a6b" fill-opacity="0.1"/>
+<text x="190" y="72" font-size="11.5" fill="#555" text-anchor="middle">free hour</text>
+<text x="170" y="106" font-size="13" fill="#222" text-anchor="end">handoff enough,</text>
+<text x="170" y="122" font-size="13" fill="#222" text-anchor="end">nothing pending</text>
+<rect x="180" y="94" width="20" height="34" fill="#a8701a" fill-opacity="0.3" stroke="#a8701a" stroke-width="1"/>
+<circle cx="200" cy="111" r="6" fill="#0d7a6b"/>
+<text x="212" y="115" font-size="12" fill="#222">exit at the first tick</text>
+<text x="170" y="170" font-size="13" fill="#222" text-anchor="end">something pending</text>
+<text x="170" y="186" font-size="11.5" fill="#555" text-anchor="end">a reply, a peer, a CI run</text>
+<rect x="180" y="158" width="220" height="34" fill="#a8701a" fill-opacity="0.3" stroke="#a8701a" stroke-width="1"/>
+<circle cx="400" cy="175" r="6" fill="#0d7a6b"/>
+<text x="412" y="179" font-size="12" fill="#222">exit when it arrives, or at tick 11 (about 9 h)</text>
+<text x="170" y="234" font-size="13" fill="#222" text-anchor="end">session holds detail</text>
+<text x="170" y="250" font-size="11.5" fill="#555" text-anchor="end">the handoff lacks</text>
+<rect x="180" y="222" width="800" height="34" fill="#a8701a" fill-opacity="0.3" stroke="#a8701a" stroke-width="1"/>
+<text x="580" y="243" font-size="12" fill="#222" text-anchor="middle">warm until the operator returns, up to 40 ticks (about 33 h)</text>
+<line x1="180" y1="270" x2="980" y2="270" stroke="#555" stroke-width="1"/>
+<line x1="180" y1="270" x2="180" y2="275" stroke="#555" stroke-width="1"/>
+<text x="180" y="288" font-size="12" fill="#555" text-anchor="middle">0</text>
+<line x1="200" y1="270" x2="200" y2="275" stroke="#555" stroke-width="1"/>
+<text x="200" y="288" font-size="12" fill="#555" text-anchor="middle">1</text>
+<line x1="280" y1="270" x2="280" y2="275" stroke="#555" stroke-width="1"/>
+<text x="280" y="288" font-size="12" fill="#555" text-anchor="middle">5</text>
+<line x1="380" y1="270" x2="380" y2="275" stroke="#555" stroke-width="1"/>
+<text x="380" y="288" font-size="12" fill="#555" text-anchor="middle">10</text>
+<line x1="400" y1="270" x2="400" y2="275" stroke="#555" stroke-width="1"/>
+<line x1="580" y1="270" x2="580" y2="275" stroke="#555" stroke-width="1"/>
+<text x="580" y="288" font-size="12" fill="#555" text-anchor="middle">20</text>
+<line x1="780" y1="270" x2="780" y2="275" stroke="#555" stroke-width="1"/>
+<text x="780" y="288" font-size="12" fill="#555" text-anchor="middle">30</text>
+<line x1="980" y1="270" x2="980" y2="275" stroke="#555" stroke-width="1"/>
+<text x="980" y="288" font-size="12" fill="#555" text-anchor="middle">40</text>
+<text x="580" y="308" font-size="12" fill="#555" text-anchor="middle">keepwarm ticks, about 50 idle minutes each</text>
+</svg>
