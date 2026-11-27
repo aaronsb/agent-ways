@@ -121,6 +121,10 @@ export function wrappedArgv(outcome: WrapOutcome, detail: string, focus?: string
   return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail), ...focusArgs(focus), ...(marker === undefined ? [] : ['--marker', marker])]
 }
 
+function focusArgs(focus: string | undefined): string[] {
+  return focus === undefined ? [] : ['--focus', oneLine(focus)]
+}
+
 /** A relay's resume went in, or why it did not.
  *
  *  References:
@@ -138,10 +142,6 @@ export function goalArgv(active: boolean): string[] {
 /** A resumed turn ended with a `relay: stop <reason> ...` line. */
 export function stoppedArgv(stop: RelayStop): string[] {
   return [ATTEND, 'keepwarm', 'stopped', stop.reason, '--detail', oneLine(stop.detail)]
-}
-
-function focusArgs(focus: string | undefined): string[] {
-  return focus === undefined ? [] : ['--focus', oneLine(focus)]
 }
 
 /** The compaction after the wrap ran, or why it failed. */
