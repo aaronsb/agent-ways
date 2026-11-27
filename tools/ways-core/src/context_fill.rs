@@ -7,9 +7,12 @@
 //! `ways context`, the `context-threshold` trigger, attend's context sensor and
 //! the peers sensor all read a transcript's fill here. The token count is the
 //! newest turn's API usage ([`claude_sessions::usage::last_context_tokens`]),
-//! and the window comes from [`context_window`] (ADR-166). A second copy of
-//! this arithmetic is how attend's sensor came to report 69% of a 1M window
-//! that `ways context` read as 17% (#1361).
+//! and the window comes from [`context_window`]. A second copy of this
+//! arithmetic is how attend's sensor came to report 69% of a 1M window that
+//! `ways context` read as 17% (#1361).
+//!
+//! References:
+//! - ADR-166: the one resolver for a model's context window.
 
 use crate::context_window::{self, ContextWindow};
 use std::path::Path;

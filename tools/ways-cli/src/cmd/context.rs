@@ -88,10 +88,13 @@ pub fn get_context_for_transcript(transcript: &str) -> Result<ContextInfo> {
 ///
 /// The `context-threshold` trigger in `scan/state.rs` reads this; it is the
 /// same measurement `ways context` prints ([`context_fill::measure`]): real
-/// API token counts divided by the model window (ADR-166). The transcript
-/// *file* is far larger than the live context (it holds full tool output,
-/// persisted-output blobs that aren't in context, and JSON envelope overhead),
-/// so its byte size is never the gauge.
+/// API token counts divided by the model window. The transcript *file* is far
+/// larger than the live context (it holds full tool output, persisted-output
+/// blobs that aren't in context, and JSON envelope overhead), so its byte size
+/// is never the gauge.
+///
+/// References:
+/// - ADR-166: the one resolver for a model's context window.
 pub fn pct_used_from_transcript(transcript: &str) -> Option<u64> {
     let fill = context_fill::measure_transcript(Path::new(transcript), Owner::Own).ok()?;
     (fill.window.tokens > 0).then(|| fill.pct_used())

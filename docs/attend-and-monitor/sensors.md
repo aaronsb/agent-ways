@@ -47,7 +47,7 @@ When a sensor discloses on the event lane, the sensor host writes its lines only
 
 ## `context`
 
-The sensor that watches the session itself rather than the world (ADR-113). Each poll measures the sensor host's own session transcript with `ways_core::context_fill`, the measurement `ways context` prints: the newest turn's API token usage over the model's window (ADR-166). Its percent is the one `ways context` shows. A host with no session id reads nothing, since the newest transcript in a project can belong to another session.
+The sensor that watches the session itself rather than the world. Each poll measures the sensor host's own session transcript with `ways_core::context_fill`, the measurement `ways context` prints: the newest turn's API token usage over the model's window. Its percent is the one `ways context` shows. A host with no session id reads nothing, since the newest transcript in a project can belong to another session.
 
 **Tier crossings.** A tier runs from its start to the next tier's start, and its message is true at every percent in that range: each agent-ways action (todos at 75%, memory at 80%, the compaction checkpoint at 85%) starts a tier, so no message calls an action ahead once the fill has passed it. A tier emits when the fill first reaches it. Only the tier the fill is in emits, and reaching it spends the tiers below, so a reading that lands past two tiers reports the higher one alone:
 
@@ -192,5 +192,6 @@ The sensor does not capture output.
 - **ADR-113** — attend and the first context sensor
 - **ADR-117** — sensor crate extraction and feature flags
 - **ADR-136** — the event and message lanes
+- **ADR-166** — the one resolver for a model's context window, which the context sensor divides by
 - **ADR-403** — sensors as files under one spec
 - **ADR-416** — the sensor host, the presence-only peers sensor, the update check and the `ways-update` sensor

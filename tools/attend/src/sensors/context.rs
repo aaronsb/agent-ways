@@ -205,7 +205,10 @@ impl Sensor for ContextSensor {
                     }
                 }
 
-                // High-salience bands get an affordance (ADR-114)
+                // High-salience bands name the way to read for reflection.
+                //
+                // References:
+                // - ADR-114: a high-salience observation carries an affordance.
                 if band.at >= 85 {
                     msg.push_str(". Use `ways show attend context-pressure --session $CLAUDE_SESSION_ID` for reflection guidance");
                 }
