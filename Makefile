@@ -76,8 +76,8 @@ help:
 	@echo "  make site-serve   Preview the manual at http://127.0.0.1:8000 with live reload"
 	@echo "  make explainer-video [EXPLAINER=name]  Render docs/explainers/animations/<name> to build/explainers/<name>.mp4"
 	@echo "  make explainer-stills EXPLAINER=name T=5,20,40  PNG stills of an explainer at those seconds"
-	@echo "  make cut-release  Open a version-bump PR for a component (COMPONENT=ways LEVEL=patch)"
-	@echo "  make publish-release  After the bump PR merges: tag + publish (COMPONENT=ways [PUSH=1])"
+	@echo "  make cut-release  Open one version-bump PR for one or more components (COMPONENT=\"ways attend\" LEVEL=patch)"
+	@echo "  make publish-release  After the bump PR merges: tag + publish each (COMPONENT=\"ways attend\" [PUSH=1])"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make purge-attend-state  Wipe all attend runtime cache (peers, signals,"
 	@echo "                           channels, instance names, heartbeats, sensor"
@@ -390,6 +390,7 @@ test-hooks:
 	@bash tests/installer-report-test.sh
 	@bash tests/make-targets-test.sh
 	@bash tests/release-plugin-test.sh
+	@bash tests/release-bump-test.sh
 	@bash tests/prebuilt-lib-test.sh
 	@bash tests/download-prebuilt-test.sh
 	@bash tests/gh-tasks-test.sh
@@ -435,13 +436,16 @@ test-live-matrix:
 
 # --- Release ---
 
-# Release a Cargo-versioned component (ADR-150). Two steps, because main is
+# Release Cargo-versioned components (ADR-150). Two steps, because main is
 # branch-protected and PR-first:
-#   make cut-release COMPONENT=ways LEVEL=patch      # 1) open a version-bump PR
+#   make cut-release COMPONENT="ways attend" LEVEL=patch     # 1) open one version-bump PR
 #   (merge that PR, then: git checkout main && git pull)
-#   make publish-release COMPONENT=ways [PUSH=1]     # 2) tag the merged bump + publish
-# publish-release without PUSH=1 creates the tag locally and prints the push
-# command; PUSH=1 pushes it (CI then builds all platforms + creates the Release).
+#   make publish-release COMPONENT="ways attend" [PUSH=1]    # 2) tag the merged bump + publish
+# COMPONENT is one component or a list, separated by spaces or commas. An
+# entry may name its own level, as in COMPONENT="ways:minor attend:patch";
+# LEVEL is the level of an entry that names none. publish-release without
+# PUSH=1 creates the tags locally and prints the push commands; PUSH=1 pushes
+# them (CI then builds all platforms + creates each Release).
 cut-release:
 	@bash scripts/release.sh bump "$(COMPONENT)" "$(LEVEL)"
 
