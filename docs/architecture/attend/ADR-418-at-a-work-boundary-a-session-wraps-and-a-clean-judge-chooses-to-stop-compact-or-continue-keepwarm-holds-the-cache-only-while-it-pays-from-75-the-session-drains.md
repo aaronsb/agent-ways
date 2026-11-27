@@ -67,6 +67,10 @@ considered:
     said: "I accept this - we can use the same judge interface we use for disclosing a way too"
     via: operator in session, 2026-11-27, after reviewing ADR-418 and its four figures
     covers: [settings, judge-model, first]
+  - operator: aaronsb
+    said: "perhaps the judge interface gets different judgement profiles - a ways disclosure and continuance profile. we can specify the models just the same, but they're not tied to each other"
+    via: operator in session, 2026-11-27, refining the earlier answer on the judge's profile
+    covers: [judge-model]
 status: accepted
 date: 2026-11-27
 deciders:
