@@ -55,10 +55,11 @@ pub(super) fn respond(raw: &str, attend: &OsStr, today: &dyn Fn() -> String) -> 
     let Some(root) = handoff::repo_root(Path::new(cwd)) else { return handoff::OUTLINE.to_string() };
     let path = handoff::path(&root);
     let Ok(text) = std::fs::read_to_string(&path) else { return handoff::OUTLINE.to_string() };
-    let fresh = match wrap_id(attend) {
-        Some(id) => handoff::is_fresh_for(&text, &id),
-        None => handoff::head_short(&root).is_some_and(|head| handoff::is_fresh_by_head(&text, &head, &today())),
-    };
+    // The id attend recorded decides; where attend has none, or names
+    // another wrap than the file's (one it did not hear of, such as a wrap
+    // in a session without the mod), today's date and HEAD decide.
+    let by_head = || handoff::head_short(&root).is_some_and(|head| handoff::is_fresh_by_head(&text, &head, &today()));
+    let fresh = wrap_id(attend).is_some_and(|id| handoff::is_fresh_for(&text, &id)) || by_head();
     if fresh {
         handoff::instructions(&text, &path)
     } else {
@@ -178,11 +179,23 @@ mod tests {
     }
 
     #[test]
-    fn a_handoff_from_another_wrap_gives_the_outline() {
+    fn a_handoff_from_another_wrap_and_another_day_gives_the_outline() {
         let (top, root, head) = repo("staleid");
-        write_handoff(&root, &format!("{TODAY} {head} wrap=20261126T2100Z-3f9a1c2e"));
+        write_handoff(&root, &format!("2026-11-25 {head} wrap=20261126T2100Z-3f9a1c2e"));
         let attend = stub_attend(&top, ID, 0);
         assert_eq!(respond(&payload(&root, None), attend.as_os_str(), &today), handoff::OUTLINE);
+    }
+
+    /// The finding's sequence: attend recorded relay wrap A, then a `/wrap
+    /// handoff` wrote B without attend hearing of it, then a bare
+    /// `/compact`. B names today and HEAD, so it is given.
+    #[test]
+    fn a_handoff_whose_id_attend_did_not_record_is_given_when_fresh_by_head_and_date() {
+        let (top, root, head) = repo("unrecorded");
+        let path = write_handoff(&root, &format!("{TODAY} {head} wrap=20261126T2210Z-3f9a1c2e"));
+        let attend = stub_attend(&top, ID, 0);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(respond(&payload(&root, None), attend.as_os_str(), &today), handoff::instructions(&text, &path));
     }
 
     #[test]

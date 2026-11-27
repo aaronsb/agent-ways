@@ -10,8 +10,9 @@
 //!
 //! The wrap skill writes the date, the HEAD commit and `wrap=<id>` on the
 //! file's first line. A handoff is fresh for a wrap when that line carries
-//! the wrap's id; where no wrap id is known, when it names today's date and
-//! the current HEAD.
+//! the wrap's id. The PreCompact hook, which asks attend for the id, also
+//! takes a handoff whose first line names today's date and the current
+//! HEAD, where attend knows no id or names another wrap than the file's.
 //!
 //! References:
 //! - ADR-165: the wrap writes its handoff to `.claude/handoff.wrap.md`.
