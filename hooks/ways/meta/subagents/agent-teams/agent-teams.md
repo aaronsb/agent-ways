@@ -51,6 +51,7 @@ Staging by name and leaving other sessions' changes alone: delivery/commits/prep
 - collaboration/teams(collaboration) — the guidance each teammate receives in its own session
 - subagents(meta) — parent: briefs, the return shape and worktree base branches
 - subagents/briefs(meta) — what each agent's prompt carries
+- subagents/lead(meta) — the lead session that watches the team and merges its work
 - teams(collaboration) — the teammate side of this traffic
 - delivery/branching(softwaredev) — branch awareness before edits
 - delivery/commits/prepare(softwaredev) — uncommitted changes you did not make, and staging by name

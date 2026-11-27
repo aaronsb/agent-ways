@@ -9,6 +9,10 @@ basis:
 agent:
   name: Claude
   model: unrecorded
+considered:
+  - operator: aaronsb
+    said: "we should change the adr"
+    via: "operator, 2026-11-27, in the agent-ways session that ran the ways refactor for #1365"
 status: accepted
 date: 2026-07-07
 deciders:
@@ -167,3 +171,4 @@ rename ripple through references to `ship`.
 ## Amendments
 
 - 2026-11-26, by ADR-417, to Decision item 2: a skill still cannot fire `/compact`, but the attend mod can compact. In relay mode it compacts after a wrap with the wrap's handoff as instructions, then submits a turn that resumes the work, so `wrap` no longer always ends by handing the operator the trigger.
+- 2026-11-27, to Decision item 5, on the operator's decision in the ways refactor for #1365: the four-square still classifies each increment, but its deep or swarm column is focal review, which covers what one change can reach, for a change that sets direction or has a high blast radius, and a swarm on every branch is not the default. Review breadth comes once where branches combine, at an integration branch, a wave candidate or the release bump, together with one full gate pass per tree, usually in CI. A tree that passed is not tested again by a later push, merge or bump of the same tree, and the lead does not re-run a worker's gates. The ways code/testing/gates/attention(softwaredev), delivery/ci(softwaredev) and subagents/lead(meta) hold the practice.

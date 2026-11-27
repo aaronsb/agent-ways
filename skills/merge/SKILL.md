@@ -74,17 +74,17 @@ Title under 70 chars. Summary 1–3 bullets.
 
 The gate is **not one policy**. Classify the increment on two axes and pick the path (the full rationale lives in the `delivery/merge` way):
 
-|                          | machine review: **light** | machine review: **deep / swarm** |
+|                          | machine review: **light** | machine review: **deep** |
 |--------------------------|---------------------------|----------------------------------|
-| **human gate: none**     | quick `code-reviewer` (or skip for trivial) → merge | swarm review + adversarial verify → agent-gated merge |
-| **human gate: required** | single `code-reviewer` → offer to read before merge | swarm review **and** operator approval before merge |
+| **human gate: none**     | quick `code-reviewer` (or skip for trivial) → merge | deep review, adversarially verified → agent-gated merge |
+| **human gate: required** | single `code-reviewer` → offer to read before merge | deep review **and** operator approval before merge |
 
-- **X (review depth)** ← complexity and blast-radius: diff size, files touched, core-vs-leaf, test coverage, reversibility. The same change class sets the gate depth (`code/testing/gates` way): choose review depth and gate depth together, and report each gate as executed, discovered, or absent.
+- **X (review depth)** ← complexity and blast-radius: diff size, files touched, core-vs-leaf, test coverage, reversibility. The same change class sets the gate depth (`code/testing/gates` way): choose review depth and gate depth together, and report each gate as executed, discovered, or absent. On a branch, both are focal: the review and the gates cover what this change can reach (code/testing/gates/attention). The deep corner is for a change that sets direction or has a high blast radius; a deep review on every branch is not the default. Review breadth and the one full gate pass per tree come where branches combine (delivery/ci).
 - **Y (human gate)** ← does the work set direction (an ADR, an architecture change → human gate required, however small), and has the operator already read it (wrote it or reviewed it live → gate already satisfied).
 
 When the classification is ambiguous, **state your read and let the operator decide** rather than silently picking a corner. Inside a `/goal` loop, bias to the autonomous corners; outside one, ask. Team repos always gate; `/merge full-sail` is rejected for them and for direction-setting changes — say why.
 
-Invoking `/merge` is the request for the review this gate specifies, in whichever corner you landed — dispatch the reviewers, don't stop to ask permission for them. Say why in a clause as you go ("review needs a reader who hasn't seen my reasoning"). For a swarm, state the number before spawning it. Reviewers run on the model their agent definition names; a review is judgment work, so never pass a cheaper `model` to save tokens. See ADR-175.
+Invoking `/merge` is the request for the review this gate specifies, in whichever corner you landed — dispatch the reviewers, don't stop to ask permission for them. Say why in a clause as you go ("review needs a reader who hasn't seen my reasoning"). For a fan-out of reviewers, state the number before spawning it. Reviewers run on the model their agent definition names; a review is judgment work, so never pass a cheaper `model` to save tokens.
 
 **Running a single review:**
 
@@ -93,7 +93,7 @@ Agent(subagent_type="code-reviewer", prompt="Review PR #<number> in this repo.
 Run gh pr diff <number> to see the changes. Post findings as a gh pr comment.")
 ```
 
-For the swarm corner, fan `code-reviewer` agents across dimensions (correctness, security, reuse) and adversarially verify each finding before trusting it.
+The deep corner is one deep review of the change, adversarially verified. Where several branches combine into an integration branch or a wave candidate, the breadth review runs once on the combined tree, not once per branch, and that review fans `code-reviewer` agents across dimensions (correctness, security, reuse) and adversarially verifies each finding before trusting it.
 
 ### 6. Remediate
 
@@ -106,6 +106,7 @@ A review is only worth running if the findings get fixed. Before the merge gate,
 - **Any other deferral is the operator's call**, asked per finding with what the fix costs now. Without that answer, fix it.
 - **A finding the change does not own** is a residual (`delivery/issues`) and does not hold the merge.
 - **One fix round takes every owned finding.** A cap on review rounds limits the rounds, not the fixes. A review brief asks for findings to fix, not for a follow-up list.
+- **Size the re-review to the fix.** After a fix round, review the fix and re-run the gates the fix reaches. The full suite runs once per tree, at integration or in CI, not per fix round.
 
 "Reviewed" is not "landed clean."
 

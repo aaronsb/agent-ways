@@ -26,7 +26,8 @@ For each function under test:
 ## What to Assert
 
 - Observable outputs and side effects only
-- Never assert on method call counts or internal variable values
+- Never assert on internal variable values
+- Assert a mock's call count only when the count is the behavior (code/testing/mocking)
 - If you need to reach into private state, the design needs rethinking
 
 ## Test Levels
@@ -57,7 +58,7 @@ Detect the test framework from project files (package.json, requirements.txt, Ca
 
 ## See Also
 
-- code/testing/mocking(softwaredev) — when and how to mock
+- code/testing/mocking(softwaredev) — when and how to mock, and when a call count may be asserted
 - code/testing/tdd(softwaredev) — test-driven development cycle
 - code/testing/gates(softwaredev) — every gate reports executed, discovered, or absent; a zero needs a positive control
 - code/testing/gates/assertions(softwaredev) — golden baselines and the rapid iteration phase

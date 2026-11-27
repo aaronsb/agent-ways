@@ -1,13 +1,13 @@
 ---
-description: the shape of a test assertion, composition versus a bare count, expected values independent of the subject, failure messages that name what drifted, mock call counts, snapshot and golden baselines, a named known-bug marker that expires when the bug is fixed
-vocabulary: assert assertion expect expected mock called toHaveBeenCalled snapshot golden baseline known bug xfail known_bug marker tautological witness drift composition count vacuous volatile self-expiring serialized expectation echo
+description: the shape of a test assertion, composition versus a bare count, expected values independent of the subject, failure messages that name what drifted, mock assertions and change-detector tests that echo hardcoded arguments, snapshot and golden baselines, a named known-bug marker that expires when the bug is fixed
+vocabulary: assert assertion expect expected mock called toHaveBeenCalled toHaveBeenCalledWith change-detector hardcoded arguments prune snapshot golden baseline known bug xfail known_bug marker tautological witness drift composition count vacuous volatile self-expiring serialized expectation echo
 scope: agent, subagent
 refire: 0.15
 ---
 <!-- epistemic: heuristic -->
 # Assertion Shape
 
-A gate that executes and asserts can still prove nothing. The assertion compares a count that offsetting errors restore, or an expected value computed from the very thing under test, or a mock call tally that goes vacuous the moment the code stops calling the collaborator. Each of these stays green through the bug it was written to catch.
+A gate that executes and asserts can still prove nothing. The assertion compares a count that offsetting errors restore, or an expected value computed from the very thing under test, or a mock call tally that goes vacuous the moment the code stops calling the collaborator, or a mock argument that the test copied from the code. Each of these stays green through the bug it was written to catch.
 
 ## Three questions
 
@@ -17,15 +17,16 @@ A gate that executes and asserts can still prove nothing. The assertion compares
 
 **Does a failure say what drifted?** Assert each dimension under its own name so a red identifies the property that moved. One assertion over a serialized blob says "different" and stops. Choose a witness sensitive to the change you guard against. A projection only witnesses what it projects.
 
-## The mock invocation count
+## Mock assertions and change-detector tests
 
-The canonical vacuous assertion is `expect(mock).toHaveBeenCalledTimes(1)`. It passes for the right call, and it keeps passing when the code calls the collaborator once for an unrelated, wrong reason. Assert on the destination, the content, or the argument passed:
+The canonical vacuous assertion is `expect(mock).toHaveBeenCalledTimes(1)`, and the rule for when a count is the behavior is in code/testing/mocking. Assert instead on what the input determines: the destination, the content, or the argument the code derived.
 
 ```js
-expect(send).toHaveBeenCalledWith({ to: "ops@example.com", subject: "Disk 91%" });
+// The input is a disk reading of 91%; the subject is what the code builds from it.
+expect(send).toHaveBeenCalledWith(expect.objectContaining({ subject: "Disk 91%" }));
 ```
 
-A count is the behavior only when the count is what the code promises, such as exactly one charge per order. The mocking way holds the wider rule on call counts. This way covers what to assert instead.
+A change-detector test asserts that a collaborator got the exact arguments the code hardcodes, such as a fixed URL, a header set, or a retry setting copied from the source into the test. Its expected value is an echo of the code, so it fails on each edit to that line and on no defect. Change-detector tests are pruned at the ambient pass, the one full pass over the combined tree (code/testing/gates/attention): each is deleted, or replaced with an assertion on an outcome the product cares about.
 
 ## The self-expiring known-bug marker
 
@@ -57,6 +58,7 @@ A provisional golden is not yet a judge, so changing one during the phase does n
 ## See Also
 
 - code/testing/gates(softwaredev) — parent: gate states, positive controls, and the report format
-- code/testing/mocking(softwaredev) — call counts are asserted only when the count is the behavior
+- code/testing/mocking(softwaredev) — the rule on when a call count may be asserted
+- code/testing/gates/attention(softwaredev) — the ambient pass that prunes change-detector tests
 - freshness/groundtruth(softwaredev) — the golden-master oracle captured before a refactor or migration
 - code/testing/tdd(softwaredev) — a test must be seen red before its green means anything

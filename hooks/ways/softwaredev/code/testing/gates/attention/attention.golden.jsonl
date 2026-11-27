@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"should each branch run the full test suite, or only the tests its change reaches, with the full suite once at integration"}
+{"kind":"situational","prompt":"ci already passed on this exact commit locally and on the branch, and now the merge is waiting forty minutes for it to run again"}

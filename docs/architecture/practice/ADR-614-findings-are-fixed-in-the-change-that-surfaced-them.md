@@ -31,6 +31,9 @@ considered:
     said: "this looks good. let's pull both open PRs in and publish."
     via: chat, session 2026-11-07, after the review fixes and the two probes were put in the reply
     covers: [ownership, wording]
+  - operator: aaronsb
+    said: "we should change the adr"
+    via: "operator, 2026-11-27, in the agent-ways session that ran the ways refactor for #1365"
 status: accepted
 date: 2026-11-07
 deciders:
@@ -78,7 +81,9 @@ The cost appears later. Issues filed this way name the exact file and the ADR th
 5. **Declining** an owned finding takes evidence that it is wrong: the reproduction fails, the path never runs, or the requirement says otherwise. The evidence goes in the PR. Severity, cost and review fatigue are not grounds.
 6. **Deferring.** Apart from the exits in item 1, deferring an owned finding is the operator's decision, asked per finding with what the fix costs now. An issue filed for an owned finding without that decision does not count as handling it.
 7. **Residual issues** are for work the change does not own: a finding that fails the ownership test, a hold, or an option judged unneeded. These are filed with an owner and a reopen condition under the issue-write rules of ADR-609 as amended by ADR-611. In a repository the user does not own, the issue is drafted and asked for.
-8. **Review rounds.** A cap on rounds limits how many rounds run. Each fix round takes every owned finding, wording included. Review briefs do not ask for a separate follow-up list.
+8. **Review rounds.** A cap on rounds limits how many rounds run. Each fix round takes every owned finding, wording included. Review briefs do not ask for a separate follow-up list. The re-review after a fix round is sized to the fix: it reads the fix and re-runs the gates the fix reaches, and the full gate pass waits for the combined tree.
+
+   > Edited 2026-11-27: the operator decided that verification on a branch is focal, covering what the change can reach, and the full pass runs once per tree. A fix round had read as a cue to re-run the whole review and every gate. The sentence on sizing the re-review is new (code/testing/gates/attention, delivery/ci).
 9. **Reviewers** report findings to fix, ordered by severity. A reviewer does not recommend follow-ups. A point not worth fixing is not reported.
 10. **Orchestrators.** A finding a worker raises outside its own files goes to the worker that owns those files, or the orchestrator fixes it, before integration. Splitting files between parallel workers is not a reason to defer.
 
@@ -112,7 +117,9 @@ The cost appears later. Issues filed this way name the exact file and the ADR th
 ### Neutral
 
 - The issue-write rules of ADR-609 and ADR-611 are unchanged; this record narrows which findings become issues.
-- The four-square in delivery/merge still decides review depth and the human gate.
+- The four-square in delivery/merge still decides review depth and the human gate. Its deep corner is focal review, which covers what one change can reach, for a change that sets direction or has a high blast radius; review breadth comes once where branches combine.
+
+  > Edited 2026-11-27: the second sentence is new. The operator decided that a review swarm on every branch is not the default (delivery/ci, subagents/lead).
 
 ## Alternatives Considered
 

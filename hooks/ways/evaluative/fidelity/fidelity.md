@@ -34,7 +34,7 @@ Where the product runs through more than one path (a compiled build and a fallba
 
 ## Gate output for a long suite
 
-Each gate prints one pass or fail line and writes its full log to disk. On failure it prints only the failing lines. Run a slice while iterating. Before a change is proposed, every gate runs once in full.
+Each gate prints one pass or fail line and writes its full log to disk. On failure it prints only the failing lines. Run the slice the change reaches while iterating. The full suite runs once per tree, on the candidate where changes come together (code/testing/gates/attention).
 
 ## See Also
 

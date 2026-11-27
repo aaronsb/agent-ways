@@ -56,7 +56,9 @@ make publish-release COMPONENT="ways attend attend-chat" PUSH=1    # tags each <
 
 A change under `plugins/attend/` ships only with a new plugin version, and attend's bump sets that version. When the range since a component's last tag changed the mod, include attend in the same release; `cut-release` refuses the other components otherwise.
 
-When anything under `hooks/ways` changed since the last tag, run `cargo test --manifest-path tools/Cargo.toml -p ways -p ways-core` before `cut-release`. The committed probe samples under `tests/probes` derive from the golden sidecars, so a corpus-only change can fail them on the bump PR.
+When anything under `hooks/ways` changed since the last tag, the `ways` and `ways-core` tests must have passed on the tree you cut from, because the committed probe samples under `tests/probes` derive from the golden sidecars, and a corpus-only change can fail them on the bump PR. CI already ran those tests on that tree when its PR merged, so check for a passing CI run on the commit first. Run `cargo test --manifest-path tools/Cargo.toml -p ways -p ways-core` before `cut-release` only when that tree has no passing CI run, for example when it changed after the last green run.
+
+A merge to `main` also starts the test suite again on a tree its PR already passed. Until CI skips that run, cancelling the duplicate run on the push to `main` is acceptable (delivery/ci(softwaredev)).
 
 Components are the six suite binaries in `tools/suite-bins`: `ways`, `ways-audit`, `ways-mcp`, `ways-agent`, `attend`, `attend-chat`. `way-embed` versions through its own Makefile.
 

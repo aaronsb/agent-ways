@@ -21,7 +21,7 @@ Every change lands through a PR, solo projects included. A PR with no reviewer i
 
 ## Review Before Merge
 
-Review after opening the PR. Dispatch a `code-reviewer` subagent for it when the user asked to open or land the PR, a skill in use directs it, or a CLAUDE.md line covers it. Otherwise, where your instructions restrict the Agent tool, propose the review in one line or review inline (ADR-608). Review depth and whether a human reads first are the four-square decision in `delivery/merge`. Scale the reviewer to a swarm for high-blast-radius changes, and gate on operator approval when the work sets direction. "Merge it" is a request for that review. Merge strategy is a separate question, settled by the default below. The repository's own enforcement comes first, and a version-only release bump can skip review where nothing enforces it; see `delivery/merge`.
+Review after opening the PR. Dispatch a `code-reviewer` subagent for it when the user asked to open or land the PR, a skill in use directs it, or a CLAUDE.md line covers it. Otherwise, where your instructions restrict the Agent tool, propose the review in one line or review inline. Review depth and whether a human reads first are the four-square decision in `delivery/merge`. Size the review to the change: a deep review for a change that sets direction or has a high blast radius, and the breadth review once on the integrated candidate, as `delivery/merge` sets out. Gate on operator approval when the work sets direction. "Merge it" is a request for that review. Merge strategy is a separate question, settled by the default below. The repository's own enforcement comes first, and a version-only release bump can skip review where nothing enforces it; see `delivery/merge`.
 
 ## Merge Strategy: Regular Merge by Default
 
@@ -48,4 +48,5 @@ Issues for requirements and bugs, a basic label set, no project boards or milest
 - delivery/issues(softwaredev) — issues mirrored into the session task list
 - adr(documentation) — reference ADRs in PR descriptions
 - writing/plain(writing) — plain sentences and the present tense in a PR body or an issue
-- delivery/github/follow-through(softwaredev) — CI on main after the merge, parked and closed issues, contributing to another project
+- delivery/ci(softwaredev) — one CI run per tree, triggers that do not fan out
+- delivery/github/follow-through(softwaredev) — the tree's one passing run after the merge, parked and closed issues, contributing to another project

@@ -1,6 +1,8 @@
 policy:
   - uri: governance/policies/code-lifecycle.md
     type: governance-doc
+  - uri: docs/architecture/practice/ADR-608-delegation-is-asked-for-by-the-user-a-skill-or-a-claude-md-file-not-by-a-way-s-own-text.md
+    type: adr
 controls:
   - id: SOC 2 CC8.1 (Change Management)
     justifications:

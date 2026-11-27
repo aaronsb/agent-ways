@@ -1,5 +1,5 @@
 ---
-description: test-driven development, TDD red-green-refactor cycle, failing test first, characterization tests on untested or legacy code, proving an inherited green suite by reintroducing the defect
+description: test-driven development, TDD red-green-refactor cycle, failing test first, characterization tests on untested or legacy code and when they expire, proving an inherited green suite by reintroducing the defect
 vocabulary: tdd red green refactor test first implementation failing characterize characterization legacy inherited untested suite mutation defect regression exploratory prototyping glue unproven
 scope: agent, subagent
 refire: 0.2
@@ -33,7 +33,9 @@ The cycle assumes you can state what the code should do. On inherited code with 
 2. Run it. It passes.
 3. Make the change. The characterization test now fails in the way you intended. That failure is the RED, and the cycle resumes.
 
-An inherited suite that is green when you arrive is unproven until a planted defect has turned it red (core.md). For the plant, pick a test that claims to guard against a past defect and reintroduce that defect in the production code. Confirm the suite fails for that reason.
+A `characterizes_` test expires once the behavior it pins is fixed or decided. Then rename it to state the decided behavior and assert the correct answer, or delete it when another test already covers that behavior. A characterization test left in place after the decision keeps asserting a guess.
+
+An inherited suite that is green when you arrive is unproven until a planted defect has turned it red, by the procedure in code/testing/gates. On inherited code, the plant to choose is the past defect that a test claims to guard against.
 
 ## Common Rationalizations
 
@@ -41,7 +43,7 @@ An inherited suite that is green when you arrive is unproven until a planted def
 |---|---|
 | "This is simple, tests aren't needed" | If it's simple, the test is trivial to write. Write it. |
 | "I'll add tests later" | Later never comes. The test verifies understanding NOW. |
-| "Existing tests cover this" | Prove it with a planted defect: reintroduce the defect they claim to catch (see Untested Code First). |
+| "Existing tests cover this" | Prove it with a planted defect (code/testing/gates). |
 | "Just a refactor, behavior doesn't change" | Then existing tests pass. Run them. If none exist, write them first. |
 | "Writing tests would take too long" | Debugging the regression takes longer. |
 | "The user didn't ask for tests" | The user asked for working code. Tests prove it works. |

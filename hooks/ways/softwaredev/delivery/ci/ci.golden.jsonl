@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"set up test result caching keyed by tree hash so ci stops running the full suite again on main after the pr already passed"}
+{"kind":"situational","prompt":"every lockfile bump wakes all twelve workflows and the parallel test jobs keep timing out when they run together on the build box"}
