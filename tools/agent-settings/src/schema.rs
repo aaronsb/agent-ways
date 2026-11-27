@@ -496,7 +496,6 @@ impl KeySpec {
         }
     }
 
-    /// Match a concrete file path, returning the wildcard bindings.
     /// Whether `path` is this key's path before its rename ([`KeySpec::was`]).
     pub fn is_was_path(&self, path: &[String]) -> bool {
         self.was.is_some_and(|w| w.len() == path.len() && w.iter().zip(path).all(|(a, b)| *a == b))
@@ -507,6 +506,7 @@ impl KeySpec {
         self.was.map(|w| w.iter().map(|s| s.to_string()).collect())
     }
 
+    /// Match a concrete file path, returning the wildcard bindings.
     pub fn match_path(&self, path: &[String]) -> Option<Vec<String>> {
         if path.len() != self.path.len() {
             return None;
