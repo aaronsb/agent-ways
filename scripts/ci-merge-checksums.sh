@@ -102,7 +102,11 @@ case "$rc" in
     ;;
 esac
 
-sort -k2 "$work/new" > checksums.txt
+# Order by file name, ignoring a binary-mode `*`, in the C locale: `sort -k2`
+# keeps the blanks before the name in the key and orders them by locale, so
+# two hosts would write the lines in different orders.
+awk '{ name = $2; sub(/^\*/, "", name); print name "\t" $0 }' "$work/new" \
+  | LC_ALL=C sort -t "$(printf '\t')" -k1,1 | cut -f2- > checksums.txt
 cat checksums.txt
 
 if [[ "$upload" -eq 1 ]]; then
