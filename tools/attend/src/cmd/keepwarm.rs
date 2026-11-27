@@ -9,7 +9,7 @@
 
 use crate::cli::{KeepwarmCheckArgs, KeepwarmCmd};
 use crate::util::keepwarm_dir;
-use sensor_keepwarm::policy::{self, Config, Gate, Policy, SessionSkills, Site, WrapOutcome};
+use sensor_keepwarm::policy::{self, Config, Fill, Gate, Handoff, Policy, SessionSkills, Site, WrapOutcome};
 use sensor_keepwarm::{
     card, card_state, check_once, fmt_duration, lock_session, parse_duration, read_arm, read_context, read_ledger, settle, write_arm,
     write_ledger, ArmFile, State, DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
@@ -81,7 +81,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             }
             println!("keepalive count reset");
         }
-        KeepwarmCmd::Wrapped { outcome, detail, path, save, focus } => {
+        KeepwarmCmd::Wrapped { outcome, detail, path, save, focus, marker } => {
             let Some(o) = WrapOutcome::parse(&outcome) else {
                 eprintln!("keepwarm wrapped takes transcript, file, sent, refused or unfinished");
                 std::process::exit(2);
@@ -95,14 +95,8 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 _ => (o.describe(&detail), Ok(())),
             };
             let focus = focus.map(|f| f.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|f| !f.is_empty());
-            // An unfinished wrap wrote no handoff: nothing compacts after it.
-            let focus = focus.filter(|_| o != WrapOutcome::Unfinished);
-            let recorded = update_policy(&dir, sid, |p| {
-                p.wrap_outcome = Some(line);
-                if focus.is_some() {
-                    p.compact_focus = focus;
-                }
-            });
+            let marker = marker.map(|m| m.trim().to_string()).filter(|m| !m.is_empty());
+            let recorded = update_policy(&dir, sid, |p| policy::wrapped(p, o, line, focus, marker, now));
             if !recorded {
                 std::process::exit(1);
             }
@@ -113,18 +107,41 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
         }
         KeepwarmCmd::Compacted { failed } => {
             let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
-            // Only a wrapped stretch is compacted: a report that lands after
-            // the operator's prompt reset the ledger changes nothing.
-            let recorded = update_policy(&dir, sid, |p| {
-                if p.wrapped_at.is_some() {
-                    p.compacted_at.get_or_insert(now);
-                    p.compact_failed = failed;
-                }
+            if !update_policy(&dir, sid, |p| policy::compacted(p, failed, now)) {
+                std::process::exit(1);
+            }
+        }
+        KeepwarmCmd::Resumed { failed } => {
+            let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
+            let recorded = update_policy(&dir, sid, |p| match &failed {
+                Some(why) => policy::resume_failed(p, why),
+                // Only a relay wrap that compacted resumes: a report that
+                // lands after the operator's prompt changes nothing.
+                None if p.relay && p.compacted_at.is_some() && p.stopped.is_none() => policy::resumed(p, now),
+                None => {}
             });
             if !recorded {
                 std::process::exit(1);
             }
         }
+        KeepwarmCmd::Goal { state } => {
+            if !update_policy(&dir, sid, |p| policy::goal(p, state == "active")) {
+                std::process::exit(1);
+            }
+        }
+        KeepwarmCmd::Stopped { reason, detail } => {
+            let mut took = false;
+            if !update_policy(&dir, sid, |p| took = policy::stopped_by_agent(p, &reason, &detail)) {
+                std::process::exit(1);
+            }
+            if !took {
+                eprintln!("keepwarm: no relay has run since the operator's last prompt; nothing to stop");
+            }
+        }
+        KeepwarmCmd::WrapId => match read_ledger(&dir, sid).and_then(|l| l.policy.last_wrap_id) {
+            Some(id) => println!("{id}"),
+            None => std::process::exit(1),
+        },
         KeepwarmCmd::Status => {
             let Some(reading) = read_context(sid, &ident.origin_path) else {
                 eprintln!("keepwarm: could not read the session transcript through `ways context`");
@@ -267,6 +284,8 @@ fn nothing(reason: &str, next_at: Option<u64>) -> serde_json::Value {
         "wraps_at": null, "reason": reason, "policy": false, "state": "off",
         "wraps_at_hm": null, "wrapped_at_hm": null, "wrap": null, "retry": false, "idle": null,
         "after_count": 0, "after_max": 0, "compacts_at": null, "compacts_at_hm": null, "compacted_at_hm": null,
+        "relay": false, "relay_count": 0, "max_relays": 0, "relay_at_tokens": null, "resume": null, "relay_stop": null,
+        "send_handoff": false, "wrap_id": null,
     })
 }
 
@@ -279,7 +298,20 @@ fn site(ident: &attend_presence::session::SessionIdentity) -> Site {
         operator: agent_identity::sanitize_id_component(&agent_identity::signal::user_name()),
         state_root: ways_core::paths::state_root(),
         home: claude_sessions::home_dir(),
+        handoff: None,
     }
+}
+
+/// The repository's handoff file under `project`, as the relay judges it
+/// (ADR-417 item 4): its path, the wrap id on its first line, and the
+/// compaction instructions built from it. `None` outside a repository or
+/// where the file cannot be read.
+fn read_handoff(project: &str) -> Option<Handoff> {
+    use ways_core::handoff;
+    let root = handoff::repo_root(Path::new(project))?;
+    let path = handoff::path(&root);
+    let text = std::fs::read_to_string(&path).ok()?;
+    Some(Handoff { wrap_id: handoff::wrap_id_of(&text).map(str::to_string), instructions: handoff::instructions(&text, &path), path })
 }
 
 /// The mods.attend settings for the policy check: a read kept beside the
@@ -419,6 +451,9 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     if pcfg.session_skills == SessionSkills::NotChecked {
         pcfg.after_max = 0;
     }
+    if let (Some(tokens), Some(window)) = (args.fill, args.window) {
+        pcfg.fill = Some(Fill { tokens, window, native_at: args.native_at });
+    }
     let Some(reading) = read_context(sid, &ident.origin_path) else {
         let why = "could not read the session transcript through `ways context`";
         if args.json {
@@ -435,12 +470,18 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         }
         return;
     };
-    let site = site(ident);
+    let mut site = site(ident);
     prune_stale(&dir, sid, now);
     // One read-step-write at a time per session: two processes on one
     // session id never both send a keepalive or a wrap.
     let _lock = lock_session(&dir, sid).ok();
-    let mut state = State::resume(read_ledger(&dir, sid));
+    let ledger = read_ledger(&dir, sid);
+    // The handoff is read only while a relay wrap's marker waits to be
+    // judged, so a check every minute runs no git.
+    if ledger.as_ref().is_some_and(|l| l.policy.relay && l.policy.marker.is_some() && l.policy.compacted_at.is_none() && l.policy.stopped.is_none()) {
+        site.handoff = read_handoff(&ident.origin_path);
+    }
+    let mut state = State::resume(ledger);
     let arm = read_arm(&dir, sid);
     let (mut out, decision) = policy::step(&mut state, &reading, arm.as_ref(), &pcfg, gate, &site, now);
     state.policy.old_host = pcfg.session_skills == SessionSkills::NotChecked;

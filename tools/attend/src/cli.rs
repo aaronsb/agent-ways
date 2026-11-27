@@ -696,8 +696,8 @@ pub enum KeepwarmCmd {
     /// one is due, else nothing (exit 0 either way). The attend mod polls
     /// it.
     Check(KeepwarmCheckArgs),
-    /// The operator prompted: the keepalive count starts again, and a sent
-    /// wrap and a stop are cleared. The attend mod runs it for each prompt
+    /// The operator prompted: the keepalive and relay counts start again,
+    /// and a sent wrap and a stop are cleared. The attend mod runs it for each prompt
     /// typed in the session (ADR-414 item 4)
     Reset {
         /// When the operator prompted, in epoch seconds (default now). The
@@ -726,6 +726,10 @@ pub enum KeepwarmCmd {
         /// keepalives
         #[arg(long)]
         focus: Option<String>,
+        /// The relay marker the reply ended with (ADR-417 item 8). With no
+        /// relay wrap waiting, it records a `/wrap` run in relay mode
+        #[arg(long)]
+        marker: Option<String>,
     },
     /// Record the compaction after the wrap, for the status card and so
     /// nothing more follows. The attend mod runs it once the compaction
@@ -735,13 +739,43 @@ pub enum KeepwarmCmd {
         #[arg(long)]
         failed: Option<String>,
     },
+    /// Record that a relay's resume turn went in: the relay count goes up
+    /// by one and the keepalive count starts again. The attend mod runs it
+    /// once the compaction after a relay wrap has run (ADR-417 item 4)
+    Resumed {
+        /// Why the resume did not go in, which stops the relay
+        #[arg(long)]
+        failed: Option<String>,
+    },
+    /// Record a `/goal` the attend mod saw typed: active, or none for
+    /// `/goal clear`. The relay stops once a goal that was active has ended
+    /// (ADR-417 item 6)
+    Goal {
+        #[arg(value_parser = ["active", "none"])]
+        state: String,
+    },
+    /// Record that a resumed turn ended with a `relay: stop <reason>` line,
+    /// which stops the relay until the operator's next prompt (ADR-417
+    /// item 5)
+    Stopped {
+        #[arg(value_parser = ["empty", "decision", "doubt"])]
+        reason: String,
+        /// The rest of the line: the agent's reason
+        #[arg(long, default_value = "")]
+        detail: String,
+    },
+    /// Print the id of this session's last recorded wrap, or nothing and
+    /// exit 1 when none is recorded. `ways hook pre-compact` reads it to
+    /// tell whether .claude/handoff.wrap.md is fresh (ADR-417 item 3)
+    WrapId,
 }
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct KeepwarmCheckArgs {
-    /// Apply the keepalive policy (ADR-414): from each turn's end, one wake
-    /// the margin before the cache lapses, counted from the operator's last
-    /// prompt and bounded by mods.attend.keepalive, then one wrap turn
+    /// Apply the continuity policy (ADR-414, ADR-417): from each turn's end,
+    /// one wake the margin before the cache lapses, counted from the
+    /// operator's last prompt and bounded by mods.attend.continuity, then
+    /// one wrap turn; in relay mode, a compaction and a resume after it
     #[arg(long)]
     pub policy: bool,
     /// Print the decision as one JSON object: action (none, keepalive,
@@ -754,7 +788,7 @@ pub struct KeepwarmCheckArgs {
     pub autocompact: String,
     /// The skills the session lists, comma-separated, as the host read them.
     /// The wrap and the compaction after it run only when
-    /// mods.attend.keepalive.wrap_skill names one of them. Absent, as from a
+    /// mods.attend.continuity.wrap_skill names one of them. Absent, as from a
     /// host that predates the flag, the wrap is not held to a listing
     #[arg(long, requires = "policy", value_delimiter = ',')]
     pub skills: Option<Vec<String>>,
@@ -765,6 +799,19 @@ pub struct KeepwarmCheckArgs {
     /// missing from it is not held against the wrap
     #[arg(long, requires = "skills")]
     pub skills_partial: bool,
+    /// The context's tokens at a main-loop turn's end, for relay's fill
+    /// path (ADR-417 item 2a): with relay on, a fill past
+    /// mods.attend.continuity.relay_at_pct of --window sends a wrap
+    #[arg(long, requires_all = ["policy", "window"])]
+    pub fill: Option<u64>,
+    /// The model's whole context window, in tokens
+    #[arg(long, requires = "fill")]
+    pub window: Option<u64>,
+    /// Claude Code's own autocompact threshold, in tokens; with autocompact
+    /// on, the fill path wraps five points of the window under it where
+    /// that is lower
+    #[arg(long, requires = "fill")]
+    pub native_at: Option<u64>,
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.

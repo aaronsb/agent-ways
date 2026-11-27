@@ -56,8 +56,8 @@ impl Warm {
         // `ways settings ...` answers with settings.json beside the reading,
         // when a test wrote one; anything else is `ways context --json`.
         let settings = f.home.join("settings.json");
-        // The keepalive policy runs only where ways says enabled: true.
-        std::fs::write(&settings, r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true}}}"#).unwrap();
+        // The idle path runs only where ways says keepalive: true.
+        std::fs::write(&settings, r#"{"view":"effective","keys":{"mods.attend.continuity.keepalive":{"value":true}}}"#).unwrap();
         std::fs::write(
             &ways,
             format!(
@@ -210,7 +210,7 @@ fn a_paid_cold_write_arms_keepwarm() {
 #[test]
 fn the_check_is_off_where_mods_attend_keepwarm_is_off() {
     let w = Warm::new("kw-config-off");
-    w.settings(r#"{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepwarm":{"value":"off"}}"#);
+    w.settings(r#"{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.keepwarm":{"value":"off"}}"#);
     w.reading(&[(51 * MIN, 200_000, 500)]);
     assert!(w.run(&["keepwarm", "on"]).status.success());
     for args in [&["keepwarm", "check"][..], &["keepwarm", "check", "--policy", "--json", "--autocompact", "off"][..]] {
@@ -466,7 +466,7 @@ fn the_settings_bound_the_policy_and_route_the_wrap() {
     let w = Warm::new("ka-settings");
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.max_keepalives":{"value":0},"mods.attend.keepalive.wrap":{"value":"file"},"mods.attend.keepalive.wrap_file":{"value":"{state}/wrap/{session}.md"}}}"#,
+        r#"{"view":"effective","keys":{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.max_keepalives":{"value":0},"mods.attend.continuity.wrap":{"value":"file"},"mods.attend.continuity.wrap_file":{"value":"{state}/wrap/{session}.md"}}}"#,
     )
     .unwrap();
     w.reading(&[(50 * MIN, 200_000, 500)]);
@@ -497,7 +497,7 @@ fn the_compaction_after_the_wrap_carries_the_focus_the_mod_reported() {
     let w = Warm::new("ka-compact");
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.windows":{"value":[]},"mods.attend.keepalive.after_wrap":{"value":"compact"},"mods.attend.keepalive.after_wrap_keepalives":{"value":2},"mods.attend.keepalive.wrap_skill":{"value":"handoff"}}}"#,
+        r#"{"view":"effective","keys":{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.windows":{"value":[]},"mods.attend.continuity.after_wrap":{"value":"compact"},"mods.attend.continuity.after_wrap_keepalives":{"value":2},"mods.attend.continuity.wrap_skill":{"value":"handoff"}}}"#,
     )
     .unwrap();
     w.reading(&[(50 * MIN, 200_000, 500)]);
@@ -543,7 +543,7 @@ fn the_skills_flag_gates_the_wrap_and_its_absence_is_the_old_protocol() {
         let w = Warm::new(tag);
         std::fs::write(
             w.f.home.join("settings.json"),
-            r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.max_keepalives":{"value":0},"mods.attend.keepalive.windows":{"value":[]},"mods.attend.keepalive.after_wrap":{"value":"compact"},"mods.attend.keepalive.after_wrap_keepalives":{"value":2}}}"#,
+            r#"{"view":"effective","keys":{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.max_keepalives":{"value":0},"mods.attend.continuity.windows":{"value":[]},"mods.attend.continuity.after_wrap":{"value":"compact"},"mods.attend.continuity.after_wrap_keepalives":{"value":2}}}"#,
         )
         .unwrap();
         w.reading(&[(50 * MIN, 200_000, 500)]);
@@ -592,7 +592,7 @@ fn concurrent_checks_decide_one_wrap() {
     let w = Warm::new("ka-lock");
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.max_keepalives":{"value":0}}}"#,
+        r#"{"view":"effective","keys":{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.max_keepalives":{"value":0}}}"#,
     )
     .unwrap();
     w.reading(&[(50 * MIN, 200_000, 500)]);
@@ -684,7 +684,7 @@ fn wrapped_save_writes_the_reply_under_the_state_root_and_refuses_a_link() {
     let w = Warm::new("ka-save");
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"mods.attend.keepalive.enabled":{"value":true},"mods.attend.keepalive.max_keepalives":{"value":0}}}"#,
+        r#"{"view":"effective","keys":{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.max_keepalives":{"value":0}}}"#,
     )
     .unwrap();
     w.reading(&[(50 * MIN, 200_000, 500)]);
@@ -768,5 +768,54 @@ fn a_check_prunes_other_sessions_stale_files() {
     assert!(dir.join("gone.lock").exists(), "a lock file is never pruned");
     assert!(dir.join("live.settings.json").exists() && dir.join("live.lock").exists());
     drop(held);
+}
+
+/// Relay mode through the CLI (ADR-417 items 2 to 5): a fill past the
+/// threshold sends a wrap naming its id; the mod reports the wrap's marker;
+/// with the handoff the skill wrote, the check asks for a compaction with
+/// the handoff and a resume naming the file; `resumed` counts the relay;
+/// `wrap-id` gives the id to the PreCompact hook.
+#[test]
+fn a_relay_wraps_on_fill_compacts_with_the_handoff_and_resumes() {
+    let w = Warm::new("ka-relay");
+    w.settings(r#"{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.relay":{"value":"on"}}"#);
+    let init = std::process::Command::new("git").args(["init", "-q"]).current_dir(&w.f.origin).status().unwrap();
+    assert!(init.success());
+    w.reading(&[(MIN, 700_000, 500)]);
+    assert_eq!(w.run(&["keepwarm", "wrap-id"]).status.code(), Some(1), "no wrap recorded yet");
+    let fill = |tokens: &str| {
+        let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "on", "--skills", "wrap", "--fill", tokens, "--window", "1000000", "--native-at", "900000"]);
+        assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()
+    };
+    let d = fill("700000");
+    assert_eq!((d["action"].as_str(), d["relay"].as_bool(), d["relay_at_tokens"].as_u64()), (Some("none"), Some(true), Some(750_000)), "{d}");
+    let d = fill("760000");
+    assert_eq!(d["action"], "wrap", "{d}");
+    let id = d["wrap_id"].as_str().unwrap().to_string();
+    assert!(d["text"].as_str().unwrap().starts_with("wrap: context at 76% (760k of 1M), past the relay threshold of 75%.\n"), "{d}");
+    assert_eq!(w.run(&["keepwarm", "wrap-id"]).stdout, format!("{id}\n").into_bytes());
+    // The skill wrote the handoff with the id; the mod reports the marker.
+    let handoff = std::path::Path::new(&w.f.origin).join(".claude").join("handoff.wrap.md");
+    std::fs::create_dir_all(handoff.parent().unwrap()).unwrap();
+    std::fs::write(&handoff, format!("2026-11-26 e6bbfbdd wrap={id}\nContinue work.\n\nTASKS — one.\n\nDO NEXT — start.\n")).unwrap();
+    let marker = format!("relay: continue tasks=1 goal=none wrap={id} head=e6bbfbdd");
+    assert!(w.run(&["keepwarm", "wrapped", "transcript", "--marker", &marker]).status.success());
+    let d = policy(&w, "on");
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("compact"), Some("compacted")), "{d}");
+    assert!(d["text"].as_str().unwrap().contains(&format!("wrap={id}\nContinue work.")), "{d}");
+    let resume = d["resume"].as_str().unwrap();
+    assert!(resume.contains("this is relay 1 of 5") && resume.contains(".claude/handoff.wrap.md. The task list"), "{resume}");
+    assert!(w.run(&["keepwarm", "compacted"]).status.success());
+    assert!(w.run(&["keepwarm", "resumed"]).status.success());
+    let d = policy(&w, "on");
+    assert_eq!((d["state"].as_str(), d["relay_count"].as_u64()), (Some("resumed"), Some(1)), "{d}");
+    let card = card_text(&w);
+    assert!(card.contains("relay       on · 1 of 5"), "{card}");
+    // A resumed turn's stop line stops the relay.
+    assert!(w.run(&["keepwarm", "stopped", "decision", "--detail", "which database"]).status.success());
+    let d = policy(&w, "on");
+    assert_eq!((d["state"].as_str(), d["relay_stop"].as_str()), (Some("stopped"), Some("decision")), "{d}");
+    assert_eq!(w.run(&["keepwarm", "wrap-id"]).stdout, format!("{id}\n").into_bytes(), "the id outlives the stop");
 }
 }

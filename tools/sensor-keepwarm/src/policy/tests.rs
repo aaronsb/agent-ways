@@ -65,6 +65,7 @@ fn site() -> Site {
         operator: "aaron".into(),
         state_root: PathBuf::from("/state/agent-ways"),
         home: PathBuf::from("/home/aaron"),
+        handoff: None,
     }
 }
 
@@ -284,7 +285,7 @@ fn keepalive_disabled_or_keepwarm_off_turns_the_policy_off() {
     let mut s = Session::new(MONDAY, 200_000);
     let d = s.check(&c, Gate::Off, MONDAY + 50 * MIN);
     assert_eq!((d.action, d.policy), (Action::None, false));
-    assert_eq!(d.reason, "mods.attend.keepalive.enabled is false");
+    assert_eq!(d.reason, "mods.attend.continuity.keepalive is false");
     let mut c = cfg();
     c.keepwarm_on = false;
     let arm = ArmFile { deadline: MONDAY + 2 * 3600, armed_at: MONDAY, window_secs: 7200, auto: false };
@@ -454,14 +455,14 @@ fn the_wrap_sent_over_attend_goes_to_the_operator_by_default_with_a_handoff_line
 fn the_settings_are_read_and_a_wrong_type_keeps_its_default() {
     let doc = r##"{"view":"effective","keys":{
         "mods.attend.keepwarm":{"value":"on"},
-        "mods.attend.keepalive.enabled":{"value":false},
-        "mods.attend.keepalive.max_keepalives":{"value":3},
-        "mods.attend.keepalive.margin_minutes":{"value":"ten"},
-        "mods.attend.keepalive.windows":{"value":["Mon-Fri 08:00-19:00","bad"]},
-        "mods.attend.keepalive.timezone":{"value":"UTC"},
-        "mods.attend.keepalive.wrap":{"value":"send"},
-        "mods.attend.keepalive.wrap_to":{"value":" #deploy "},
-        "mods.attend.keepalive.after_wrap":{"value":"compact"}}}"##;
+        "mods.attend.continuity.keepalive":{"value":false},
+        "mods.attend.continuity.max_keepalives":{"value":3},
+        "mods.attend.continuity.margin_minutes":{"value":"ten"},
+        "mods.attend.continuity.windows":{"value":["Mon-Fri 08:00-19:00","bad"]},
+        "mods.attend.continuity.timezone":{"value":"UTC"},
+        "mods.attend.continuity.wrap":{"value":"send"},
+        "mods.attend.continuity.wrap_to":{"value":" #deploy "},
+        "mods.attend.continuity.after_wrap":{"value":"compact"}}}"##;
     let c = Config::from_settings(Some(doc));
     assert!(!c.enabled);
     assert_eq!(c.max, 3);
@@ -470,11 +471,11 @@ fn the_settings_are_read_and_a_wrong_type_keeps_its_default() {
     assert_eq!(c.windows.dropped.len(), 1);
     assert_eq!((c.wrap, c.wrap_to.as_str(), c.after_wrap), (WrapDest::Send, "#deploy", AfterWrap::Compact));
     assert_eq!(c.wrap_file, DEFAULT_WRAP_FILE);
-    let d = Config::from_settings(Some(r#"{"keys":{"mods.attend.keepalive.enabled":{"value":true}}}"#));
+    let d = Config::from_settings(Some(r#"{"keys":{"mods.attend.continuity.keepalive":{"value":true}}}"#));
     assert!(d.enabled && d.keepwarm_on && d.settings_ok);
     assert_eq!((d.max, d.margin_secs, d.wrap), (8, 600, WrapDest::Transcript));
     assert_eq!(d.windows.describe(), "daily 00:00-24:00");
-    let out_of_range = Config::from_settings(Some(r#"{"keys":{"mods.attend.keepalive.max_keepalives":{"value":99}}}"#));
+    let out_of_range = Config::from_settings(Some(r#"{"keys":{"mods.attend.continuity.max_keepalives":{"value":99}}}"#));
     assert_eq!(out_of_range.max, 8);
     let off = Config::from_settings(Some(r#"{"keys":{"mods.attend.keepwarm":{"value":"off"}}}"#));
     assert!(!off.keepwarm_on);
@@ -540,8 +541,8 @@ fn unreadable_settings_or_no_enabled_key_turn_the_policy_off() {
     for (doc, why) in [
         (None, "the mods.attend settings could not be read"),
         (Some("not json"), "the mods.attend settings could not be read"),
-        (Some(r#"{"keys":{}}"#), "mods.attend.keepalive.enabled is false"),
-        (Some(r#"{"keys":{"mods.attend.keepalive.enabled":{"value":"yes"}}}"#), "mods.attend.keepalive.enabled is false"),
+        (Some(r#"{"keys":{}}"#), "mods.attend.continuity.keepalive is false"),
+        (Some(r#"{"keys":{"mods.attend.continuity.keepalive":{"value":"yes"}}}"#), "mods.attend.continuity.keepalive is false"),
     ] {
         let c = Config::from_settings(doc);
         assert_eq!(c.why_off(Gate::Off), Some(why), "{doc:?}");
@@ -985,14 +986,14 @@ fn with_no_wrap_skill_to_point_at_the_keepalives_stop_at_the_bound() {
 #[test]
 fn the_settings_read_the_keys_after_the_wrap() {
     let doc = r#"{"keys":{
-        "mods.attend.keepalive.enabled":{"value":true},
-        "mods.attend.keepalive.after_wrap":{"value":"compact"},
-        "mods.attend.keepalive.after_wrap_keepalives":{"value":3},
-        "mods.attend.keepalive.wrap_skill":{"value":"/handoff stay"}}}"#;
+        "mods.attend.continuity.keepalive":{"value":true},
+        "mods.attend.continuity.after_wrap":{"value":"compact"},
+        "mods.attend.continuity.after_wrap_keepalives":{"value":3},
+        "mods.attend.continuity.wrap_skill":{"value":"/handoff stay"}}}"#;
     let c = Config::from_settings(Some(doc));
     assert_eq!((c.after_max, c.after_wrap), (3, AfterWrap::Compact));
     assert_eq!((c.wrap_skill.name.as_str(), c.wrap_skill.args.as_str()), ("handoff", "stay"));
-    let d = Config::from_settings(Some(r#"{"keys":{"mods.attend.keepalive.after_wrap_keepalives":{"value":99}}}"#));
+    let d = Config::from_settings(Some(r#"{"keys":{"mods.attend.continuity.after_wrap_keepalives":{"value":99}}}"#));
     assert_eq!(d.after_max, DEFAULT_AFTER_MAX, "out of range keeps the default");
     assert_eq!(d.wrap_skill, WrapSkill::default(), "the shipped wrap skill by default");
     assert_eq!(d.session_skills, SessionSkills::NotChecked, "the caller fills the session's skills");
@@ -1027,3 +1028,5 @@ fn the_card_follows_the_stretch_after_the_wrap_to_the_compaction() {
     let lines = card(&s.state, &s.reading(), &c, &site(), MONDAY + 310 * MIN);
     assert!(lines[0].ends_with(" · the compaction at 05:00 failed: a turn was running"), "{}", lines[0]);
 }
+
+mod relay;
