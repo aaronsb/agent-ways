@@ -80,17 +80,30 @@ export function resetArgv(atS: number): string[] {
   return [ATTEND, 'keepwarm', 'reset', '--at', String(Math.floor(atS))]
 }
 
-/** The keepalive policy's judgment, once, with the autocompact gate and the
- *  session's skills the mod read (ADR-414 item 7). Unread skills pass
- *  `--skills-unread`, and attend runs no wrap; a listing the host's budget
- *  cut short adds `--skills-partial`. `legacy` is the form an attend from
- *  before the flags accepts. */
-export function policyArgv(gate: Gate, skills: Skills | null, legacy = false): string[] {
+/** The continuity policy's judgment, once, with the autocompact gate and
+ *  the session's skills the mod read. Unread skills pass `--skills-unread`,
+ *  and attend runs no wrap; a listing the host's budget cut short adds
+ *  `--skills-partial`. With `fill`, the context at a turn's end, relay's
+ *  fill path judges it. `legacy` is the form an attend from before the
+ *  flags accepts.
+ *
+ *  References:
+ *  - ADR-414 item 7: attend's check judges the policy and the mod acts on it.
+ *  - ADR-417 item 2a: a context fill past the threshold starts a wrap. */
+export function policyArgv(gate: Gate, skills: Skills | null, legacy = false, fill?: Fill): string[] {
   const argv = [ATTEND, 'keepwarm', 'check', '--policy', '--json', '--autocompact', gate]
   if (legacy) return argv
-  if (skills === null) return [...argv, '--skills-unread']
-  return [...argv, `--skills=${skills.names.join(',')}`, ...(skills.isPartial ? ['--skills-partial'] : [])]
+  const listed = skills === null ? ['--skills-unread'] : [`--skills=${skills.names.join(',')}`, ...(skills.isPartial ? ['--skills-partial'] : [])]
+  const filled = fill
+    ? ['--fill', String(fill.tokens), '--window', String(fill.window), ...(fill.nativeAt !== undefined ? ['--native-at', String(fill.nativeAt)] : [])]
+    : []
+  return [...argv, ...listed, ...filled]
 }
+
+/** The context at a main-loop turn's end, as `session.measure` reported
+ *  it, with Claude Code's own autocompact threshold where the usage
+ *  breakdown gave one and autocompact is on. */
+export type Fill = { tokens: number; window: number; nativeAt?: number }
 
 /** Whether a policy check failed because attend predates a flag the mod
  *  passed (clap's usage error), so the mod asks again in the legacy form. */
@@ -99,13 +112,36 @@ export function isUnknownFlag(r: { exitCode: number; stderr: string }): boolean 
 }
 
 /** Where the wrap's reply went, for the status card; with `focus`, the
- *  wrap's closing `/compact` focus, which a compaction later uses. */
-export function wrappedArgv(outcome: WrapOutcome, detail: string, focus?: string): string[] {
-  return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail), ...focusArgs(focus)]
+ *  wrap's closing `/compact` focus, which a compaction later uses; with
+ *  `marker`, the relay marker its reply ended with.
+ *
+ *  References:
+ *  - ADR-417 item 8: the relay marker a wrap in relay mode ends with. */
+export function wrappedArgv(outcome: WrapOutcome, detail: string, focus?: string, marker?: string): string[] {
+  return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail), ...focusArgs(focus), ...(marker === undefined ? [] : ['--marker', marker])]
 }
 
 function focusArgs(focus: string | undefined): string[] {
   return focus === undefined ? [] : ['--focus', oneLine(focus)]
+}
+
+/** A relay's resume went in, or why it did not.
+ *
+ *  References:
+ *  - ADR-417 item 4: a resume that fails to go in stops the relay. */
+export function resumedArgv(failed?: string): string[] {
+  return [ATTEND, 'keepwarm', 'resumed', ...(failed === undefined ? [] : ['--failed', oneLine(failed)])]
+}
+
+/** A `/goal` the operator typed: set (active) or cleared (none). */
+export function goalArgv(active: boolean): string[] {
+  const state = active ? 'active' : 'none'
+  return [ATTEND, 'keepwarm', 'goal', state]
+}
+
+/** A resumed turn ended with a `relay: stop <reason> ...` line. */
+export function stoppedArgv(stop: RelayStop): string[] {
+  return [ATTEND, 'keepwarm', 'stopped', stop.reason, '--detail', oneLine(stop.detail)]
 }
 
 /** The compaction after the wrap ran, or why it failed. */
@@ -255,6 +291,32 @@ export type Keepalive = {
    *  wrap itself, whatever a Stop-hook continuation or a notification adds
    *  to the turn after it. */
   wrap: { route: WrapRoute; text: string; turnId: string | undefined; reply: string | undefined; sawTurn: boolean } | undefined
+  /** Claude Code's autocompact threshold, read with the gate. */
+  nativeAt: number | undefined
+  /** The context at the last main-loop turn's end, past relay's
+   *  threshold: attend is asked with it once no turn runs.
+   *
+   *  References:
+   *  - ADR-417 item 2a: a context fill past the threshold starts a wrap. */
+  fillDue: Fill | undefined
+  /** A relay wrap's reply was reported and waits for attend's word: the
+   *  next check judges it, and a turn that comes first defers it to that
+   *  turn's end. */
+  isRelayPending: boolean
+  /** The reply the relay hands to the operator when it stops: the wrap's,
+   *  or a resumed turn's that ended with a stop line. */
+  relayReply: string | undefined
+  /** Moves at each operator prompt: a resume whose compaction an operator
+   *  prompt followed is not submitted. */
+  operatorEpoch: number
+  /** Relay mode as attend's last decision read it, from the project's
+   *  setting at that check; the mod's settings at session start until
+   *  attend first answers.
+   *
+   *  References:
+   *  - ADR-417 item 1: the relay setting is read when a wrap starts, not
+   *    at session start. */
+  relay: boolean
 }
 
 // ── tools ────────────────────────────────────────────────────────────────
@@ -384,12 +446,18 @@ export type ModConfig = {
   preambleEveryTurns: number
   /** Whether a `-p` run or an SDK session may poll. */
   headlessPoll: boolean
-  /** `mods.attend.keepalive.enabled`: the keepalive policy may run (ADR-414). */
+  /** `mods.attend.continuity.keepalive`: the idle path may run. */
   keepalive: boolean
-  /** `mods.attend.keepalive.margin_minutes`: a keepalive is due this long
+  /** `mods.attend.continuity.margin_minutes`: a keepalive is due this long
    *  before the cache lapses. attend judges; the mod uses it only to set a
    *  dormant session's timer. */
   marginMinutes: number
+  /** `mods.attend.continuity.relay` is `on`: a wrap is followed by a
+   *  compaction and a resume, and the context fill can start one. */
+  relay: boolean
+  /** `mods.attend.continuity.relay_at_pct`. attend judges the fill; the mod
+   *  uses it only to ask attend once a turn's end has passed it. */
+  relayAtPct: number
 }
 
 /** What the mod runs under when ways cannot answer. The keepalive policy
@@ -406,6 +474,8 @@ export const DEFAULT_CONFIG: ModConfig = {
   headlessPoll: false,
   keepalive: false,
   marginMinutes: 10,
+  relay: false,
+  relayAtPct: 75,
 }
 
 /** The notice when `ways settings list mods.attend` exits non-zero: the mod
@@ -450,8 +520,16 @@ export function parseConfig(stdout: string): ModConfig {
     preambleEveryTurns: num('preamble_every_turns', DEFAULT_CONFIG.preambleEveryTurns),
     headlessPoll: bool('headless_poll', DEFAULT_CONFIG.headlessPoll),
     // Only an explicit true: a ways that does not know the key runs none.
-    keepalive: v('keepalive.enabled') === true,
-    marginMinutes: num('keepalive.margin_minutes', DEFAULT_CONFIG.marginMinutes),
+    // ways reads the keys' old names from before the rename to
+    // `mods.attend.continuity` into these.
+    //
+    // References:
+    // - ADR-417 item 1: the keys move to `mods.attend.continuity`, and the
+    //   old names are still read for a while.
+    keepalive: v('continuity.keepalive') === true,
+    marginMinutes: num('continuity.margin_minutes', DEFAULT_CONFIG.marginMinutes),
+    relay: v('continuity.relay') === 'on',
+    relayAtPct: num('continuity.relay_at_pct', DEFAULT_CONFIG.relayAtPct),
   }
 }
 
@@ -480,12 +558,68 @@ export function isContextReset(before: number | undefined, after: number | undef
   return after === undefined || after < before / 2
 }
 
-/** Whether the keepalive policy may run in a session started with
- *  `isInteractive` under `c` (ADR-414 item 1): never a -p run or an SDK
- *  session, whatever `headless_poll` says; autocompact is judged at each
- *  check. Where it applies, keepalive.tsx drives every cache wake. */
+/** Whether the continuity policy may run in a session started with
+ *  `isInteractive` under `c`: never a -p run or an SDK session, whatever
+ *  `headless_poll` says; autocompact is judged at each check. The idle path
+ *  or relay turns it on. Where it applies, the policy drives every cache
+ *  wake.
+ *
+ *  References:
+ *  - ADR-414 item 1: the policy runs only in interactive sessions.
+ *  - ADR-417 item 1: relay turns the policy on as the idle path does. */
 export function keepaliveApplies(c: ModConfig, isInteractive: boolean): boolean {
-  return isInteractive && c.install && c.keepwarm === 'on' && c.keepalive
+  return isInteractive && c.install && c.keepwarm === 'on' && (c.keepalive || c.relay)
+}
+
+/** Claude Code's own autocompact threshold, in tokens, from
+ *  `$.session.usage({ breakdown: 'summary' })`; undefined when autocompact
+ *  is off or the breakdown has none. `session.measure` does not carry it:
+ *  its `window` stays at the model's whole window.
+ *
+ *  References:
+ *  - ADR-417 item 10: the probe that found `session.measure` reports the
+ *    whole window. */
+export function nativeThresholdFrom(usage: unknown): number | undefined {
+  const b = (usage as { context?: { breakdown?: { autoCompactThreshold?: unknown } } } | undefined)?.context?.breakdown
+  const t = b?.autoCompactThreshold
+  return typeof t === 'number' && Number.isFinite(t) && t > 0 ? t : undefined
+}
+
+/** The fill at which relay mode wraps, as attend judges it: `relay_at_pct`
+ *  of the window, lowered with autocompact on to five points of the
+ *  window under its threshold where that is lower. */
+export function relayAtTokens(c: ModConfig, window: number, gate: Gate, nativeAt?: number): number {
+  const at = Math.floor((window * c.relayAtPct) / 100)
+  return gate === 'on' && nativeAt !== undefined ? Math.min(at, nativeAt - Math.floor(window * 0.05)) : at
+}
+
+/** The relay marker a wrap's reply ends with.
+ *
+ *  References:
+ *  - ADR-417 item 8: the marker's form and fields. */
+export const RELAY_MARKER = /^relay: (continue|stop (empty|decision|doubt)) tasks=\d+ goal=(active|none) wrap=[0-9A-Za-z-]{8,64} head=[0-9a-f]{7,40}$/
+
+/** The reply's last line with surrounding space and backticks taken off. */
+function lastLine(reply: string): string {
+  const lines = reply.split('\n').map(l => l.trim()).filter(l => l !== '')
+  return (lines[lines.length - 1] ?? '').replace(/^`+|`+$/g, '').trim()
+}
+
+/** The relay marker the reply's last line is, or undefined. */
+export function relayMarkerOf(reply: string): string | undefined {
+  const line = lastLine(reply)
+  return RELAY_MARKER.test(line) ? line : undefined
+}
+
+/** A resumed turn's closing `relay: stop <reason> ...` line, which is no
+ *  whole marker. */
+export type RelayStop = { reason: 'empty' | 'decision' | 'doubt'; detail: string }
+
+export function relayStopOf(reply: string): RelayStop | undefined {
+  const line = lastLine(reply)
+  if (RELAY_MARKER.test(line)) return undefined
+  const m = /^relay: stop (empty|decision|doubt)\b[\s:,.;]*(.*)$/.exec(line)
+  return m ? { reason: m[1] as RelayStop['reason'], detail: m[2] ?? '' } : undefined
 }
 
 /** When the policy's timer asks attend first after a main-loop turn's end: the margin before the hour tier's cache lapses, or ADR-182's
@@ -545,7 +679,8 @@ export type WrapRoute = {
   file: string
   /** `send`'s recipient; `#name` is a channel. */
   to: string
-  after: 'lapse' | 'compact'
+  /** `relay`: a compaction and a resume follow, at attend's word. */
+  after: 'lapse' | 'compact' | 'relay'
   /** Keepalives after the wrap before `after` applies. With none the mod
    *  compacts once the wrap answers; otherwise attend asks for it. */
   afterKeepalives: number
@@ -565,7 +700,7 @@ export type Decision = {
   wrappedAt: string | null
   /** Whether the policy runs; false is ADR-182's armed windows alone. */
   policy: boolean
-  state: 'running' | 'wrapped' | 'compacted' | 'stopped' | 'off'
+  state: 'running' | 'wrapped' | 'compacted' | 'resumed' | 'stopped' | 'off'
   reason: string
   afterCount: number
   afterMax: number
@@ -576,6 +711,18 @@ export type Decision = {
   retry: boolean
   /** Why a running policy has nothing due: `under 50k`, `5m tier`. */
   idle: string | null
+  /** Relay mode is on. */
+  relay: boolean
+  relayCount: number
+  maxRelays: number
+  relayAtTokens: number | null
+  /** With `compact`: the turn to submit once the compaction ran without a skip. */
+  resume: string | null
+  /** Why the relay stopped, in a few words for the row. */
+  relayStop: string | null
+  /** Send the wrap's reply over attend to `wrap.to`, opening with `wrap.handoff`. */
+  sendHandoff: boolean
+  wrapId: string | null
 }
 
 export type WrapOutcome = 'transcript' | 'file' | 'sent' | 'refused' | 'unfinished'
@@ -595,7 +742,7 @@ export function parseDecision(stdout: string): Decision | undefined {
   if (action !== 'none' && action !== 'keepalive' && action !== 'wrap' && action !== 'compact') return undefined
   const str = (v: unknown) => (typeof v === 'string' ? v : null)
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
-  const states = ['running', 'wrapped', 'compacted', 'stopped', 'off'] as const
+  const states = ['running', 'wrapped', 'compacted', 'resumed', 'stopped', 'off'] as const
   const state = states.find(x => x === d.state) ?? 'off'
   const w = d.wrap as Record<string, unknown> | null | undefined
   const dests = ['transcript', 'file', 'send', 'off'] as const
@@ -606,7 +753,7 @@ export function parseDecision(stdout: string): Decision | undefined {
           dest,
           file: w.file,
           to: w.to,
-          after: w.after === 'compact' ? 'compact' : 'lapse',
+          after: w.after === 'compact' || w.after === 'relay' ? w.after : 'lapse',
           afterKeepalives: num(w.after_keepalives) ?? 0,
           handoff: str(w.handoff) ?? 'handoff:',
         }
@@ -629,6 +776,14 @@ export function parseDecision(stdout: string): Decision | undefined {
     wrap,
     retry: d.retry === true,
     idle: str(d.idle),
+    relay: d.relay === true,
+    relayCount: num(d.relay_count) ?? 0,
+    maxRelays: num(d.max_relays) ?? 0,
+    relayAtTokens: num(d.relay_at_tokens),
+    resume: str(d.resume),
+    relayStop: str(d.relay_stop),
+    sendHandoff: d.send_handoff === true,
+    wrapId: str(d.wrap_id),
   }
 }
 
@@ -664,6 +819,9 @@ export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): Keepalive
     idle: d.state === 'running' ? d.idle : null,
     isRefused: d.state === 'wrapped' && (was?.isRefused ?? false),
     isShown: (was?.isShown ?? false) || d.action !== 'none',
+    relayCount: d.relay ? d.relayCount : 0,
+    maxRelays: d.maxRelays,
+    relayStop: d.relay && d.state === 'stopped' ? d.relayStop : null,
   }
 }
 
@@ -679,8 +837,14 @@ function nextIn(nextAt: number, nowMs: number): string {
 
 /** `⟳ 2/8 · next 41m · wrap ~21:40`, `⟳ 0/1 · idle: under 50k`,
  *  `⟳ wrapped 21:40`, `⟳ wrapped 21:40 · 1/3 · next 41m · compact ~00:10`,
- *  `⟳ compacted 00:10`, `⟳ stopped`. */
+ *  `⟳ compacted 00:10`, `⟳ stopped`; in relay mode `⟳ relay 2/5` once a
+ *  relay has run and `⟳ relay stopped: decision`.
+ *
+ *  References:
+ *  - ADR-417 item 4: the row's words for a relay and for its stop. */
 export function keepaliveSegment(k: KeepaliveRow, nowMs: number): string {
+  if (k.relayStop) return `⟳ relay stopped: ${k.relayStop}`
+  if (k.relayCount > 0 && (k.state === 'running' || k.state === 'resumed')) return `⟳ relay ${k.relayCount}/${k.maxRelays}`
   if (k.state === 'compacted') return `⟳ compacted ${k.compactedAt ?? ''}`.trimEnd()
   if (k.state === 'wrapped') {
     const parts = [`⟳ wrapped ${k.wrappedAt ?? ''}`.trimEnd()]
@@ -736,9 +900,14 @@ export function planCheck(d: Decision, isListening: boolean): CheckPlan {
 
 /** Whether a planned turn may still go in: no prompt or main-loop turn came
  *  since the check began (the epoch held), none runs now, and for the
- *  policy's own turn the gate, read again, is still off (ADR-414 item 2). */
-export function maySubmit(o: { epochThen: number; epochNow: number; running: number; isPolicy: boolean; gate: Gate }): boolean {
-  return o.epochThen === o.epochNow && o.running === 0 && (!o.isPolicy || o.gate === 'off')
+ *  policy's own turn the gate, read again, is still off, unless relay is
+ *  on, which runs whatever autocompact says.
+ *
+ *  References:
+ *  - ADR-414 item 2: the policy's turns go in only while autocompact is off.
+ *  - ADR-417 item 2: with relay on, the gate ignores autocompact. */
+export function maySubmit(o: { epochThen: number; epochNow: number; running: number; isPolicy: boolean; gate: Gate; isRelay?: boolean }): boolean {
+  return o.epochThen === o.epochNow && o.running === 0 && (!o.isPolicy || o.gate === 'off' || o.isRelay === true)
 }
 
 /** A dormant session's retries after a check that could not judge, at most
@@ -826,7 +995,12 @@ export function refusalDetail(to: string, r: { exitCode: number; stderr: string;
 /** The row's segment after the operator's prompt: the count starts again,
  *  and a dormant session stops drawing it. */
 export function rowAfterPrompt(k: KeepaliveRow | null): KeepaliveRow | null {
-  return k && { ...k, state: 'running', count: 0, afterCount: 0, compactsAt: null, compactedAt: null, wrappedAt: null, isRefused: false, isShown: false }
+  return k && { ...k, state: 'running', count: 0, afterCount: 0, compactsAt: null, compactedAt: null, wrappedAt: null, isRefused: false, isShown: false, relayCount: 0, relayStop: null }
+}
+
+/** After a relay's resume went in: the count shows the relay. */
+export function rowAfterResume(k: KeepaliveRow | null, relayCount: number, maxRelays: number): KeepaliveRow | null {
+  return k && { ...k, state: 'resumed', count: 0, afterCount: 0, wrappedAt: null, compactedAt: null, relayCount, maxRelays, relayStop: null, isShown: true }
 }
 
 /** After a main-loop turn's end: the next check's time, while it runs, the

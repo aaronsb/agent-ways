@@ -239,7 +239,7 @@ fn file_keys<'a>(schema: &'a Schema, file: &str) -> Vec<&'a KeySpec> {
 /// reading of each switch in it, so a bad value beside a switch never
 /// switches it back on.
 fn closed(keys: &[&KeySpec], scope: LayerScope, path: &[String], raw: &Value) -> Option<Value> {
-    if let Some(k) = keys.iter().find(|k| k.match_path(path).is_some()) {
+    if let Some(k) = keys.iter().find(|k| k.match_path(path).is_some() || k.is_was_path(path)) {
         if !scope.admits(k.scope) {
             return None;
         }
@@ -420,7 +420,7 @@ fn strip_retired(retired: &[(&str, &str)], sec: &SectionSpec, top: &str, v: &Val
 }
 
 fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &Value, errs: &mut Vec<(Vec<String>, String)>) {
-    if let Some(k) = keys.iter().find(|k| k.match_path(path).is_some()) {
+    if let Some(k) = keys.iter().find(|k| k.match_path(path).is_some() || k.is_was_path(path)) {
         if !scope.admits(k.scope) {
             errs.push((path.clone(), format!("{} is set in the {} file only", k.name, k.scope.as_str())));
         } else if let Err(m) = k.check_value(v) {
@@ -428,9 +428,8 @@ fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &
         }
         return;
     }
-    let deeper = keys.iter().any(|k| {
-        k.path.len() > path.len() && k.path.iter().zip(path.iter()).all(|(p, s)| *p == "*" || p == s)
-    });
+    let under = |kp: &[&str]| kp.len() > path.len() && kp.iter().zip(path.iter()).all(|(p, s)| *p == "*" || p == s);
+    let deeper = keys.iter().any(|k| under(k.path) || k.was.is_some_and(under));
     if !deeper {
         errs.push((path.clone(), "unknown key".into()));
         return;
@@ -620,7 +619,12 @@ pub fn resolve(spec: &KeySpec, bound: &[String], layers: &[Layer]) -> Resolved {
         if l.file != spec.file || !l.scope.admits(spec.scope) {
             continue;
         }
-        if let Some(v) = l.get(&path) {
+        // The key's own path first; its name before a rename where this
+        // layer does not set the new one.
+        //
+        // References:
+        // - ADR-417 item 1: a renamed key is read under both names for a while.
+        if let Some(v) = l.get(&path).or_else(|| spec.was_path().and_then(|w| l.get(&w))) {
             value = Some(v.clone());
             from = Some(i);
         }
@@ -773,6 +777,7 @@ mod tests {
         computed: None,
         fail_closed: None,
         star_instance: false,
+        was: None,
     };
     const KEYS: &[KeySpec] = &[
         BASE,
@@ -835,6 +840,29 @@ mod tests {
         assert!(!is_higher(&layers, user, user));
         assert!(is_higher(&layers, user, elsewhere));
         assert!(!is_higher(&layers, elsewhere, user));
+    }
+
+    /// A renamed key reads its old path where a layer does not set the new
+    /// one, the new path wins inside one layer, and an old name in a higher
+    /// layer beats a new name in a lower one. The old path loads, checked as
+    /// the key, and a bad value there fails its section.
+    ///
+    /// References:
+    /// - ADR-417 item 1: a renamed key is read under both names for a while.
+    #[test]
+    fn a_renamed_key_reads_its_old_path_layer_by_layer() {
+        const RENAMED: KeySpec = KeySpec { name: "matching.prob", section: "matching", path: &["prob"], kind: Kind::Float { min: 0.0, max: 1.0 }, default: DefaultValue::Yaml("0.5"), was: Some(&["presets", "oldprob"]), ..BASE };
+        let old_only = layer("user", LayerScope::User, "presets:\n  oldprob: 0.25\n");
+        assert!(old_only.findings.is_empty(), "{:?}", old_only.findings);
+        assert_eq!(resolve(&RENAMED, &[], std::slice::from_ref(&old_only)).value, Some(Value::from(0.25)));
+        let both = layer("user", LayerScope::User, "prob: 0.75\npresets:\n  oldprob: 0.25\n");
+        assert_eq!(resolve(&RENAMED, &[], &[both]).value, Some(Value::from(0.75)), "the new path wins in one layer");
+        let user_new = layer("user", LayerScope::User, "prob: 0.75\n");
+        let project_old = layer("project", LayerScope::Project, "presets:\n  oldprob: 0.25\n");
+        let r = resolve(&RENAMED, &[], &[user_new, project_old]);
+        assert_eq!((r.value, r.layer), (Some(Value::from(0.25)), Some(1)), "an old name in a higher layer wins");
+        let bad = layer("user", LayerScope::User, "presets:\n  oldprob: 3\n");
+        assert!(bad.findings.iter().any(|f| f.fallback), "{:?}", bad.findings);
     }
 
     #[test]

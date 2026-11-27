@@ -153,7 +153,7 @@ pub const ATTEND_MOD_RETIRED: &str = "`attend_mod` was retired by ADR-512 and is
 /// under `mods`, with the doc of that entry. The plugins
 /// `plugins/.claude-plugin/marketplace.json` lists, in its order.
 pub const MODS: &[(&str, &str)] = &[
-    ("attend", "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing."),
+    ("attend", "The attend mod in Claude Code: whether a session starts listening, keepwarm, the continuity policy (keepalive and relay), the install and poll timing."),
     ("ways-judge", "The ways-judge mod, the relevance gate's Claude Code internal engine (ADR-708): whether repair installs it."),
     ("ways-theme", "The ways-theme mod, which has Claude Code follow theme.active (ADR-514): whether repair installs it, what it draws, and the words it shows."),
     ("images", "The images mod, which draws pictures inline in the terminal transcript (ADR-517): whether repair installs it, and how it draws."),
@@ -174,6 +174,7 @@ const BASE: KeySpec = KeySpec {
     computed: None,
     fail_closed: None,
     star_instance: false,
+    was: None,
 };
 
 const PROB: Kind = Kind::Float { min: 0.0, max: 1.0 };
@@ -390,7 +391,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Choice(&["on", "off"]),
         default: DefaultValue::Yaml("on"),
         doc: "Whether the attend mod drives cache wakes: on or off.",
-        long: "on keeps ADR-182's wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. It also lets the keepalive policy (mods.attend.keepalive.*) run in every interactive session with the mod, dormant ones included, while autocompact is off (ADR-414). off means no cache wake the mod drives in that project's sessions, the policy included, and arms nothing.",
+        long: "on keeps the mod's cache wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. It also lets the continuity policy (mods.attend.continuity.*) run in every interactive session with the mod, dormant ones included, while autocompact is off. off means no cache wake the mod drives in that project's sessions, the policy included, and arms nothing.",
         ..BASE
     },
     KeySpec {
@@ -456,20 +457,22 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.enabled",
+        name: "mods.attend.continuity.keepalive",
         section: "mods",
         fail_closed: Some(closed_keepalive),
-        path: &["mods", "attend", "keepalive", "enabled"],
+        path: &["mods", "attend", "continuity", "keepalive"],
+        was: Some(&["mods", "attend", "keepalive", "enabled"]),
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
-        doc: "Whether the attend mod keeps an idle session warm for a bounded stretch, then asks for a wrap.",
-        long: "The keepalive policy (ADR-414) runs in an interactive session with the mod while autocompact is off: one keepwarm: turn the margin before the prompt cache lapses, counted from the operator's last prompt, then one wrap: turn, after which the cache lapses. With autocompact on it does not run, and ADR-182's armed windows apply as before. false returns the project to ADR-182 alone. Only an explicit true runs it: a bad value, or settings that cannot be read, leave it off.",
+        doc: "Whether the attend mod keeps an idle session warm for a bounded stretch, then asks for a wrap (the idle path).",
+        long: "The idle path of the continuity policy runs in an interactive session with the mod while autocompact is off, or whatever autocompact says while relay is on: one keepwarm: turn the margin before the prompt cache lapses, counted from the operator's last prompt, then one wrap: turn. With relay off the cache then lapses or the mod compacts (after_wrap); with relay on the mod compacts and resumes the work. false leaves the project with the cache wakes of mods.attend.keepwarm alone, with relay's fill trigger still running where relay is on. Only an explicit true runs it: a bad value, or settings that cannot be read, leave it off. Was mods.attend.keepalive.enabled, which is still read until `ways settings fix mods.attend.continuity` moves it.",
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.max_keepalives",
+        name: "mods.attend.continuity.max_keepalives",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "max_keepalives"],
+        path: &["mods", "attend", "continuity", "max_keepalives"],
+        was: Some(&["mods", "attend", "keepalive", "max_keepalives"]),
         kind: Kind::Int { min: 0, max: 48 },
         default: DefaultValue::Yaml("8"),
         doc: "Keepalives allowed since the operator's last prompt before the wrap.",
@@ -477,9 +480,10 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.margin_minutes",
+        name: "mods.attend.continuity.margin_minutes",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "margin_minutes"],
+        path: &["mods", "attend", "continuity", "margin_minutes"],
+        was: Some(&["mods", "attend", "keepalive", "margin_minutes"]),
         kind: Kind::Int { min: 3, max: 30 },
         default: DefaultValue::Yaml("10"),
         doc: "Minutes before the prompt cache lapses that a keepalive is due.",
@@ -487,19 +491,21 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.windows",
+        name: "mods.attend.continuity.windows",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "windows"],
+        path: &["mods", "attend", "continuity", "windows"],
+        was: Some(&["mods", "attend", "keepalive", "windows"]),
         kind: Kind::List,
         default: DefaultValue::Yaml("[\"daily 00:00-24:00\"]"),
         doc: "When keepalives may run: entries of `<days> <HH:MM>-<HH:MM>`.",
-        long: "Days are daily, one day (Sat) or a range (Mon-Fri; Fri-Mon wraps the week). 24:00 closes a day; an end before its start crosses midnight and belongs to the start's day. Outside every window the next due point sends the wrap instead. An entry that does not parse is dropped and `attend keepwarm status` names it; an empty list is never inside. Set several with commas: `ways settings set mods.attend.keepalive.windows \"Mon-Fri 08:00-19:00, Sat 10:00-14:00\"`.",
+        long: "Days are daily, one day (Sat) or a range (Mon-Fri; Fri-Mon wraps the week). 24:00 closes a day; an end before its start crosses midnight and belongs to the start's day. Outside every window the next due point sends the wrap instead. An entry that does not parse is dropped and `attend keepwarm status` names it; an empty list is never inside. Set several with commas: `ways settings set mods.attend.continuity.windows \"Mon-Fri 08:00-19:00, Sat 10:00-14:00\"`.",
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.timezone",
+        name: "mods.attend.continuity.timezone",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "timezone"],
+        path: &["mods", "attend", "continuity", "timezone"],
+        was: Some(&["mods", "attend", "keepalive", "timezone"]),
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"\""),
         doc: "The IANA zone the windows are read in; empty for the host's zone.",
@@ -507,9 +513,10 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.wrap",
+        name: "mods.attend.continuity.wrap",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "wrap"],
+        path: &["mods", "attend", "continuity", "wrap"],
+        was: Some(&["mods", "attend", "keepalive", "wrap"]),
         kind: Kind::Choice(&["transcript", "file", "send", "off"]),
         default: DefaultValue::Yaml("transcript"),
         doc: "Where the wrap's final reply goes: transcript, file, send or off.",
@@ -517,9 +524,10 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.wrap_file",
+        name: "mods.attend.continuity.wrap_file",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "wrap_file"],
+        path: &["mods", "attend", "continuity", "wrap_file"],
+        was: Some(&["mods", "attend", "keepalive", "wrap_file"]),
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"{state}/wrap/{session}.md\""),
         doc: "The file the mod writes the wrap's reply to, for file and a refused send.",
@@ -527,9 +535,10 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.wrap_to",
+        name: "mods.attend.continuity.wrap_to",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "wrap_to"],
+        path: &["mods", "attend", "continuity", "wrap_to"],
+        was: Some(&["mods", "attend", "keepalive", "wrap_to"]),
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"\""),
         doc: "Who receives the wrap with send: empty for the operator.",
@@ -537,33 +546,66 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.after_wrap",
+        name: "mods.attend.continuity.after_wrap",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "after_wrap"],
+        path: &["mods", "attend", "continuity", "after_wrap"],
+        was: Some(&["mods", "attend", "keepalive", "after_wrap"]),
         kind: Kind::Choice(&["lapse", "compact"]),
         default: DefaultValue::Yaml("lapse"),
         doc: "What follows the wrap: lapse, or compact the conversation.",
-        long: "lapse lets the prompt cache lapse an hour after the wrap. compact has the mod compact the conversation with the focus of the wrap's closing /compact line, leaving a small context for the operator's return; it is one more warm request. Either applies once the wrap has answered, or after after_wrap_keepalives more keepalives when that is set.",
+        long: "lapse lets the prompt cache lapse an hour after the wrap. compact has the mod compact the conversation with the focus of the wrap's closing /compact line, leaving a small context for the operator's return; it is one more warm request. Either applies once the wrap has answered, or after after_wrap_keepalives more keepalives when that is set. Handoff mode only: with relay on, every wrap is followed by a compaction and a resume.",
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.after_wrap_keepalives",
+        name: "mods.attend.continuity.after_wrap_keepalives",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "after_wrap_keepalives"],
+        path: &["mods", "attend", "continuity", "after_wrap_keepalives"],
+        was: Some(&["mods", "attend", "keepalive", "after_wrap_keepalives"]),
         kind: Kind::Int { min: 0, max: 48 },
         default: DefaultValue::Yaml("0"),
         doc: "Keepalives after the wrap before after_wrap applies.",
-        long: "The session stays warm with its whole context for this many more keepalives after the wrap, so an operator back within that stretch finds the conversation as it was and the handoff already written. Then after_wrap applies: the cache lapses, or the mod compacts the conversation with the wrap's focus. Outside the windows it applies at the next due point. 0 applies it once the wrap has answered.",
+        long: "The session stays warm with its whole context for this many more keepalives after the wrap, so an operator back within that stretch finds the conversation as it was and the handoff already written. Then after_wrap applies: the cache lapses, or the mod compacts the conversation with the wrap's focus. Outside the windows it applies at the next due point. 0 applies it once the wrap has answered. Handoff mode only, as after_wrap.",
         ..BASE
     },
     KeySpec {
-        name: "mods.attend.keepalive.wrap_skill",
+        name: "mods.attend.continuity.wrap_skill",
         section: "mods",
-        path: &["mods", "attend", "keepalive", "wrap_skill"],
+        path: &["mods", "attend", "continuity", "wrap_skill"],
+        was: Some(&["mods", "attend", "keepalive", "wrap_skill"]),
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"wrap stay\""),
         doc: "The skill the wrap turn asks for, with its arguments.",
-        long: "Written `<skill> [arguments]`, as `wrap stay` (the shipped wrap skill) or `handoff`; a leading / is allowed. The skill should square the task list, write a continuation prompt and end with a /compact <focus> line, which after_wrap: compact uses. The wrap and the compaction run only when the session lists this skill: empty, a skill the session does not have, or a value refused leaves them off, and the keepalives stop at max_keepalives. The text goes into a turn nobody watches, so the name is letters, digits and : _ - . and the arguments plain words; `attend keepwarm status` names a refusal.",
+        long: "Written `<skill> [arguments]`, as `wrap stay` (the shipped wrap skill) or `handoff`; a leading / is allowed. The skill should square the task list, write a continuation prompt and end with a /compact <focus> line, which after_wrap: compact uses, or in relay mode with the relay marker line. The wrap and the compaction run only when the session lists this skill: empty, a skill the session does not have, or a value refused leaves them off, and the keepalives stop at max_keepalives. The text goes into a turn nobody watches, so the name is letters, digits and : _ - . and the arguments plain words; `attend keepwarm status` names a refusal.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.attend.continuity.relay",
+        section: "mods",
+        path: &["mods", "attend", "continuity", "relay"],
+        kind: Kind::Choice(&["on", "off"]),
+        default: DefaultValue::Yaml("off"),
+        doc: "What follows a wrap: off ends it with a /compact line for the operator; on compacts and resumes the work.",
+        long: "off is handoff mode, wrap as it was: the wrap ends with a /compact <focus> line, and the idle path's wrap is followed by after_wrap. on is relay mode: the attend mod asks for a wrap when the context reaches relay_at_pct, compacts the conversation with the wrap's handoff, and submits a turn that reads .claude/handoff.wrap.md and starts its DO NEXT, up to max_relays times since the operator's last prompt. The agent stops the relay in its wrap's closing marker when no work is left, a decision only the operator can make is next, or its doubt is high, and the handoff then goes to the operator over attend. Relay starts turns nobody watches and spends tokens, so it is off unless set. It is its own setting, not Claude Code's autocompact switch; the project's value wins over the user's.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.attend.continuity.relay_at_pct",
+        section: "mods",
+        path: &["mods", "attend", "continuity", "relay_at_pct"],
+        kind: Kind::Int { min: 50, max: 95 },
+        default: DefaultValue::Yaml("75"),
+        doc: "The context fill, in percent of the model's window, at which relay mode asks for a wrap.",
+        long: "Judged at each main-loop turn's end. 75 leaves a quarter of the window for the wrap to read state and write a dense handoff, below the 85% at which the compaction-checkpoint way fires. With Claude Code's autocompact on, the trigger is lowered to five points of the window under its threshold where that is lower, so the relay's wrap comes first.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.attend.continuity.max_relays",
+        section: "mods",
+        path: &["mods", "attend", "continuity", "max_relays"],
+        kind: Kind::Int { min: 0, max: 50 },
+        default: DefaultValue::Yaml("5"),
+        doc: "Resumes relay mode submits since the operator's last prompt before it stops.",
+        long: "Each relay is a context window of work nobody watches. At the cap the next wrap still compacts with its handoff, submits no resume, and sends the handoff to the operator over attend. The operator's next prompt starts the count again. 0 relays nothing: every wrap stops.",
         ..BASE
     },
     KeySpec {
@@ -906,7 +948,7 @@ fn closed_keepwarm(v: &Value) -> Option<Value> {
     (v.as_str() != Some("on")).then(|| Value::String("off".into()))
 }
 
-/// `mods.attend.keepalive.enabled`: anything but `true` reads as off, the
+/// `mods.attend.continuity.keepalive`: anything but `true` reads as off, the
 /// side that starts no turn the operator did not type.
 fn closed_keepalive(v: &Value) -> Option<Value> {
     (v != &Value::Bool(true)).then_some(Value::Bool(false))
@@ -965,23 +1007,30 @@ pub static SCHEMA: Schema = Schema {
 
 /// Keys of both scopes that the settings screens write to the project's
 /// `.claude/ways.yaml`, not the user file: how a project's sessions start
-/// is decided per project (ADR-406 item 2), and so is the keepalive policy
-/// (ADR-414 item 8). `ways settings set` still writes
-/// the user file unless `--project` is given.
+/// is decided per project, and so is the continuity policy. `ways settings
+/// set` still writes the user file unless `--project` is given.
+///
+/// References:
+/// - ADR-406 item 2: each project decides how its sessions start.
+/// - ADR-414 item 8: the keepalive policy is set per project.
+/// - ADR-417 item 1: the relay and the other continuity keys are set per project.
 pub const SCREENS_WRITE_PROJECT: &[&str] = &[
     "mods.attend.listening",
     "mods.attend.keepwarm",
-    "mods.attend.keepalive.enabled",
-    "mods.attend.keepalive.max_keepalives",
-    "mods.attend.keepalive.margin_minutes",
-    "mods.attend.keepalive.windows",
-    "mods.attend.keepalive.timezone",
-    "mods.attend.keepalive.wrap",
-    "mods.attend.keepalive.wrap_file",
-    "mods.attend.keepalive.wrap_to",
-    "mods.attend.keepalive.after_wrap",
-    "mods.attend.keepalive.after_wrap_keepalives",
-    "mods.attend.keepalive.wrap_skill",
+    "mods.attend.continuity.keepalive",
+    "mods.attend.continuity.max_keepalives",
+    "mods.attend.continuity.margin_minutes",
+    "mods.attend.continuity.windows",
+    "mods.attend.continuity.timezone",
+    "mods.attend.continuity.wrap",
+    "mods.attend.continuity.wrap_file",
+    "mods.attend.continuity.wrap_to",
+    "mods.attend.continuity.after_wrap",
+    "mods.attend.continuity.after_wrap_keepalives",
+    "mods.attend.continuity.wrap_skill",
+    "mods.attend.continuity.relay",
+    "mods.attend.continuity.relay_at_pct",
+    "mods.attend.continuity.max_relays",
 ];
 
 /// Whether the mod `name` (an entry of [`MODS`]) is wanted in a target
@@ -1150,6 +1199,45 @@ mod tests {
         agent_settings::load::resolve(spec, &[], layers).value
     }
 
+    /// The continuity keys read their old keepalive names during the dual
+    /// read. In one file the new name wins; across files a project's old
+    /// name beats the user's new one; `enabled` becomes `keepalive`, and a
+    /// bad old value still fails closed.
+    ///
+    /// References:
+    /// - ADR-417 item 1: the keepalive keys move under mods.attend.continuity.
+    #[test]
+    fn continuity_keys_dual_read_their_keepalive_names() {
+        let old = layer("user", LayerScope::User, "mods:\n  attend:\n    keepalive:\n      max_keepalives: 2\n      enabled: false\n");
+        assert!(old.findings.is_empty(), "{:?}", old.findings);
+        assert_eq!(resolved("mods.attend.continuity.max_keepalives", std::slice::from_ref(&old)), Some(Value::Number(2.into())));
+        assert_eq!(resolved("mods.attend.continuity.keepalive", &[old]), Some(Value::Bool(false)));
+        let both = layer("user", LayerScope::User, "mods:\n  attend:\n    keepalive:\n      max_keepalives: 2\n    continuity:\n      max_keepalives: 3\n");
+        assert_eq!(resolved("mods.attend.continuity.max_keepalives", &[both]), Some(Value::Number(3.into())));
+        let user_new = layer("user", LayerScope::User, "mods:\n  attend:\n    continuity:\n      max_keepalives: 3\n");
+        let project_old = layer("project", LayerScope::Project, "mods:\n  attend:\n    keepalive:\n      max_keepalives: 2\n");
+        assert_eq!(resolved("mods.attend.continuity.max_keepalives", &[user_new, project_old]), Some(Value::Number(2.into())));
+        let bad = layer("user", LayerScope::User, "mods:\n  attend:\n    keepalive:\n      enabled: maybe\n");
+        assert_eq!(resolved("mods.attend.continuity.keepalive", &[bad]), Some(Value::Bool(false)));
+    }
+
+    /// Relay is on or off, the project winning, and its threshold and cap
+    /// are held to their ranges.
+    ///
+    /// References:
+    /// - ADR-417 item 1: the relay setting, its threshold and its cap.
+    #[test]
+    fn relay_resolves_with_the_project_winning_and_its_bounds_hold() {
+        let user_on = layer("user", LayerScope::User, "mods:\n  attend:\n    continuity:\n      relay: 'on'\n");
+        let project_off = layer("project", LayerScope::Project, "mods:\n  attend:\n    continuity:\n      relay: 'off'\n");
+        assert_eq!(resolved("mods.attend.continuity.relay", std::slice::from_ref(&user_on)), Some(Value::String("on".into())));
+        assert_eq!(resolved("mods.attend.continuity.relay", &[user_on, project_off]), Some(Value::String("off".into())));
+        for (key, bad) in [("relay_at_pct", "49"), ("relay_at_pct", "96"), ("max_relays", "51"), ("relay", "yes")] {
+            let l = layer("user", LayerScope::User, &format!("mods:\n  attend:\n    continuity:\n      {key}: {bad}\n"));
+            assert!(l.findings.iter().any(|f| f.fallback), "{key}: {bad} should fail: {:?}", l.findings);
+        }
+    }
+
     #[test]
     fn manage_mode_defaults_to_whatif_and_reads_commit_from_the_user_file() {
         assert!(!manage_mode_commit_in(&[layer("user", LayerScope::User, "")]));
@@ -1174,20 +1262,23 @@ mod tests {
     /// falling to off when its section does not load.
     #[test]
     fn mods_attend_keepalive_defaults_and_its_switch_fails_closed() {
-        assert_eq!(resolved("mods.attend.keepalive.enabled", &[]), Some(Value::Bool(true)));
-        assert_eq!(resolved("mods.attend.keepalive.max_keepalives", &[]), Some(Value::Number(8.into())));
-        assert_eq!(resolved("mods.attend.keepalive.margin_minutes", &[]), Some(Value::Number(10.into())));
+        assert_eq!(resolved("mods.attend.continuity.keepalive", &[]), Some(Value::Bool(true)));
+        assert_eq!(resolved("mods.attend.continuity.max_keepalives", &[]), Some(Value::Number(8.into())));
+        assert_eq!(resolved("mods.attend.continuity.margin_minutes", &[]), Some(Value::Number(10.into())));
         assert_eq!(
-            resolved("mods.attend.keepalive.windows", &[]),
+            resolved("mods.attend.continuity.windows", &[]),
             Some(Value::Sequence(vec![Value::String("daily 00:00-24:00".into())]))
         );
-        assert_eq!(resolved("mods.attend.keepalive.timezone", &[]), Some(Value::String(String::new())));
-        assert_eq!(resolved("mods.attend.keepalive.wrap", &[]), Some(Value::String("transcript".into())));
-        assert_eq!(resolved("mods.attend.keepalive.wrap_file", &[]), Some(Value::String("{state}/wrap/{session}.md".into())));
-        assert_eq!(resolved("mods.attend.keepalive.wrap_to", &[]), Some(Value::String(String::new())));
-        assert_eq!(resolved("mods.attend.keepalive.after_wrap", &[]), Some(Value::String("lapse".into())));
-        assert_eq!(resolved("mods.attend.keepalive.after_wrap_keepalives", &[]), Some(Value::Number(0.into())));
-        assert_eq!(resolved("mods.attend.keepalive.wrap_skill", &[]), Some(Value::String("wrap stay".into())));
+        assert_eq!(resolved("mods.attend.continuity.timezone", &[]), Some(Value::String(String::new())));
+        assert_eq!(resolved("mods.attend.continuity.wrap", &[]), Some(Value::String("transcript".into())));
+        assert_eq!(resolved("mods.attend.continuity.wrap_file", &[]), Some(Value::String("{state}/wrap/{session}.md".into())));
+        assert_eq!(resolved("mods.attend.continuity.wrap_to", &[]), Some(Value::String(String::new())));
+        assert_eq!(resolved("mods.attend.continuity.after_wrap", &[]), Some(Value::String("lapse".into())));
+        assert_eq!(resolved("mods.attend.continuity.after_wrap_keepalives", &[]), Some(Value::Number(0.into())));
+        assert_eq!(resolved("mods.attend.continuity.wrap_skill", &[]), Some(Value::String("wrap stay".into())));
+        assert_eq!(resolved("mods.attend.continuity.relay", &[]), Some(Value::String("off".into())));
+        assert_eq!(resolved("mods.attend.continuity.relay_at_pct", &[]), Some(Value::Number(75.into())));
+        assert_eq!(resolved("mods.attend.continuity.max_relays", &[]), Some(Value::Number(5.into())));
         assert_eq!(closed_keepalive(&Value::Null), Some(Value::Bool(false)));
         assert_eq!(closed_keepalive(&Value::Bool(true)), None);
     }

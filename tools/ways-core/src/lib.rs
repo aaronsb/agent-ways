@@ -26,6 +26,7 @@ pub mod event_archive;
 pub mod finding;
 pub mod firing;
 pub mod frontmatter;
+pub mod handoff;
 pub mod introspection;
 pub mod paths;
 pub mod provenance;

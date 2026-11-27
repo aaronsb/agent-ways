@@ -1557,7 +1557,7 @@ fn mods_lists_each_mod_and_attend_mod_names_no_section() {
     let (out, err, code) = f.run(&["settings", "list", "mods.attend", "--json", "--effective"]);
     assert_eq!(code, 0, "{err}");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    for k in ["mods.attend.listening", "mods.attend.keepwarm", "mods.attend.install", "mods.attend.keepalive.enabled"] {
+    for k in ["mods.attend.listening", "mods.attend.keepwarm", "mods.attend.install", "mods.attend.continuity.keepalive", "mods.attend.continuity.relay"] {
         assert!(v["keys"][k].is_object(), "{k}: {out}");
     }
     assert!(v["keys"]["mods.ways-judge.install"].is_null(), "mods.attend is attend's alone: {out}");
@@ -1694,9 +1694,14 @@ fn fix_moves_the_section_with_its_comments() {
     let f = Fx::new();
     f.write(&f.user(), "# top\nattend_mod:\n  # why active\n  listening: active # inline\n  keepalive:\n    # weekdays only\n    windows: [\"Mon-Fri 08:00-19:00\"]\nother: 1\n");
     let (_, err, _) = f.run(&["settings", "fix", "mods.attend"]);
+    // `fix mods.attend` covers the whole entry, so the keepalive section
+    // inside moves on to its continuity name as well.
+    //
+    // References:
+    // - ADR-417 item 1: the keepalive section moves to `mods.attend.continuity`.
     assert_eq!(
         std::fs::read_to_string(f.user()).unwrap(),
-        "# top\nmods:\n  attend:\n    # why active\n    listening: active # inline\n    keepalive:\n      # weekdays only\n      windows: [\"Mon-Fri 08:00-19:00\"]\nother: 1\n",
+        "# top\nmods:\n  attend:\n    # why active\n    listening: active # inline\n    continuity:\n      # weekdays only\n      windows: [\"Mon-Fri 08:00-19:00\"]\nother: 1\n",
         "{err}"
     );
 }
@@ -1723,9 +1728,9 @@ fn fix_says_why_each_value_was_dropped() {
     let (_, err, code) = f.run(&["settings", "fix", "mods.attend"]);
     assert_eq!(code, 0, "{err}");
     assert!(err.contains("dropped attend_mod: it is `true`, not a section of keys") && !err.contains("already holds"), "{err}");
-    f.write(&f.user(), "mods:\n  attend:\n    keepalive: off\nattend_mod:\n  keepalive:\n    enabled: true\n");
+    f.write(&f.user(), "mods:\n  attend:\n    continuity: off\nattend_mod:\n  continuity:\n    keepalive: true\n");
     let (_, err, _) = f.run(&["settings", "fix", "mods.attend"]);
-    assert!(err.contains("dropped attend_mod.keepalive.enabled: mods.attend.keepalive is `off`"), "{err}");
+    assert!(err.contains("dropped attend_mod.continuity.keepalive: mods.attend.continuity is `off`"), "{err}");
 }
 
 /// Finding 9: a mod the app does not ship is no section to fix.
@@ -1747,5 +1752,120 @@ fn the_retired_settings_report_names_each_file_and_its_fix() {
     f.write(&f.user(), "attend_mod:\n  listening: active\n");
     let (out, _, code) = f.run(&["retired-settings"]);
     assert_eq!(code, 0);
-    assert_eq!(out, "<ROOT>/xdg/config/agent-ways/config.yaml:1 holds attend_mod, now mods.attend: `ways settings fix mods.attend` moves it\n");
+    assert_eq!(out, "<ROOT>/xdg/config/agent-ways/config.yaml:1 holds attend_mod, now mods.attend; nothing reads it: `ways settings fix mods.attend` moves it\n");
+    f.write(&f.user(), "mods:\n  attend:\n    keepalive:\n      enabled: true\n");
+    let (out, _, _) = f.run(&["retired-settings"]);
+    assert_eq!(
+        out,
+        "<ROOT>/xdg/config/agent-ways/config.yaml:3 holds mods.attend.keepalive, now mods.attend.continuity; it is still read: `ways settings fix mods.attend.continuity` moves it\n"
+    );
+}
+
+// ── the continuity rename ─────────────────────
+//
+// References:
+// - ADR-417 item 1: `mods.attend.keepalive` moves to `mods.attend.continuity`.
+
+/// A file holding the old `mods.attend.keepalive` section still resolves
+/// through `get`, and `lint` names it with its fix as a warning: the file
+/// loads as written, so the exit stays 0.
+#[test]
+fn an_old_keepalive_section_still_resolves_and_lint_names_it() {
+    let f = Fx::new();
+    f.write(&f.user(), "mods:\n  attend:\n    keepalive:\n      enabled: false\n      max_keepalives: 3\n");
+    assert_eq!(f.run(&["settings", "get", "mods.attend.continuity.keepalive"]).0, "false\n");
+    assert_eq!(f.run(&["settings", "get", "mods.attend.continuity.max_keepalives"]).0, "3\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        out,
+        "<ROOT>/xdg/config/agent-ways/config.yaml:3: mods.attend.keepalive: warning: `mods.attend.keepalive` was renamed `mods.attend.continuity`, with `enabled` now `keepalive`; it is still read until `ways settings fix mods.attend.continuity` moves it\n"
+    );
+}
+
+/// `fix mods.attend.continuity` renames the section in place, `enabled`
+/// to `keepalive`, keeping every comment, and lint is then silent.
+#[test]
+fn fix_moves_the_keepalive_section_to_continuity_with_its_comments() {
+    let f = Fx::new();
+    f.write(
+        &f.user(),
+        "mods:\n  attend:\n    listening: active\n    # the idle path\n    keepalive:\n      # on for this host\n      enabled: true # inline\n      windows: [\"Mon-Fri 08:00-19:00\"]\n    keepwarm: on\n",
+    );
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend.continuity"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        std::fs::read_to_string(f.user()).unwrap(),
+        "mods:\n  attend:\n    listening: active\n    # the idle path\n    continuity:\n      # on for this host\n      keepalive: true # inline\n      windows: [\"Mon-Fri 08:00-19:00\"]\n    keepwarm: on\n",
+        "{err}"
+    );
+    assert_eq!(f.run(&["settings", "get", "mods.attend.continuity.keepalive"]).0, "true\n");
+    let (out, _, code) = f.run(&["settings", "lint"]);
+    assert_eq!((out.as_str(), code), ("", 0));
+}
+
+/// Where the file holds both names, the new value stays, the old one is
+/// named with why it was dropped, and the rest moves value by value.
+#[test]
+fn fix_keeps_a_continuity_value_and_names_the_keepalive_one_it_dropped() {
+    let f = Fx::new();
+    let p = f.root.join("proj");
+    f.write(
+        &f.overlay(),
+        "mods:\n  attend:\n    continuity:\n      keepalive: false\n    keepalive:\n      # dropped with the block\n      enabled: true\n      margin_minutes: 5\n",
+    );
+    let (out, _, code) = f.run(&["settings", "lint", "--project", p.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}");
+    let fix = format!("`ways settings fix mods.attend.continuity --project {}` moves it", f.word(&p));
+    assert!(out.contains("<ROOT>/proj/.claude/ways.yaml:5: mods.attend.keepalive: warning: ") && out.contains(&fix), "{out}");
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend.continuity", "--project", p.to_str().unwrap()]);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        err.contains("dropped mods.attend.keepalive.enabled: mods.attend.continuity.keepalive already holds a value in <ROOT>/proj/.claude/ways.yaml, which stays"),
+        "{err}"
+    );
+    assert!(err.contains("the comments inside mods.attend.keepalive"), "{err}");
+    let text = std::fs::read_to_string(f.overlay()).unwrap();
+    assert_eq!(parsed(&text), parsed("mods: {attend: {continuity: {keepalive: false, margin_minutes: 5}}}"), "{text}");
+}
+
+/// A target's config is named with `--target`, and the fix moves it there.
+#[test]
+fn lint_names_a_target_holding_the_keepalive_section() {
+    let f = Fx::new();
+    let target = f.root.join("home/.claude");
+    let tcfg = f.root.join("tcfg/config.yaml");
+    f.write(&f.user(), &format!("targets:\n  - path: {}\n    config: {}\n", target.display(), tcfg.display()));
+    f.write(&tcfg, "mods:\n  attend:\n    keepalive:\n      wrap: send\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let fix = format!("`ways settings fix mods.attend.continuity --target {}` moves it", f.word(&target));
+    assert!(out.contains("<ROOT>/tcfg/config.yaml:3: mods.attend.keepalive: warning: ") && out.contains(&fix), "{out}");
+    let (_, err, code) = f.run(&["settings", "fix", "mods.attend.continuity", "--target", target.to_str().unwrap()]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(std::fs::read_to_string(&tcfg).unwrap(), "mods:\n  attend:\n    continuity:\n      wrap: send\n");
+}
+
+/// `unset` of a renamed key removes it in that layer under both names, so
+/// the old name's value does not read back through the dual read.
+///
+/// References:
+/// - ADR-417 item 1: a renamed key is read under both names for a while.
+#[test]
+fn unset_removes_a_renamed_key_under_its_old_name_too() {
+    let f = Fx::new();
+    let p = f.root.join("proj");
+    f.write(&f.overlay(), "mods:\n  attend:\n    listening: active\n    keepalive:\n      enabled: false\n      margin_minutes: 5\n");
+    let get = |k: &str| f.run(&["settings", "get", k, "--project", p.to_str().unwrap()]).0;
+    assert_eq!(get("mods.attend.continuity.keepalive"), "false\n");
+    let (out, err, code) = f.run(&["settings", "unset", "mods.attend.continuity.keepalive", "--project", p.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(get("mods.attend.continuity.keepalive"), "true\n", "the default, from no layer");
+    let text = std::fs::read_to_string(f.overlay()).unwrap();
+    assert_eq!(parsed(&text), parsed("mods: {attend: {listening: active, keepalive: {margin_minutes: 5}}}"), "{text}");
+    // Both names in one layer: both go.
+    f.write(&f.overlay(), "mods:\n  attend:\n    continuity:\n      margin_minutes: 9\n    keepalive:\n      margin_minutes: 5\n");
+    assert_eq!(f.run(&["settings", "unset", "mods.attend.continuity.margin_minutes", "--project", p.to_str().unwrap()]).2, 0);
+    let text = std::fs::read_to_string(f.overlay()).unwrap();
+    assert!(!text.contains("margin_minutes"), "{text}");
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-// attend's agent-facing driver in Claude Code (ADR-406).
+// attend's agent-facing driver in Claude Code.
 //
 // Dormant is plain Claude Code: one tool, `attend_listen`, and no polling,
 // delivery or row of this module's. A session is active from session start
@@ -12,18 +12,24 @@
 // messages as framed turns, serves the send/reply/join/peers tools, draws one
 // status row, drives keepwarm, and keeps the session's sensor host running.
 //
-// The keepalive policy (ADR-414) runs in every interactive session with the
-// mod, dormant ones included, while autocompact is off: attend judges, and
-// this module supplies the operator's prompts and the autocompact gate,
-// submits the keepalive and wrap turns, and routes the wrap's reply. A
-// dormant session polls nothing, delivers nothing and joins nothing for it:
-// one timer, set again at each main-loop turn's end. Where the policy
-// applies, it drives every cache wake, ADR-182's armed windows included.
+// The continuity policy runs in every interactive
+// session with the mod, dormant ones included, while autocompact is off or
+// relay is on: attend judges, and this module supplies the operator's
+// prompts, the autocompact gate, the context fill and the wrap's relay
+// marker, submits the keepalive, wrap and resume turns, compacts, and
+// routes the wrap's reply. A dormant session polls nothing, delivers
+// nothing and joins nothing for it: one timer, set again at each main-loop
+// turn's end. Where the policy applies, it drives every cache wake,
+// keepwarm's armed windows included.
 //
 // Every message travels through attend's signal store by the attend CLI, as
 // an argv array with no shell. The mod never uses $.session.send.
 //
 // References:
+// - ADR-406: the attend mod as attend's driver in Claude Code.
+// - ADR-414: the keepalive policy, which is the continuity policy's idle path.
+// - ADR-417: relay mode and the context fill trigger of the continuity policy.
+// - ADR-182: keepwarm's cache wakes and the windows that arm them.
 // - ADR-416 item 2: the sensor host the mod spawns for a listening session.
 
 import { atom, read, update } from 'claude-code'
@@ -55,6 +61,16 @@ import {
   frameInbound,
   compactFocus,
   compactedArgv,
+  goalArgv,
+  isOpenChannel,
+  nativeThresholdFrom,
+  relayAtTokens,
+  relayMarkerOf,
+  relayStopOf,
+  resumedArgv,
+  rowAfterResume,
+  stoppedArgv,
+  wrapSendArgv,
   isUnknownFlag,
   skillsFrom,
   wrapFocus,
@@ -94,7 +110,7 @@ import {
   sendArgv,
   shortId,
 } from './lib.ts'
-import type { Decision, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
+import type { Decision, Fill, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
 import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit, HOST_EXIT_WAIT_MS, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
 import type { HostChild, HostEnd, HostSpec } from './host.ts'
 
@@ -154,6 +170,9 @@ const POLICY_START_MS = 1_000
 // answered by the time the cache lapses, is reported unfinished.
 const WRAP_START_MS = 10 * 60_000
 const WRAP_LAPSE_MS = 60 * 60_000
+// A relay wrap's answer, a fill past relay's threshold, or a stop line is
+// judged this long after the turn's end, between turns.
+const RELAY_CHECK_MS = 1_000
 
 // agent-ways theme (tools/agent-theme/themes/agent-ways.theme).
 const SUBTLE = '#3a3a3c'
@@ -257,6 +276,7 @@ async function activate($: $, mod: Mod, id: string, isAsked = false): Promise<Pr
     // per ledger, the policy's timer or the poll's plain check.
     const didApply = mod.ka.applies
     mod.ka.applies = keepaliveApplies(mod.config, mod.isInteractive)
+    mod.ka.relay = mod.config.relay
     if (mod.ka.applies && !didApply) await armKeepalive($, mod, (await $.clock.now()) + POLICY_START_MS)
     if (!mod.ka.applies) mod.ka.timer?.cancel()
     mod.lastActivityMs = await $.clock.now()
@@ -890,6 +910,7 @@ async function readGate($: $, ka: Keepalive, fresh = false): Promise<Gate> {
     usage = undefined
   }
   ka.skills = skillsFrom(usage)
+  ka.nativeAt = nativeThresholdFrom(usage)
   let settings: unknown
   if (gateFrom(usage, undefined) === 'unknown') {
     try {
@@ -930,8 +951,16 @@ async function checkKeepalive($: $, mod: Mod) {
   await serialize(ka, async () => {
     const gate = await readGate($, ka)
     const isListening = await isOn($, mod)
-    if (!isListening && gate !== 'off') return
-    let r = await run($, policyArgv(gate, ka.skills, ka.isLegacyAttend), POLICY_TIMEOUT_MS)
+    // Relay runs whatever autocompact says, as attend last read it.
+    //
+    // References:
+    // - ADR-417 item 2: with relay on, the gate ignores autocompact.
+    if (!isListening && gate !== 'off' && !ka.relay) return
+    // The fill a turn's end left past relay's threshold, judged once.
+    const due = ka.fillDue
+    ka.fillDue = undefined
+    const fill: Fill | undefined = due && { tokens: due.tokens, window: due.window, nativeAt: gate === 'on' ? ka.nativeAt : undefined }
+    let r = await run($, policyArgv(gate, ka.skills, ka.isLegacyAttend, fill), POLICY_TIMEOUT_MS)
     // An attend from before --skills: ask as before, and keep asking so.
     if (!ka.isLegacyAttend && isUnknownFlag(r)) {
       ka.isLegacyAttend = true
@@ -946,13 +975,33 @@ async function checkKeepalive($: $, mod: Mod) {
       return
     }
     ka.retries = 0
+    // attend read the relay setting for this check: it governs what follows.
+    ka.relay = d.relay
     await setKeepaliveRow($, k => keepaliveRowOf(d, k))
+    // A relay that stopped hands the reply to the operator, once.
+    if (d.sendHandoff && d.wrap) await sendRelayHandoff($, ka, d.wrap, d.text)
+    // With relay off, a /wrap's marker was only recorded: nothing waits on it.
+    if (!d.relay) {
+      ka.isRelayPending = false
+      ka.relayReply = undefined
+    }
     if (plan.submit) {
       const isPolicy = d.policy
       const gateNow = isPolicy ? await readGate($, ka, true) : gate
-      if (!maySubmit({ epochThen: epoch, epochNow: ka.epoch, running: mod.running.size, isPolicy, gate: gateNow })) {
+      if (!maySubmit({ epochThen: epoch, epochNow: ka.epoch, running: mod.running.size, isPolicy, gate: gateNow, isRelay: d.relay })) {
         if (plan.submit.kind === 'wrap') await run($, wrappedArgv('unfinished', 'a turn started before the wrap went in'))
-        if (plan.submit.kind === 'compact') await run($, compactedArgv('a turn started before the compaction'))
+        // A turn that starts before a relay's compaction defers it: attend
+        // records none until the mod reports one ran, so that turn's end
+        // judges again.
+        //
+        // References:
+        // - ADR-417 item 4: the mod compacts and resumes only between turns.
+        if (plan.submit.kind === 'compact' && d.relay) deferRelay($, ka, 'a turn started before it')
+        else if (plan.submit.kind === 'compact') await run($, compactedArgv('a turn started before the compaction'))
+        return
+      }
+      if (plan.submit.kind === 'compact' && d.relay) {
+        await relayCompact($, mod, d, plan.submit.text)
         return
       }
       if (plan.submit.kind === 'compact') {
@@ -996,10 +1045,16 @@ async function keepaliveOperator($: $, mod: Mod) {
   const ka = mod.ka
   if (!ka.applies) return
   ka.epoch += 1
+  // The operator is back: a relay waiting for its compaction or its
+  // resume submits nothing more.
+  ka.operatorEpoch += 1
+  ka.isRelayPending = false
+  ka.fillDue = undefined
+  ka.relayReply = undefined
   // Never awaited: the prompt must not wait on the chain a check holds.
   if (ka.wrap) void reportUnrouted($, ka, 'the operator prompted before the wrap answered')
   const now = await $.clock.now()
-  if ((await readGate($, ka, true)) === 'off') {
+  if ((await readGate($, ka, true)) === 'off' || ka.relay) {
     ka.heldPromptMs = undefined
     void serialize(ka, () => run($, resetArgv(now / 1000)))
   } else {
@@ -1012,22 +1067,52 @@ async function keepaliveOperator($: $, mod: Mod) {
  *  the first point a check could be due, and attend names the due point
  *  there. The wrap's turn routes its reply first. */
 async function keepaliveTurnEnded($: $, mod: Mod, e: { turnId: string; reason: string; answer?: string }) {
-  if (!mod.ka.applies) return
-  await routeWrap($, mod.ka, e.turnId, e.reason, e.answer ?? '')
+  const ka = mod.ka
+  if (!ka.applies) return
+  const isWrap = await routeWrap($, ka, e.turnId, e.reason, e.answer ?? '')
+  if (!isWrap && e.reason === 'answer') await relayTurnEnded($, mod, e.answer ?? '')
   if (mod.running.size > 0) return
-  mod.ka.retries = 0
-  const at = (await $.clock.now()) + firstCheckMs(mod.config)
+  ka.retries = 0
+  // A relay wrap's answer, a stop line, or a fill past the threshold is
+  // judged at once, between turns; otherwise the first due point.
+  const isSoon = ka.isRelayPending || ka.fillDue !== undefined || ka.relayReply !== undefined
+  const at = (await $.clock.now()) + (isSoon ? RELAY_CHECK_MS : firstCheckMs(mod.config))
   await armKeepalive($, mod, at)
   await setKeepaliveRow($, k => rowAfterTurnEnd(k, at))
+}
+
+/** A main-loop turn that was not a wrap the mod sent ended: a reply ending
+ *  in a relay marker is a `/wrap` whose skill read relay on, reported in
+ *  either mode, since attend reads the setting now and records the wrap's
+ *  id whatever it finds; one ending in a `relay: stop` line after a relay
+ *  stops the relay.
+ *
+ *  References:
+ *  - ADR-417 item 2b: a `/wrap` in relay mode ends with the marker.
+ *  - ADR-417 item 3: the PreCompact hook asks attend for the last wrap's id.
+ *  - ADR-417 item 5: a resumed turn may stop the relay with a stop line. */
+async function relayTurnEnded($: $, mod: Mod, answer: string) {
+  const ka = mod.ka
+  const marker = relayMarkerOf(answer)
+  if (marker !== undefined) {
+    ka.relayReply = answer
+    ka.isRelayPending = true
+    await serialize(ka, () => run($, wrappedArgv('transcript', '', undefined, marker)))
+    return
+  }
+  const stop = relayStopOf(answer)
+  if (stop === undefined || ((await readStatus($)).keepalive?.relayCount ?? 0) === 0) return
+  ka.relayReply = answer
+  await serialize(ka, () => run($, stoppedArgv(stop)))
 }
 
 /** The wrap's turn ended: its final reply goes where `wrap` says, and attend
  *  records where it went (ADR-414 item 6). Only the turn the wrap's own
  *  text started is routed; a turn that ended other than with an answer is
  *  written nowhere. */
-async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, answer: string) {
+async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, answer: string): Promise<boolean> {
   const w = ka.wrap
-  if (!w || w.turnId === undefined || w.turnId !== turnId) return
+  if (!w || w.turnId === undefined || w.turnId !== turnId) return false
   ka.wrap = undefined
   // Before the first await: a prompt during the reports or the send below
   // cancels the compaction scheduled after them.
@@ -1037,9 +1122,25 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
   // turn's final answer only where no step was seen.
   const reply = w.reply ?? answer
   const plan = wrapPlan(w.route, w.reply !== undefined ? 'answer' : reason, reply)
+  // A relay wrap's reply stays in the transcript: attend judges its marker
+  // and the handoff, and the next check compacts and resumes, or stops and
+  // hands the reply over.
+  //
+  // References:
+  // - ADR-417 item 4: the compaction and the resume after a relay wrap.
+  if (w.route.after === 'relay') {
+    ka.relayReply = reply
+    ka.isRelayPending = plan.kind !== 'unfinished'
+    const argv = plan.kind === 'unfinished' ? wrappedArgv('unfinished', plan.detail) : wrappedArgv('transcript', '', undefined, relayMarkerOf(reply))
+    await serialize(ka, () => run($, argv))
+    return true
+  }
   // An unfinished wrap wrote no handoff, so it records no focus and
   // nothing compacts after it.
-  if (plan.kind === 'unfinished') return void (await serialize(ka, () => run($, wrappedArgv('unfinished', plan.detail))))
+  if (plan.kind === 'unfinished') {
+    await serialize(ka, () => run($, wrappedArgv('unfinished', plan.detail)))
+    return true
+  }
   const focus = wrapFocus(w.route, reply)
   const report = (o: WrapOutcome, detail = '') => serialize(ka, () => run($, wrappedArgv(o, detail, focus)))
   if (plan.kind === 'transcript') await report('transcript')
@@ -1068,6 +1169,84 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
       if (ka.epoch === epoch) void serialize(ka, () => compactAfterWrap($, instructions))
     })
   }
+  return true
+}
+
+/** A relay's compaction with the handoff as its instructions, then, where
+ *  attend gave one and no operator prompt came meanwhile, the resume turn.
+ *  Only a compaction that ran without a skip is followed by the resume.
+ *  attend hears how each went; a failure stops the relay, and the next
+ *  check hands the reply over. A compaction that rejects because a turn
+ *  started meanwhile is deferred, not failed. The caller holds the
+ *  keepalive chain.
+ *
+ *  References:
+ *  - ADR-417 item 4: the compaction and the resume after a relay wrap. */
+async function relayCompact($: $, mod: Mod, d: Decision, instructions: string) {
+  const ka = mod.ka
+  const operatorThen = ka.operatorEpoch
+  const epochThen = ka.epoch
+  ka.isRelayPending = false
+  let failed: string | undefined
+  try {
+    const r = await $.session.compact({ instructions })
+    if (r.skip !== undefined) failed = `skipped: ${String(r.skip)}`
+  } catch (err) {
+    // A turn that started after attend's word rejects the compaction:
+    // attend recorded none, and that turn's end judges again.
+    if (mod.running.size > 0 || ka.epoch !== epochThen) {
+      if (ka.operatorEpoch === operatorThen) deferRelay($, ka, 'a turn started while it ran')
+      return
+    }
+    failed = String(err)
+  }
+  if (failed !== undefined) {
+    $.ui.log(`attend: the relay's compaction failed: ${failed}`)
+    await run($, compactedArgv(failed))
+    $.clock.after(RELAY_CHECK_MS, () => void checkKeepalive($, mod))
+    return
+  }
+  await markCompacted($)
+  await run($, compactedArgv())
+  if (d.resume === null || ka.operatorEpoch !== operatorThen) return
+  const isEntered = await $.prompt
+    .submit({ text: d.resume })
+    .then(x => x.drop === undefined)
+    .catch(() => false)
+  await run($, resumedArgv(isEntered ? undefined : 'the resume prompt did not enter'))
+  if (isEntered) {
+    ka.relayReply = undefined
+    await setKeepaliveRow($, k => rowAfterResume(k, d.relayCount + 1, d.maxRelays))
+  } else {
+    $.clock.after(RELAY_CHECK_MS, () => void checkKeepalive($, mod))
+  }
+}
+
+/** A relay's compaction waits for the turn that started before it could
+ *  run: logged, and judged again once that turn ends.
+ *
+ *  References:
+ *  - ADR-417 item 4: a turn before the compaction cancels it, and the next
+ *    turn's end judges again. */
+function deferRelay($: $, ka: Keepalive, why: string) {
+  ka.isRelayPending = true
+  $.ui.log(`attend: the relay's compaction waits for the turn that started: ${why}; that turn's end judges again`)
+}
+
+/** A stopped relay's reply, sent over attend to the route's recipient,
+ *  opening with its handoff line, which names why the relay stopped; a
+ *  refused send is written to the wrap file instead. Where this module
+ *  holds no reply (it reloaded since the wrap), attend's `handoff`, the
+ *  handoff file's text, is sent in its place.
+ *
+ *  References:
+ *  - ADR-417 item 5: a stopped relay hands its reply to the operator. */
+async function sendRelayHandoff($: $, ka: Keepalive, route: WrapRoute, handoff: string | null) {
+  const reply = ka.relayReply ?? handoff ?? 'The reply is in the session transcript.'
+  ka.relayReply = undefined
+  if (isOpenChannel(route.to)) return
+  const r = await run($, wrapSendArgv(route, reply))
+  if (r.exitCode !== 0 && route.file !== '') await run($, saveArgv('refused', refusalDetail(route.to, r), route.file), undefined, reply)
 }
 
 /** The compaction after the wrap, with the wrap's focus; attend records
@@ -1147,6 +1326,12 @@ export const register: Register = on => {
       heldPromptMs: undefined,
       retries: 0,
       wrap: undefined,
+      nativeAt: undefined,
+      fillDue: undefined,
+      isRelayPending: false,
+      relayReply: undefined,
+      operatorEpoch: 0,
+      relay: false,
     },
   }
 
@@ -1158,6 +1343,7 @@ export const register: Register = on => {
     mod.canPoll = e.isInteractive || mod.config.headlessPoll
     mod.isInteractive = e.isInteractive
     mod.ka.applies = keepaliveApplies(mod.config, e.isInteractive)
+    mod.ka.relay = mod.config.relay
     // The first check reads where the transcript stands (a resumed session
     // may be warm) and records the gate for the status card.
     if (mod.ka.applies) await armKeepalive($, mod, (await $.clock.now()) + POLICY_START_MS)
@@ -1232,7 +1418,35 @@ export const register: Register = on => {
     const before = mod.contextTokens
     mod.contextTokens = e.context.tokens
     if (isContextReset(before, e.context.tokens)) await markCompacted($)
+    // Relay's fill path: a turn's end past the threshold asks attend, once
+    // no turn runs. The native threshold may lower it, so the mod asks
+    // wherever attend could find it past.
+    //
+    // References:
+    // - ADR-417 item 2a: a context fill past the threshold starts a wrap.
+    const { tokens, window } = e.context
+    const ka = mod.ka
+    if (ka.applies && ka.relay && tokens !== undefined && window > 0 && tokens >= relayAtTokens(mod.config, window, 'on', ka.nativeAt)) {
+      ka.fillDue = { tokens, window }
+      if (mod.running.size === 0) await armKeepalive($, mod, (await $.clock.now()) + RELAY_CHECK_MS)
+    }
     return next(e)
+  })
+
+  // A /goal typed while the mod is loaded: attend records whether one is
+  // active, and stops the relay once one that was active has ended. It is
+  // recorded in either mode, since relay may be turned on later in the
+  // session. `/goal clear` clears it; `/goal` alone shows it.
+  //
+  // References:
+  // - ADR-417 item 6: the end of a goal ends the relay.
+  on('command.run', { command: 'goal' }, async ($, e, next) => {
+    const done = await next(e)
+    const args = (e.args ?? '').trim()
+    if (mod.ka.applies && args !== '') {
+      void serialize(mod.ka, () => run($, goalArgv(!/^(clear|off|stop|none|reset)$/i.test(args))))
+    }
+    return done
   })
 
   // The operator's next prompt while a message waits on a lapsed cache, or

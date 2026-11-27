@@ -4,7 +4,7 @@
 
 /** The keepalive policy as the row draws it (ADR-414 item 9). */
 export type KeepaliveRow = {
-  state: 'running' | 'wrapped' | 'compacted' | 'stopped'
+  state: 'running' | 'wrapped' | 'compacted' | 'resumed' | 'stopped'
   count: number
   max: number
   /** Keepalives since the wrap, of `afterMax` (`after_wrap_keepalives`). */
@@ -24,6 +24,11 @@ export type KeepaliveRow = {
   /** A dormant session draws the segment from its first keepalive until
    *  the operator's next prompt. */
   isShown: boolean
+  /** Relays since the operator's last prompt, of `maxRelays`. */
+  relayCount: number
+  maxRelays: number
+  /** Why the relay stopped, in a few words; null while it runs. */
+  relayStop: string | null
 }
 
 /** The sensor host a session wants: its id, and the id a /clear ended,

@@ -50,7 +50,7 @@ agent:
 amends:
   - ADR-165#Decision
   - ADR-414#Decision
-status: proposed
+status: accepted
 date: 2026-11-26
 deciders:
   - aaronsb
@@ -124,7 +124,7 @@ This record sits in the attend band because the mod and attend's check do the wo
    - When `custom_instructions` is non-empty, the hook prints nothing. That covers an operator's `/compact <focus>` and every compaction the mod starts: Claude Code fires the classic PreCompact hook for the mod's `$.session.compact` call with `trigger: manual` and `custom_instructions` set to the mod's instructions, and it adds the hook's stdout to those instructions rather than replacing them. Without this rule the safety net would append a second copy of the handoff to every relay compaction. The mod's own `session.compact` handler does not hear the mod's own call, so the mod needs no guard of its own there.
 
      > Edited 2026-11-26, per the item 10 probe: the hook fires for the mod's compactions as `manual` with the mod's text, and its stdout is appended. It read: "When `custom_instructions` is non-empty, the operator gave a focus, and the hook prints nothing."
-   - Otherwise it prints the handoff at `.claude/handoff.wrap.md` under the repository root when that handoff is fresh. The hook has no marker to compare, so it asks attend for the wrap id the ledger recorded for this session's last wrap, and the handoff is fresh when its first line carries that id. Where attend has no recorded wrap (the mod is absent or passed over), the hook falls back to a first line that names the current HEAD commit and today's date. It opens with one line, `Summarize this session as the handoff below; keep its TASKS and DO NEXT whole.`, and is cut to 10,000 characters at a section boundary, with a closing line saying the file holds the rest.
+   - Otherwise it prints the handoff at `.claude/handoff.wrap.md` under the repository root when that handoff is fresh. The hook has no marker to compare, so it asks attend for the wrap id the ledger recorded for this session's last wrap, and the handoff is fresh when its first line carries that id. Where attend has no recorded wrap (the mod is absent or passed over), the hook falls back to a first line that names the current HEAD commit and today's date. Edited 2026-11-26, at implementation: every wrap records its id, handoff mode included, and the hook also takes a handoff that is fresh by HEAD and date when attend's id names another wrap, so a `/wrap handoff` after a relay wrap is not refused (review finding on PR #1364). It opens with one line, `Summarize this session as the handoff below; keep its TASKS and DO NEXT whole.`, and is cut to 10,000 characters at a section boundary, with a closing line saying the file holds the rest.
    - With no fresh handoff it prints the wrap skill's handoff outline (the Step 3 sections), so the summary is structured even when no wrap ran.
    - It always exits 0. It never blocks, because a block during context-limit recovery fails the request.
    - It is a classic hook, not a `session.compact` handler in the mod, because an org-managed install passes the mod over and the classic hook still runs. The mod registers no `session.compact` handler for this, so there is one path.

@@ -1,6 +1,6 @@
 ---
 name: wrap
-description: Wrap up a session at a natural seam — land in-flight work, square the TaskList honestly, write a copy-paste continuation prompt, then hand off to a directed /compact. Use when the user says "wrap up", "wrap this up", "let's wrap", "end of session", "checkpoint and compact", "hand off", or invokes /wrap.
+description: Wrap up a session at a natural seam — land in-flight work, square the TaskList honestly, write a copy-paste continuation prompt, then hand off to a directed /compact, or in relay mode end with the marker the attend mod compacts and resumes on. Use when the user says "wrap up", "wrap this up", "let's wrap", "end of session", "checkpoint and compact", "hand off", or invokes /wrap.
 allowed-tools: Bash, Read, Grep, Glob, TaskList, TaskCreate, TaskUpdate, TaskGet, AskUserQuestion, Agent
 ---
 
@@ -10,25 +10,35 @@ Close out a session at its end. This is the on-demand sibling of the `meta/compa
 
 **Wrap is not merge.** Landing is *iterative* — many merges happen across a session as each piece of work lands. Wrap is *terminal* — it runs once, at the end. By the time you wrap, the session's work should already be merged. So `/wrap` does **not** land work; it confirms nothing got stranded, then produces the artifacts that outlive the session.
 
-The deliverable is two things that survive a reset: a **TaskList that honestly mirrors reality**, and a **copy-paste continuation prompt**. The skill ends by handing you a ready-to-run `/compact` line — it cannot run it for you (see Step 4).
+The deliverable is two things that survive a reset: a **TaskList that honestly mirrors reality**, and a **copy-paste continuation prompt**. A skill cannot run `/compact`, so in handoff mode the skill ends by handing you a ready-to-run `/compact` line. In relay mode it ends with a relay marker line instead, and the attend mod compacts the conversation with the handoff and starts a turn that resumes the work (Step 4).
 
 ## Arguments
 
-- `/wrap` — full flow: land work (offer), square the TaskList, write the handoff, hand off to `/compact`.
+- `/wrap` — full flow: land work (offer; relay mode lands nothing), square the TaskList, write the handoff, then end with a `/compact` line in handoff mode or the relay marker in relay mode (Step 4).
 - `/wrap stay` — wrapping mid-work on purpose: **skip** the land/merge step. Don't land anything; just capture state accurately and produce the handoff. Use when the seam is "I'm pausing", not "I'm done".
+- `/wrap handoff` — forces handoff mode for this run, whatever the relay setting says. The wrap ends with a `/compact` line and no relay marker, so the operator can stop a relay-mode session by hand.
 
-## Step 0 — Read the context gauge first
+## Step 0 — Read the context gauge and the mode first
 
-Before anything else, check where the session sits. Same source as `context-status`:
+Before anything else, check where the session sits and which mode the wrap runs in. The gauge is the same source as `context-status`:
 
 ```bash
-ways context --json   # used / total tokens, pct filled; total auto-detected from model
+ways context --json   # used / total tokens, pct filled, total auto-detected from model; `session` is the session id
+ways settings get mods.attend.continuity.relay --project "$(git rev-parse --show-toplevel)"   # on or off
 ```
+
+The wrap runs in one of two modes. **Handoff mode** ends the wrap with a `/compact <focus>` line for the operator to run. **Relay mode** ends it with a relay marker line, and the attend mod then compacts the conversation with the handoff and submits a turn that resumes the work. Pick the mode in this order:
+
+1. The argument `handoff` forces handoff mode.
+2. A wrap turn from the attend mod that names relay mode and a wrap id is in relay mode. Use that wrap id (Step 3).
+3. Otherwise the setting decides. `on` is relay mode. Any other output, `off` or an error, is handoff mode. A wrap turn from the attend mod that names no relay mode is decided here too.
+
+**In relay mode the skill runs with `stay` semantics, whoever invoked it.** It lands nothing: Step 1 records stranded work in the handoff and offers no merge. It asks nothing: do not call AskUserQuestion, because the operator may be away. It starts no new work. A choice that only the operator can make goes into the handoff's DECISIONS section, and the wrap ends with the `stop decision` marker (Step 4).
 
 The fill level calibrates the entire wrap, and is worth saying out loud — the user may be wrapping early *on purpose*, and that's valid. Locate it against the ways trigger curves (the `todos` way fires ~75%, `compaction-checkpoint` ~85%):
 
 - **Early** (well below the curves — e.g. 300k/1M, 30%): lots of headroom. Say so plainly ("we'd be wrapping early — 300k of 1M used"), but **don't talk the user out of it** — end-of-day, task-switching, or banking a clean state are all good reasons. When early, `/compact` reclaims little and costs you the live thread, so in Step 4 *offer the lighter paths*: checkpoint-and-continue (no compact), or `/clear`+paste later. The handoff can be leaner — less accumulated context means less to reconstruct.
-- **Late** (near or past the curves): compaction is imminent or already mandatory. This is the urgent case — be thorough and quick. A lot is about to be summarized away, so the continuation prompt and TaskList carry more weight; get them down before auto-compact fires on its own.
+- **Late** (near or past the curves; a relay-mode wrap that the attend mod asks for at 75% is a late wrap): compaction is imminent or already mandatory. This is the urgent case — be thorough and quick. A lot is about to be summarized away, so the continuation prompt and TaskList carry more weight; get them down before auto-compact fires on its own.
 
 Let this scale Steps 2–3: **how much detail the handoff needs is proportional to how much context is about to be lost.** A near-full window deserves a dense, complete prompt; an early wrap can be crisp. Knowing the *total* window (1M vs 200k) is what makes that call.
 
@@ -43,8 +53,8 @@ git log --oneline main..HEAD    # unmerged commits?
 ```
 
 - **Clean / already merged** → the expected state. Move on.
-- **Something stranded** (uncommitted changes, or commits never PR'd) → this is a guard, not wrap's job. Surface it and let the user decide: invoke `merge` to land it, or leave it parked.
-- **Parked on purpose** (`/wrap stay`, or user chooses to leave it) → do **not** merge. Record *exactly* what's uncommitted, on which branch, and why it's parked — verbatim into Step 3 so post-reset-you can resume the partial work cold.
+- **Something stranded** (uncommitted changes, or commits never PR'd) → this is a guard, not wrap's job. Surface it and let the user decide: invoke `merge` to land it, or leave it parked. In relay mode, treat it as parked.
+- **Parked on purpose** (`/wrap stay`, relay mode, or user chooses to leave it) → do **not** merge. Record *exactly* what's uncommitted, on which branch, and why it's parked — verbatim into Step 3 so post-reset-you can resume the partial work cold.
 
 The rule: wrap never silently drops stranded work, and never lands it behind your back. Either the user lands it (via `merge`), or it's described in the handoff.
 
@@ -86,7 +96,20 @@ Do not compress the descriptions here. This block and Step 3's prompt carry diff
 
 ## Step 3 — Write the continuation prompt
 
-Produce a single copy-pastable block. Compaction keeps the session alive; this prompt is the harder guarantee — it survives even a `/clear` or a brand-new window. Also save it to `.claude/handoff.wrap.md` at the repository root (`git rev-parse --show-toplevel`), where `start` and a successor session look for it, with the date and the HEAD commit on its first line. When `.gitignore` does not cover it, list it in `.git/info/exclude` so the working tree stays clean. Tailor sections to the work, but cover:
+Produce a single copy-pastable block. Compaction keeps the session alive; this prompt is the harder guarantee — it survives even a `/clear` or a brand-new window. Also save it to `.claude/handoff.wrap.md` at the repository root (`git rev-parse --show-toplevel`), where `start` and a successor session look for it. When `.gitignore` does not cover it, list it in `.git/info/exclude` so the working tree stays clean.
+
+The file's first line is `<YYYY-MM-DD> <short HEAD> wrap=<wrap id>` in both modes, such as `2026-11-26 e6bbfbdd wrap=20261126T214012Z-3f9a1c2e`, and the prompt starts on the next line. The wrap id names this one wrap. The attend mod and the PreCompact hook treat the file as fresh when its first line carries the id of the wrap they judge, so a handoff left over from an earlier wrap is not taken for this one. When a wrap turn from the attend mod names a wrap id, set `WRAP_ID` to that id and skip the two lines that make one. Otherwise make one from the UTC time and the first 8 letters and digits of the session id, or, where no session id is set, the shell's process id and a random number. In either case record the id with attend, in both modes, so the PreCompact hook knows this wrap:
+
+```bash
+SID="$(printf '%s' "${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID}}" | tr -cd '0-9A-Za-z' | cut -c1-8)"
+WRAP_ID="$(date -u +%Y%m%dT%H%M%SZ)-${SID:-p$$r${RANDOM:-0}}"
+attend keepwarm wrap-id --record "$WRAP_ID" >/dev/null 2>&1 || true   # no attend, nothing recorded
+echo "$(date +%F) $(git rev-parse --short HEAD) wrap=$WRAP_ID"        # the handoff's first line
+```
+
+Shell variables do not survive between Bash calls, so keep the printed id: the relay marker in Step 4 repeats it.
+
+Tailor sections to the work, but cover:
 
 ```
 Continue work on <project> (<path>) — <one-line what it is and its purpose>.
@@ -116,7 +139,7 @@ quirks, verification patterns>.
 KEY FILES / BRANCHES — <the handful that matter, with paths>.
 ```
 
-If a `/goal` is active, **restate the goal condition** at the top — it's the anchor the post-compaction turns steer by, and it survives compaction.
+If a `/goal` is active, **restate the goal condition** at the top, under the first line — it's the anchor the post-compaction turns steer by, and it survives compaction. Never write that the goal is met: only the goal's evaluator judges that.
 
 The `TASKS` section carries the Step 2 enumeration in full and tells the next session to rehydrate it with `TaskCreate`. Pasting this prompt into a `/clear`ed or brand-new window arrives with an empty task list, so spell the instruction out — "recreate these as tasks before starting" — rather than assuming the list travels with the prompt.
 
@@ -145,14 +168,18 @@ Walk four categories. Each item lands in an issue, a design note, or a way edit,
 - A trigger that should have fired and did not (a way, a skill description, a hook).
 - A reusable tool the session built: a script, a query, or a check worth running again.
 
-## Step 4 — Hand off (compaction is gauge-dependent)
+## Step 4 — Hand off
+
+Step 0's mode picks the ending. Handoff mode ends with a `/compact` line for the user, and relay mode ends with the relay marker.
+
+### Handoff mode (compaction is gauge-dependent)
 
 First, let Step 0 decide whether compaction even applies:
 
 - **Early wrap** → `/compact` is *optional*; it reclaims little and ends the live thread. Lead with the lighter paths: checkpoint-and-continue (keep working in the same session — the TaskList and handoff are already saved), or `/clear`+paste later for a clean switch. Mention `/compact` as available, not as the default.
 - **Late wrap** → compaction is the point. Make the directed `/compact` the headline action.
 
-A skill **cannot** trigger `/compact` — Claude Code forbids hooks/skills from invoking `/` commands. So when compaction is the move, end by handing the user a one-keystroke directed compaction, and explain why directed beats generic:
+A skill cannot run `/compact`, because Claude Code does not let a hook or a skill invoke a slash command. So when compaction is the move, end by handing the user a one-keystroke directed compaction, and explain why directed beats generic:
 
 > The synthesis above is now the freshest content in context. Run `/compact` with these
 > focus instructions and it'll preserve the synthesis as the anchor instead of the system
@@ -168,20 +195,45 @@ Offer the alternative explicitly: for a hard reset (switching tasks entirely), `
 
 Make the `/compact ...` line the **last thing** in your response so it's immediately copyable. Do not claim the session is compacted — you've prepared it; the user pulls the trigger.
 
+### Relay mode
+
+Print no `/compact` line and offer no lighter paths. End the reply with the relay marker as its very last line, written as plain text outside any code block, with nothing after it. The attend mod reads the marker from the last line of the reply, and a missing or malformed marker stops the relay. The marker is one of:
+
+```
+relay: continue tasks=<open tasks> goal=<active|none> wrap=<wrap id> head=<short HEAD>
+relay: stop <empty|decision|doubt> tasks=<open tasks> goal=<active|none> wrap=<wrap id> head=<short HEAD>
+```
+
+Fill in the fields:
+
+- `tasks=` is the number of open tasks after Step 2: the tasks that `TaskList` shows as pending or in progress. Completed and deleted tasks do not count.
+- `goal=active` when a `/goal` condition is in force in this conversation's context, that is, one was set and has not been cleared or ended. Otherwise `goal=none`. Do not write `none` because you believe the goal is met, since only the goal's evaluator decides that.
+- `wrap=` is the wrap id on the handoff's first line (Step 3).
+- `head=` is the short HEAD commit, from `git rev-parse --short HEAD`.
+
+Pick the first reason that holds:
+
+- `stop empty` when no open work remains (`tasks=0`).
+- `stop decision` when the next step needs a decision that only the operator can make. The decision is in the handoff's DECISIONS section.
+- `stop doubt` when your doubt about the direction is high, as core.md defines doubt.
+- `continue` otherwise: open tasks remain and DO NEXT can start without the operator.
+
+After a `continue`, the attend mod compacts the conversation with the handoff as the compaction's instructions and submits a turn that tells the agent to read `.claude/handoff.wrap.md` and start its DO NEXT, up to `max_relays` times (5 by default) since the operator's last prompt. After a `stop`, the mod compacts with the handoff, submits no resume, and sends the wrap's reply to the operator over attend. Do not claim the session is compacted or resumed: the mod does both after the reply ends. In a session without the attend mod, nothing acts on the marker, and the handoff waits in the file.
+
 ## Key Principles
 
 - **The TaskList must be honest** — done is done, stale is gone, real work is captured with resume-detail. That's the load-bearing deliverable.
 - **Print the list you squared** — an unenumerated honesty pass is unreviewable; the user should see every task and description without asking.
-- **Prepare, don't pretend** — the skill can't self-compact; it hands off a ready `/compact`. Never report compaction as done.
+- **Prepare, don't pretend** — a skill cannot run `/compact`. In handoff mode it hands off a ready `/compact` line; in relay mode the attend mod compacts after the wrap's reply. Never report compaction as done.
 - **Directed > generic** — a synthesis-anchored `/compact` keeps what matters; an unanchored one keeps what the system guesses.
-- **On-demand, not automatic** — that's the whole reason this exists alongside the `compaction-checkpoint` way. You choose the seam.
+- **On-demand** — that's the whole reason this exists alongside the `compaction-checkpoint` way. You choose the seam with `/wrap`, or the attend mod asks for a wrap at its idle bound or, in relay mode, at its context fill threshold.
 - **Two survival layers** — TaskList + continuation prompt survive even a hard reset; `/compact` is the lighter same-session path on top. The prompt carries the tasks *and* the instruction to rehydrate them, because a fresh window starts with an empty list.
 
 ## Not for
 
 - Authoring the code being wrapped — `/wrap` closes out work, it doesn't write it.
 - Replacing the `compaction-checkpoint` way — that fires passively near the limit; this is the on-demand version. They share DNA on purpose.
-- Actually performing compaction — it can't. It prepares everything and hands you `/compact`.
+- Running `/compact` itself — a skill cannot run a slash command. In handoff mode it prepares everything and hands you `/compact`; in relay mode the attend mod compacts after the wrap and starts the resume turn.
 
 ## See Also
 
@@ -189,3 +241,4 @@ Make the `/compact ...` line the **last thing** in your response so it's immedia
 - `compaction-checkpoint` (meta way) — the automatic sibling that fires near the context limit.
 - `todos` (meta way) — the TaskList-at-compaction discipline this enforces on demand.
 - `context-status` — check how much room is left before you decide to wrap.
+- `attend` — the attend mod, which asks for wraps and, in relay mode, compacts and resumes after them.

@@ -3,14 +3,18 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! What the `≡` menu's Settings ▸ lists and writes: the attend mod's
-//! `mods.attend.listening`, `mods.attend.keepwarm` and keepalive policy
-//! (`mods.attend.keepalive.*`, ADR-414), ways keys a project can set, then
-//! the chat's own `attend.chat.*` keys, which only the user
-//! file holds ([`crate::settings`]). Each shows the value in effect and the
-//! layer it comes from. A write goes to the file of the place chosen, the
-//! user's or a project's, through the agent-settings writer, as
-//! `ways settings set <key> <value> [--project <dir>]` writes it: the same
-//! file, header and edit.
+//! `mods.attend.listening`, `mods.attend.keepwarm` and continuity policy
+//! (`mods.attend.continuity.*`), ways keys a project can set, then the
+//! chat's own `attend.chat.*` keys, which only the user file holds
+//! ([`crate::settings`]). Each shows the value in effect and the layer it
+//! comes from. A write goes to the file of the place chosen, the user's or a
+//! project's, through the agent-settings writer, as `ways settings set <key>
+//! <value> [--project <dir>]` writes it: the same file, header and edit.
+//!
+//! References:
+//! - ADR-414: the keepalive policy and its keys under `mods.attend`.
+//! - ADR-417: the relay, and the move of the policy's keys under
+//!   `mods.attend.continuity`.
 
 use std::path::{Path, PathBuf};
 
@@ -24,17 +28,20 @@ use crate::settings::{plain, LOCK_WAIT};
 pub const MOD_KEYS: &[&str] = &[
     "mods.attend.listening",
     "mods.attend.keepwarm",
-    "mods.attend.keepalive.enabled",
-    "mods.attend.keepalive.max_keepalives",
-    "mods.attend.keepalive.margin_minutes",
-    "mods.attend.keepalive.windows",
-    "mods.attend.keepalive.timezone",
-    "mods.attend.keepalive.wrap",
-    "mods.attend.keepalive.wrap_file",
-    "mods.attend.keepalive.wrap_to",
-    "mods.attend.keepalive.after_wrap",
-    "mods.attend.keepalive.after_wrap_keepalives",
-    "mods.attend.keepalive.wrap_skill",
+    "mods.attend.continuity.keepalive",
+    "mods.attend.continuity.max_keepalives",
+    "mods.attend.continuity.margin_minutes",
+    "mods.attend.continuity.windows",
+    "mods.attend.continuity.timezone",
+    "mods.attend.continuity.wrap",
+    "mods.attend.continuity.wrap_file",
+    "mods.attend.continuity.wrap_to",
+    "mods.attend.continuity.after_wrap",
+    "mods.attend.continuity.after_wrap_keepalives",
+    "mods.attend.continuity.wrap_skill",
+    "mods.attend.continuity.relay",
+    "mods.attend.continuity.relay_at_pct",
+    "mods.attend.continuity.max_relays",
 ];
 
 const CHAT: &str = "attend.chat.";
@@ -304,14 +311,26 @@ pub fn set_at(name: &str, raw: &str, place: &Place, dir: &Path) -> Result<Done, 
     Ok(with_override(said, &key, &read_at(place, dir), &file, false))
 }
 
-/// Remove `name` from `place`'s file. Says what is in effect after, read
-/// where the chat runs (`dir`) or at the project written, and which higher
-/// file still sets it.
+/// Remove `name` from `place`'s file, under its old name too where it was
+/// renamed, since the layer is still read by that name. Says what is in
+/// effect after, read where the chat runs (`dir`) or at the project
+/// written, and which higher file still sets it.
+///
+/// References:
+/// - ADR-417 item 1: a renamed key is read under both names for a while.
 pub fn unset_at(name: &str, place: &Place, dir: &Path) -> Result<Done, String> {
     let key = Key::of(name).ok_or_else(|| format!("{name} is not a setting the chat lists"))?;
     let (file, _) = key.file(place)?;
     let kp = key.path();
-    edit_file_within(&file, None, Some(LOCK_WAIT), |d| d.unset(&kp)).map_err(|e| format!("{e}; nothing written"))?;
+    let was = key.spec().was_path();
+    edit_file_within(&file, None, Some(LOCK_WAIT), |d| {
+        d.unset(&kp)?;
+        if let Some(w) = &was {
+            d.unset(w)?;
+        }
+        Ok(())
+    })
+    .map_err(|e| format!("{e}; nothing written"))?;
     let at = read_at(place, dir);
     let (value, from) = key.effect(&at);
     let said = format!("{name} unset in {}; {value} ({from}) in effect", short(&file));
@@ -445,17 +464,20 @@ mod tests {
             [
                 "mods.attend.listening = active (project)",
                 "mods.attend.keepwarm = off (user)",
-                "mods.attend.keepalive.enabled = true (default)",
-                "mods.attend.keepalive.max_keepalives = 8 (default)",
-                "mods.attend.keepalive.margin_minutes = 10 (default)",
-                "mods.attend.keepalive.windows = daily 00:00-24:00 (default)",
-                "mods.attend.keepalive.timezone =  (default)",
-                "mods.attend.keepalive.wrap = transcript (default)",
-                "mods.attend.keepalive.wrap_file = {state}/wrap/{session}.md (default)",
-                "mods.attend.keepalive.wrap_to =  (default)",
-                "mods.attend.keepalive.after_wrap = lapse (default)",
-                "mods.attend.keepalive.after_wrap_keepalives = 0 (default)",
-                "mods.attend.keepalive.wrap_skill = wrap stay (default)",
+                "mods.attend.continuity.keepalive = true (default)",
+                "mods.attend.continuity.max_keepalives = 8 (default)",
+                "mods.attend.continuity.margin_minutes = 10 (default)",
+                "mods.attend.continuity.windows = daily 00:00-24:00 (default)",
+                "mods.attend.continuity.timezone =  (default)",
+                "mods.attend.continuity.wrap = transcript (default)",
+                "mods.attend.continuity.wrap_file = {state}/wrap/{session}.md (default)",
+                "mods.attend.continuity.wrap_to =  (default)",
+                "mods.attend.continuity.after_wrap = lapse (default)",
+                "mods.attend.continuity.after_wrap_keepalives = 0 (default)",
+                "mods.attend.continuity.wrap_skill = wrap stay (default)",
+                "mods.attend.continuity.relay = off (default)",
+                "mods.attend.continuity.relay_at_pct = 75 (default)",
+                "mods.attend.continuity.max_relays = 5 (default)",
                 "attend.chat.tabs.jump = auto (default)",
                 "attend.chat.tabs.menu_on_repeat = true (default)",
                 "attend.chat.tabs.focus_key = both (default)",
@@ -552,6 +574,23 @@ mod tests {
         let done = unset_at("mods.attend.listening", &here, &proj).unwrap();
         assert!(!read(&proj.join(".claude/ways.yaml")).contains("listening"));
         assert!(!done.overridden && !done.said.contains("not in effect"), "{done:?}");
+    }
+
+    /// An unset of a renamed key removes its old name in that file too,
+    /// which the dual read would otherwise still find.
+    ///
+    /// References:
+    /// - ADR-417 item 1: a renamed key is read under both names for a while.
+    #[test]
+    fn an_unset_of_a_renamed_key_removes_its_old_name_too() {
+        let _env = crate::test_dir::env_lock();
+        let home = home();
+        let proj = home.proj().to_path_buf();
+        let here = Place::Project(proj.clone());
+        write(&proj.join(".claude/ways.yaml"), "mods:\n  attend:\n    keepalive:\n      enabled: false\n");
+        let done = unset_at("mods.attend.continuity.keepalive", &here, &proj).unwrap();
+        assert!(!read(&proj.join(".claude/ways.yaml")).contains("enabled"), "{}", read(&proj.join(".claude/ways.yaml")));
+        assert!(done.said.contains("true (default) in effect"), "{}", done.said);
     }
 
     /// Unset in the user file is read where the chat runs: the project

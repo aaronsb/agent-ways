@@ -12,6 +12,7 @@
 
 mod input;
 mod post_tool;
+mod pre_compact;
 mod response;
 mod subagent;
 
@@ -67,11 +68,18 @@ pub(crate) fn deadline_for(event: HookEvent) -> std::time::Duration {
         | HookEvent::Pull
         | HookEvent::Tool
         | HookEvent::SessionStart
-        | HookEvent::TasksActive => Duration::from_secs(9),
+        | HookEvent::TasksActive
+        | HookEvent::PreCompact => Duration::from_secs(9),
     }
 }
 
 pub fn run(event: HookEvent) -> Result<()> {
+    // The PreCompact hook reads its own payload and exits 0 whatever fails,
+    // so it runs before anything here that can return an error.
+    if event == HookEvent::PreCompact {
+        pre_compact::run();
+        return Ok(());
+    }
     crate::hook_deadline::start(deadline_for(event));
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw)?;

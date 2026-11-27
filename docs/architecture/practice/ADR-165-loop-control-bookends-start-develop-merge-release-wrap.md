@@ -163,3 +163,7 @@ rename ripple through references to `ship`.
 - **A dedicated non-agile naming metaphor** (film: action/take/wrap; compiler;
   systems). Explored at length; the plain SE verbs (start/develop/merge/release)
   won for being literal, low-fatigue, and already the words for the acts.
+
+## Amendments
+
+- 2026-11-26, by ADR-417, to Decision item 2: a skill still cannot fire `/compact`, but the attend mod can compact. In relay mode it compacts after a wrap with the wrap's handoff as instructions, then submits a turn that resumes the work, so `wrap` no longer always ends by handing the operator the trigger.

@@ -180,31 +180,47 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     assert!(c.status().contains("another writer holds it") && c.status().contains("nothing written"), "{}", c.status());
     assert!(!read(&file).contains("listening"), "{}", read(&file));
 
-    // The keepalive policy's keys (ADR-414 item 8): listed with the rest; a
-    // choice is picked, a number or a list is typed in an entry dialog.
+    // The continuity policy's keys are listed with the rest; a choice is
+    // picked, a number or a list is typed in an entry dialog.
+    //
+    // References:
+    // - ADR-414 item 8: the keepalive policy's keys are settings a project sets.
+    // - ADR-417 item 1: those keys move under `mods.attend.continuity`.
     open_settings(&mut c);
     let s = shown(&mut c);
     for line in [
-        "mods.attend.keepalive.enabled = true (default)",
-        "mods.attend.keepalive.max_keepalives = 8 (default)",
-        "mods.attend.keepalive.windows = daily 00:00-24:00 (default)",
-        "mods.attend.keepalive.wrap = transcript (default)",
-        "mods.attend.keepalive.after_wrap = lapse (default)",
-        "mods.attend.keepalive.after_wrap_keepalives = 0 (default)",
-        "mods.attend.keepalive.wrap_skill = wrap stay (default)",
+        "mods.attend.continuity.keepalive = true (default)",
+        "mods.attend.continuity.max_keepalives = 8 (default)",
+        "mods.attend.continuity.windows = daily 00:00-24:00 (default)",
+        "mods.attend.continuity.wrap = transcript (default)",
+        "mods.attend.continuity.after_wrap = lapse (default)",
+        "mods.attend.continuity.after_wrap_keepalives = 0 (default)",
+        "mods.attend.continuity.wrap_skill = wrap stay (default)",
+        "mods.attend.continuity.relay = off (default)",
+        "mods.attend.continuity.relay_at_pct = 75 (default)",
+        "mods.attend.continuity.max_relays = 5 (default)",
     ] {
         assert!(s.contains(line), "{line}: {s}");
     }
-    click_on(&mut c, "mods.attend.keepalive.wrap =");
+    click_on(&mut c, "mods.attend.continuity.wrap =");
     click_on(&mut c, "project ~/work/proj:");
     click_on(&mut c, "send");
-    assert!(read(&file).contains("keepalive:\n      wrap: send"), "{}", read(&file));
+    assert!(read(&file).contains("continuity:\n      wrap: send"), "{}", read(&file));
+
+    // Relay is a choice, written to the project's file like the rest.
+    open_settings(&mut c);
+    click_on(&mut c, "mods.attend.continuity.relay =");
+    click_on(&mut c, "project ~/work/proj:");
+    click_on(&mut c, "   on ");
+    assert!(read(&file).contains("relay: on"), "{}", read(&file));
 
     // A number out of range is refused inside the dialog, which keeps it.
     open_settings(&mut c);
-    click_on(&mut c, "mods.attend.keepalive.max_keepalives =");
+    click_on(&mut c, "mods.attend.continuity.max_keepalives =");
     click_on(&mut c, "project ~/work/proj:");
-    assert!(shown(&mut c).contains("mods.attend.keepalive.max_keepalives · project"), "the entry dialog: {}", shown(&mut c));
+    // The dialog's title is cut at its frame, so only the key's name and the
+    // separator before the place are asserted.
+    assert!(shown(&mut c).contains("mods.attend.continuity.max_keepalives · "), "the entry dialog: {}", shown(&mut c));
     keys(&mut c, &[KeyCode::Backspace; 4]);
     typed(&mut c, "99");
     keys(&mut c, &[KeyCode::Enter]);
@@ -216,17 +232,17 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
 
     // A list is typed with its entries separated by commas.
     open_settings(&mut c);
-    click_on(&mut c, "mods.attend.keepalive.windows =");
+    click_on(&mut c, "mods.attend.continuity.windows =");
     click_on(&mut c, "project ~/work/proj:");
     keys(&mut c, &[KeyCode::Backspace; 40]);
     typed(&mut c, "Mon-Fri 08:00-19:00, Sat 10:00-14:00");
     keys(&mut c, &[KeyCode::Enter]);
     assert!(read(&file).contains("windows:\n        - Mon-Fri 08:00-19:00\n        - Sat 10:00-14:00"), "{}", read(&file));
     open_settings(&mut c);
-    assert!(shown(&mut c).contains("mods.attend.keepalive.windows = Mon-Fri 08:00-19:00, Sat 10:00-14:00 (project)"), "{}", shown(&mut c));
+    assert!(shown(&mut c).contains("mods.attend.continuity.windows = Mon-Fri 08:00-19:00, Sat 10:00-14:00 (project)"), "{}", shown(&mut c));
 
     // An empty entry removes the key from the place's file.
-    click_on(&mut c, "mods.attend.keepalive.windows =");
+    click_on(&mut c, "mods.attend.continuity.windows =");
     click_on(&mut c, "project ~/work/proj:");
     keys(&mut c, &[KeyCode::Backspace; 60]);
     keys(&mut c, &[KeyCode::Enter]);
@@ -235,7 +251,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     // `[]` writes an empty list, which overrides a lower layer; the dialog
     // says so.
     open_settings(&mut c);
-    click_on(&mut c, "mods.attend.keepalive.windows =");
+    click_on(&mut c, "mods.attend.continuity.windows =");
     click_on(&mut c, "project ~/work/proj:");
     assert!(shown(&mut c).contains("[] writes empty"), "the dialog's hint: {}", shown(&mut c));
     keys(&mut c, &[KeyCode::Backspace; 60]);
@@ -243,7 +259,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     keys(&mut c, &[KeyCode::Enter]);
     assert!(read(&file).contains("windows: []"), "{}", read(&file));
     open_settings(&mut c);
-    click_on(&mut c, "mods.attend.keepalive.timezone =");
+    click_on(&mut c, "mods.attend.continuity.timezone =");
     click_on(&mut c, "project ~/work/proj:");
     typed(&mut c, "\"\"");
     keys(&mut c, &[KeyCode::Enter]);

@@ -89,15 +89,20 @@ pub(super) fn file_label(file: &str) -> &'static str {
 /// Check the files. A finding exits 3; a warning is printed and leaves the
 /// exit alone, since the file is valid and loads as written.
 ///
-/// Without `--file`, a retired `attend_mod` section is reported in every
-/// file that holds it ([`retired::files_holding`]), not only the files
-/// layered here, each with its own fix command (ADR-512 item 2).
+/// Without `--file`, a section a rename moved ([`retired::MOVES`]) is
+/// reported in every file that holds it ([`retired::files_holding`]), not
+/// only the files layered here, each with its own fix command. An old
+/// section that is still read is a warning.
+///
+/// References:
+/// - ADR-512 item 2: `attend_mod` moves under `mods.attend`.
+/// - ADR-417 item 1: `mods.attend.keepalive` moves to `mods.attend.continuity`.
 pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
     let held = match file {
-        // One file: its own line, with the fix command for its kind.
-        Some(f) => retired::held_by(f).into_iter().collect(),
+        // One file: its own lines, with the fix command for its kind.
+        Some(f) => retired::held_by(f),
         None => retired::files_holding(read_project(project).as_deref()),
     };
     let mut n = 0;
@@ -107,7 +112,7 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     for l in layers.iter().filter(|l| l.present && l.file != attend_config::schema::SENSOR_FILE) {
         for f in &l.findings {
             // Reported below with the command for its own file.
-            if f.section.is_none() && f.key.as_deref() == Some(retired::KEY) && !held.is_empty() {
+            if f.section.is_none() && f.key.as_deref() == Some(retired::KEY) && held.iter().any(|h| h.moved == &retired::ATTEND_MOD) {
                 continue;
             }
             println!("{f}{}", f.lint_note());
@@ -134,8 +139,11 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     }
     for h in &held {
         println!("{}", h.line());
-        n += 1;
-        fixable += 1;
+        // A warning leaves the exit alone: the old section still loads.
+        if h.fails() {
+            n += 1;
+            fixable += 1;
+        }
     }
     if n > 0 {
         let s = if n == 1 { "" } else { "s" };
@@ -225,12 +233,17 @@ fn sections_for(reg: &Registry, arg: &str) -> Vec<Covered> {
         .collect()
 }
 
-/// Whether `fix <arg>` moves the retired `attend_mod` section: when it
-/// covers the `mods` section's `attend` entry.
-fn carries(covered: &[Covered]) -> bool {
-    covered.iter().any(|(sc, s, e)| {
-        std::ptr::eq(*sc, &ways_core::settings::SCHEMA) && s.name == "mods" && e.as_deref().is_none_or(|e| e == "attend")
-    })
+/// The moved sections `fix <arg>` carries to their new names: each whose
+/// new name lies in what `arg` covers of the `mods` section. `fix mods`
+/// and `fix mods.attend` carry both moves; `fix mods.attend.continuity`
+/// carries the keepalive section alone.
+fn carries(covered: &[Covered]) -> Vec<&'static retired::Move> {
+    let names: Vec<String> = covered
+        .iter()
+        .filter(|(sc, s, _)| std::ptr::eq(*sc, &ways_core::settings::SCHEMA) && s.name == "mods")
+        .map(|(_, s, e)| e.as_deref().map_or(s.name.to_string(), |e| format!("{}.{e}", s.name)))
+        .collect();
+    retired::MOVES.iter().copied().filter(|m| names.iter().any(|n| agent_settings::registry::under(m.fix, n))).collect()
 }
 
 /// `fix <section|prefix>`: repair what the named sections' findings point
@@ -249,9 +262,12 @@ fn carries(covered: &[Covered]) -> bool {
 ///   removed.
 ///
 /// `fix mods.attend` (or `fix mods`) first moves a retired `attend_mod`
-/// section to `mods.attend` (ADR-512 item 2): each value is written under the
-/// new name unless the file already holds one there, which stays; fix names
-/// each value it dropped, and removes the old section.
+/// section to `mods.attend`, then an old `mods.attend.keepalive` section to
+/// `mods.attend.continuity` with `enabled` renamed `keepalive`; `fix
+/// mods.attend.continuity` makes the second move alone. Each value is
+/// written under the new name unless the file already holds one there,
+/// which stays; fix names each value it dropped, and removes the old
+/// section.
 ///
 /// An entry's name the section refuses is not repaired: it closes its
 /// section, and only a hand edit can say what it meant. fix writes nothing
@@ -319,7 +335,7 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
         let entries: Vec<(&str, Option<&str>)> = list.iter().map(|(_, s, e)| (s.name, e.as_deref())).collect();
         let file = list[0].1.file;
         let schema = list[0].0;
-        let carry_here = carry && file == ways_core::settings::FILE;
+        let carry_here: &[&retired::Move] = if file == ways_core::settings::FILE { &carry } else { &[] };
         let (refused, carried) = agent_settings::writer::edit_file(path, None, |d| {
             // A name the section refuses closes it, and may be an off-switch
             // the schema cannot read: only a hand edit can say what it meant.
@@ -328,9 +344,12 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
             if before.has_refused_name() {
                 let text = d.text();
                 let refused = before.findings(None, Some(path), &text).into_iter().filter(|f| f.closed).collect::<Vec<_>>();
-                return Ok((refused, retired::Carried::default()));
+                return Ok((refused, Vec::new()));
             }
-            let carried = if carry_here { retired::carry(d)? } else { retired::Carried::default() };
+            let mut carried = Vec::new();
+            for m in carry_here {
+                carried.push((*m, retired::carry(d, m)?));
+            }
             let raw = d.value().clone();
             let checked = agent_settings::load::check(schema, file, scope, &raw, Some(&names));
             for (sec, key) in checked.failing() {
@@ -380,14 +399,18 @@ pub fn fix(section: &str, project: Option<&Path>, target: Option<&Path>) -> Out 
             ));
         }
         touched(scope, path, false);
-        for d in &carried.dropped {
-            eprintln!("{}", d.line(path));
-        }
-        if carried.comments_dropped {
-            eprintln!(
-                "dropped the comments inside attend_mod in {}: the file already has a mods section, so the values moved one by one",
-                path.display()
-            );
+        for (m, c) in &carried {
+            for d in &c.dropped {
+                eprintln!("{}", d.line(path));
+            }
+            if c.comments_dropped {
+                eprintln!(
+                    "dropped the comments inside {} in {}: the file already has a {} section, so the values moved one by one",
+                    m.old_name(),
+                    path.display(),
+                    m.merge_target()
+                );
+            }
         }
         // Check again: what fix could not repair is reported, with its command.
         let text = std::fs::read_to_string(path).unwrap_or_default();

@@ -108,7 +108,14 @@ pub fn unset(key: &str, project: Option<&Path>) -> Out {
     if b.name() == "gate.engine" {
         super::engine::report(&super::write_engine(None)?);
     } else {
-        edit_checked(&path, is_sensor_key(&b), &[(file_key(&b), None)], None, |_| Ok(()))?.map_err(|e| fail(exit::REJECTED, format!("{key}: {e}")))?;
+        // A renamed key goes under its old name too, which the layer would
+        // otherwise still be read by.
+        //
+        // References:
+        // - ADR-417 item 1: a renamed key is read under both names for a while.
+        let mut edits = vec![(file_key(&b), None)];
+        edits.extend(b.spec.was_path().map(|w| (w, None)));
+        edit_checked(&path, is_sensor_key(&b), &edits, None, |_| Ok(()))?.map_err(|e| fail(exit::REJECTED, format!("{key}: {e}")))?;
         touched(scope, &path, false);
     }
     let layers = live_layers(project_dir(project).as_deref());

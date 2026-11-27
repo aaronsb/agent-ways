@@ -369,6 +369,15 @@ pub struct KeySpec {
     /// patterns themselves, such as the way toggle `"*": false`. Otherwise a
     /// typed `*` is the pattern and binds nothing.
     pub star_instance: bool,
+    /// The path the key had before a rename, read during the rename's
+    /// dual-read period. In each layer the key's own path wins and this one
+    /// is read where the layer does not set it, so an old name in a higher
+    /// layer still beats a new name in a lower one. A file holding it loads,
+    /// checked as this key. Fixed names only.
+    ///
+    /// References:
+    /// - ADR-417 item 1: a renamed key is read under both names for a while.
+    pub was: Option<&'static [&'static str]>,
 }
 
 /// The fail-closed reading of a raw value.
@@ -485,6 +494,16 @@ impl KeySpec {
         } else {
             None
         }
+    }
+
+    /// Whether `path` is this key's path before its rename ([`KeySpec::was`]).
+    pub fn is_was_path(&self, path: &[String]) -> bool {
+        self.was.is_some_and(|w| w.len() == path.len() && w.iter().zip(path).all(|(a, b)| *a == b))
+    }
+
+    /// The key's old path as owned segments, where it has one.
+    pub fn was_path(&self) -> Option<Vec<String>> {
+        self.was.map(|w| w.iter().map(|s| s.to_string()).collect())
     }
 
     /// Match a concrete file path, returning the wildcard bindings.
@@ -627,6 +646,7 @@ mod tests {
         computed: None,
         fail_closed: None,
         star_instance: false,
+        was: None,
     };
 
     #[test]

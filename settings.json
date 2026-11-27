@@ -417,6 +417,18 @@
           }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/bin/ways hook pre-compact",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   },
   "enabledPlugins": {
