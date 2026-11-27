@@ -848,7 +848,7 @@ mod tests {
         const RENAMED: KeySpec = KeySpec { name: "matching.prob", section: "matching", path: &["prob"], kind: Kind::Float { min: 0.0, max: 1.0 }, default: DefaultValue::Yaml("0.5"), was: Some(&["presets", "oldprob"]), ..BASE };
         let old_only = layer("user", LayerScope::User, "presets:\n  oldprob: 0.25\n");
         assert!(old_only.findings.is_empty(), "{:?}", old_only.findings);
-        assert_eq!(resolve(&RENAMED, &[], &[old_only.clone()]).value, Some(Value::from(0.25)));
+        assert_eq!(resolve(&RENAMED, &[], std::slice::from_ref(&old_only)).value, Some(Value::from(0.25)));
         let both = layer("user", LayerScope::User, "prob: 0.75\npresets:\n  oldprob: 0.25\n");
         assert_eq!(resolve(&RENAMED, &[], &[both]).value, Some(Value::from(0.75)), "the new path wins in one layer");
         let user_new = layer("user", LayerScope::User, "prob: 0.75\n");

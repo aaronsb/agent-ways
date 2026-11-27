@@ -173,9 +173,9 @@ enum Commands {
     #[command(hide = true)]
     Reconcile(RepairArgs),
     /// The fixed name an updater runs on the newly installed binary after it
-    /// reprojects (ADR-507 §2): one line per file that still holds a retired
-    /// settings section, with the command that moves it. Prints nothing when
-    /// none does; changes nothing.
+    /// reprojects (ADR-507 §2): one line per settings section a rename moved
+    /// that a file still holds, with the command that moves it. Prints
+    /// nothing when none does; changes nothing.
     #[command(hide = true)]
     RetiredSettings,
     /// Serve one Claude Code hook: read its JSON payload on stdin and print

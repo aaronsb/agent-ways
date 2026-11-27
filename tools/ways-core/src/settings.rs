@@ -1203,7 +1203,7 @@ mod tests {
     fn continuity_keys_dual_read_their_keepalive_names() {
         let old = layer("user", LayerScope::User, "mods:\n  attend:\n    keepalive:\n      max_keepalives: 2\n      enabled: false\n");
         assert!(old.findings.is_empty(), "{:?}", old.findings);
-        assert_eq!(resolved("mods.attend.continuity.max_keepalives", &[old.clone()]), Some(Value::Number(2.into())));
+        assert_eq!(resolved("mods.attend.continuity.max_keepalives", std::slice::from_ref(&old)), Some(Value::Number(2.into())));
         assert_eq!(resolved("mods.attend.continuity.keepalive", &[old]), Some(Value::Bool(false)));
         let both = layer("user", LayerScope::User, "mods:\n  attend:\n    keepalive:\n      max_keepalives: 2\n    continuity:\n      max_keepalives: 3\n");
         assert_eq!(resolved("mods.attend.continuity.max_keepalives", &[both]), Some(Value::Number(3.into())));

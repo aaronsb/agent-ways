@@ -107,7 +107,8 @@ pub struct WhatIf {
     pub local: Vec<String>,
     pub actions: Vec<(Mark, String)>,
     pub dev: Vec<DevLink>,
-    /// The files that still hold a retired settings section (ADR-512 item 2).
+    /// The files that still hold a section a rename moved (ADR-512 item 2,
+    /// ADR-417 item 1).
     pub retired: Vec<Held>,
     /// Why the update's `git pull --ff-only` would stop, on the release
     /// channel: `detached`, `no-upstream` or `diverged`.
@@ -784,7 +785,7 @@ pub fn render(w: &WhatIf) -> Report {
     // changes nothing about it.
     let up_to_date = level && !w.components.iter().any(Component::moves) && w.local.is_empty() && w.dev.is_empty();
     if up_to_date && !w.retired.is_empty() {
-        r.footer(Mark::Ok, "Up to date; the files above need `ways settings fix mods.attend` (with each one's --target or --project).");
+        r.footer(Mark::Ok, "Up to date; each file above names the `ways settings fix` command that moves its section.");
     } else if up_to_date {
         r.footer(Mark::Ok, "Up to date. Nothing changed.");
     } else {
@@ -793,20 +794,22 @@ pub fn render(w: &WhatIf) -> Report {
     r
 }
 
-/// The files that still hold `attend_mod`, one ⚠ line each with the command
-/// that moves it. Nothing in the update rewrites them (ADR-512 item 2).
+/// The files that still hold a section a rename moved, one ⚠ line each
+/// saying whether it is still read, with the command that moves it.
+/// Nothing in the update rewrites them (ADR-512 item 2, ADR-417 item 1).
 pub fn retired_section(r: &mut Report, held: &[Held]) {
     if held.is_empty() {
         return;
     }
     r.section("Retired settings");
-    r.muted(2, "nothing reads these, and the update leaves them as they are:");
+    r.muted(2, "the update leaves these as they are:");
     for h in held {
         r.item(Mark::Warn, retired_line(h));
     }
 }
 
-/// One file's line: where `attend_mod` is, and the command that moves it.
+/// One file's line: where the old section is, whether it is still read,
+/// and the command that moves it.
 pub fn retired_line(h: &Held) -> String {
     h.moved_line()
 }
@@ -849,7 +852,10 @@ mod tests {
             local: vec![" M settings.json".into()],
             actions: vec![(Mark::Act, "pull: fast-forward aaaaaaaa → bbbbbbbb (origin/main)".into())],
             dev: Vec::new(),
-            retired: vec![Held { path: PathBuf::from("/p/.claude/ways.yaml"), line: Some(3), kind: retired::Kind::Project(PathBuf::from("/p")) }],
+            retired: vec![
+                Held { path: PathBuf::from("/p/.claude/ways.yaml"), line: Some(3), kind: retired::Kind::Project(PathBuf::from("/p")), moved: &retired::ATTEND_MOD },
+                Held { path: PathBuf::from("/p/.claude/ways.yaml"), line: Some(7), kind: retired::Kind::Project(PathBuf::from("/p")), moved: &retired::KEEPALIVE },
+            ],
             blocked: None,
             verbose: false,
         };
@@ -861,7 +867,11 @@ mod tests {
         assert!(text.contains("    ways-v1.41.0\n      ### Added\n      - a thing (#5)\n"), "{text}");
         assert!(!text.contains("Pre-built"), "the CI tail is dropped");
         assert!(!text.contains("ways-v1.40.0"), "the installed release is not repeated");
-        assert!(text.contains("⚠ /p/.claude/ways.yaml:3 holds attend_mod, now mods.attend: `ways settings fix mods.attend --project /p` moves it"), "{text}");
+        assert!(text.contains("⚠ /p/.claude/ways.yaml:3 holds attend_mod, now mods.attend; nothing reads it: `ways settings fix mods.attend --project /p` moves it"), "{text}");
+        assert!(
+            text.contains("⚠ /p/.claude/ways.yaml:7 holds mods.attend.keepalive, now mods.attend.continuity; it is still read: `ways settings fix mods.attend.continuity --project /p` moves it"),
+            "{text}"
+        );
         assert!(text.ends_with("· Nothing changed. Run `ways manage update --commit` to apply.\n"), "{text}");
     }
 
@@ -1027,12 +1037,12 @@ mod tests {
             local: Vec::new(),
             actions: Vec::new(),
             dev: Vec::new(),
-            retired: vec![Held { path: PathBuf::from("/u/config.yaml"), line: Some(1), kind: retired::Kind::User }],
+            retired: vec![Held { path: PathBuf::from("/u/config.yaml"), line: Some(1), kind: retired::Kind::User, moved: &retired::ATTEND_MOD }],
             blocked: None,
             verbose: false,
         };
         let text = render(&w).render(&Painter::plain());
-        assert!(text.contains("Up to date; the files above need `ways settings fix mods.attend`"), "{text}");
+        assert!(text.contains("Up to date; each file above names the `ways settings fix` command that moves its section."), "{text}");
         assert!(!text.contains("--commit` to apply"), "{text}");
     }
 

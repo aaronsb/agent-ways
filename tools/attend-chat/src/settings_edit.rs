@@ -3,8 +3,8 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! What the `≡` menu's Settings ▸ lists and writes: the attend mod's
-//! `mods.attend.listening`, `mods.attend.keepwarm` and keepalive policy
-//! (`mods.attend.keepalive.*`, ADR-414), ways keys a project can set, then
+//! `mods.attend.listening`, `mods.attend.keepwarm` and continuity policy
+//! (`mods.attend.continuity.*`, ADR-414, ADR-417), ways keys a project can set, then
 //! the chat's own `attend.chat.*` keys, which only the user
 //! file holds ([`crate::settings`]). Each shows the value in effect and the
 //! layer it comes from. A write goes to the file of the place chosen, the
@@ -24,17 +24,20 @@ use crate::settings::{plain, LOCK_WAIT};
 pub const MOD_KEYS: &[&str] = &[
     "mods.attend.listening",
     "mods.attend.keepwarm",
-    "mods.attend.keepalive.enabled",
-    "mods.attend.keepalive.max_keepalives",
-    "mods.attend.keepalive.margin_minutes",
-    "mods.attend.keepalive.windows",
-    "mods.attend.keepalive.timezone",
-    "mods.attend.keepalive.wrap",
-    "mods.attend.keepalive.wrap_file",
-    "mods.attend.keepalive.wrap_to",
-    "mods.attend.keepalive.after_wrap",
-    "mods.attend.keepalive.after_wrap_keepalives",
-    "mods.attend.keepalive.wrap_skill",
+    "mods.attend.continuity.keepalive",
+    "mods.attend.continuity.max_keepalives",
+    "mods.attend.continuity.margin_minutes",
+    "mods.attend.continuity.windows",
+    "mods.attend.continuity.timezone",
+    "mods.attend.continuity.wrap",
+    "mods.attend.continuity.wrap_file",
+    "mods.attend.continuity.wrap_to",
+    "mods.attend.continuity.after_wrap",
+    "mods.attend.continuity.after_wrap_keepalives",
+    "mods.attend.continuity.wrap_skill",
+    "mods.attend.continuity.relay",
+    "mods.attend.continuity.relay_at_pct",
+    "mods.attend.continuity.max_relays",
 ];
 
 const CHAT: &str = "attend.chat.";
@@ -445,17 +448,20 @@ mod tests {
             [
                 "mods.attend.listening = active (project)",
                 "mods.attend.keepwarm = off (user)",
-                "mods.attend.keepalive.enabled = true (default)",
-                "mods.attend.keepalive.max_keepalives = 8 (default)",
-                "mods.attend.keepalive.margin_minutes = 10 (default)",
-                "mods.attend.keepalive.windows = daily 00:00-24:00 (default)",
-                "mods.attend.keepalive.timezone =  (default)",
-                "mods.attend.keepalive.wrap = transcript (default)",
-                "mods.attend.keepalive.wrap_file = {state}/wrap/{session}.md (default)",
-                "mods.attend.keepalive.wrap_to =  (default)",
-                "mods.attend.keepalive.after_wrap = lapse (default)",
-                "mods.attend.keepalive.after_wrap_keepalives = 0 (default)",
-                "mods.attend.keepalive.wrap_skill = wrap stay (default)",
+                "mods.attend.continuity.keepalive = true (default)",
+                "mods.attend.continuity.max_keepalives = 8 (default)",
+                "mods.attend.continuity.margin_minutes = 10 (default)",
+                "mods.attend.continuity.windows = daily 00:00-24:00 (default)",
+                "mods.attend.continuity.timezone =  (default)",
+                "mods.attend.continuity.wrap = transcript (default)",
+                "mods.attend.continuity.wrap_file = {state}/wrap/{session}.md (default)",
+                "mods.attend.continuity.wrap_to =  (default)",
+                "mods.attend.continuity.after_wrap = lapse (default)",
+                "mods.attend.continuity.after_wrap_keepalives = 0 (default)",
+                "mods.attend.continuity.wrap_skill = wrap stay (default)",
+                "mods.attend.continuity.relay = off (default)",
+                "mods.attend.continuity.relay_at_pct = 75 (default)",
+                "mods.attend.continuity.max_relays = 5 (default)",
                 "attend.chat.tabs.jump = auto (default)",
                 "attend.chat.tabs.menu_on_repeat = true (default)",
                 "attend.chat.tabs.focus_key = both (default)",

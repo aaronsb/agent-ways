@@ -310,7 +310,7 @@ fn retired_settings(ways_bin: &Path) {
     for l in lines {
         Steps::warn(l);
     }
-    Steps::info("Nothing reads these, and the update leaves them as they are.");
+    Steps::info("The update leaves these as they are.");
 }
 
 /// Current HEAD sha of the app checkout, or None if git can't answer.
