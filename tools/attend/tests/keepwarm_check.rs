@@ -822,4 +822,71 @@ fn a_relay_wraps_on_fill_compacts_with_the_handoff_and_resumes() {
     assert_eq!((d["state"].as_str(), d["relay_stop"].as_str()), (Some("stopped"), Some("decision")), "{d}");
     assert_eq!(w.run(&["keepwarm", "wrap-id"]).stdout, format!("{id}\n").into_bytes(), "the id outlives the stop");
 }
+
+/// A relay wrap through the CLI up to the point its marker is judged.
+/// Returns the wrap's id and the handoff file.
+fn relay_wrap_judged(w: &Warm, marker_head: &str) -> (String, PathBuf) {
+    w.settings(r#"{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.relay":{"value":"on"}}"#);
+    let init = std::process::Command::new("git").args(["init", "-q"]).current_dir(&w.f.origin).status().unwrap();
+    assert!(init.success());
+    w.reading(&[(MIN, 760_000, 500)]);
+    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "off", "--skills", "wrap", "--fill", "760000", "--window", "1000000"]);
+    let d: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(d["action"], "wrap", "{d}");
+    let id = d["wrap_id"].as_str().unwrap().to_string();
+    let handoff = PathBuf::from(&w.f.origin).join(".claude").join("handoff.wrap.md");
+    std::fs::create_dir_all(handoff.parent().unwrap()).unwrap();
+    std::fs::write(&handoff, format!("2026-11-26 e6bbfbdd wrap={id}\nContinue work.\n\nTASKS — one.\n\nDO NEXT — start.\n")).unwrap();
+    let marker = format!("relay: {marker_head} tasks=1 goal=none wrap={id} head=e6bbfbdd");
+    assert!(w.run(&["keepwarm", "wrapped", "transcript", "--marker", &marker]).status.success());
+    (id, handoff)
+}
+
+/// A relay wrap's compaction, then the operator's `/wrap handoff`, whose
+/// skill records its own id: `wrap-id` gives the PreCompact hook the
+/// handoff wrap's id, not the relay wrap's.
+///
+/// References:
+/// - ADR-417 item 3: the PreCompact hook asks attend for the last wrap's id.
+#[test]
+fn a_handoff_mode_wrap_after_a_relay_wrap_is_the_last_wrap() {
+    let w = Warm::new("ka-relay-then-handoff");
+    let (a, _) = relay_wrap_judged(&w, "continue");
+    assert_eq!(policy(&w, "off")["action"], "compact");
+    assert!(w.run(&["keepwarm", "compacted"]).status.success());
+    assert!(w.run(&["keepwarm", "resumed"]).status.success());
+    assert!(w.run(&["keepwarm", "reset"]).status.success());
+    assert_eq!(w.run(&["keepwarm", "wrap-id"]).stdout, format!("{a}\n").into_bytes());
+    // `/wrap handoff`: the skill records its id.
+    let b = "20261126T2210Z-s1abcdef";
+    assert!(w.run(&["keepwarm", "wrap-id", "--record", b]).status.success());
+    assert_eq!(w.run(&["keepwarm", "wrap-id"]).stdout, format!("{b}\n").into_bytes());
+    assert_eq!(w.run(&["keepwarm", "wrap-id", "--record", "no good"]).status.code(), Some(2));
+    assert_eq!(w.run(&["keepwarm", "wrap-id"]).stdout, format!("{b}\n").into_bytes(), "a bad id records nothing");
+}
+
+/// The compaction attend asked for is not recorded until the mod reports
+/// it ran: a check after a deferral asks for it again. Once it ran, a check
+/// that hears no resume stops the relay and hands over the handoff.
+///
+/// References:
+/// - ADR-417 item 4: a turn before the compaction defers it; a resume that
+///   does not go in stops the relay.
+#[test]
+fn a_deferred_relay_compaction_is_asked_for_again_and_a_lost_resume_stops() {
+    let w = Warm::new("ka-relay-defer");
+    let (id, _) = relay_wrap_judged(&w, "continue");
+    let first = policy(&w, "off");
+    assert_eq!((first["action"].as_str(), first["state"].as_str()), (Some("compact"), Some("compacted")), "{first}");
+    let again = policy(&w, "off");
+    assert_eq!((again["action"].as_str(), again["text"].as_str(), again["resume"].as_str()), (Some("compact"), first["text"].as_str(), first["resume"].as_str()), "{again}");
+    assert!(w.run(&["keepwarm", "compacted"]).status.success());
+    // The mod that compacted reloaded before its resume.
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str(), d["relay_stop"].as_str(), d["send_handoff"].as_bool()), (Some("none"), Some("stopped"), Some("resume lost"), Some(true)), "{d}");
+    assert_eq!(d["text"].as_str(), Some(format!("2026-11-26 e6bbfbdd wrap={id}\nContinue work.\n\nTASKS — one.\n\nDO NEXT — start.").as_str()), "{d}");
+    assert!(w.run(&["keepwarm", "resumed"]).status.success());
+    let d = policy(&w, "off");
+    assert_eq!((d["state"].as_str(), d["relay_count"].as_u64(), d["send_handoff"].as_bool()), (Some("stopped"), Some(0), Some(false)), "a late resume report counts nothing: {d}");
+}
 }

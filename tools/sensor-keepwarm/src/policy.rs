@@ -150,9 +150,14 @@ pub struct Policy {
     /// it once the wrap answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_focus: Option<String>,
-    /// When the compaction after the wrap was asked for.
+    /// When the compaction after the wrap was asked for, in handoff mode;
+    /// in relay mode, when the mod reported that it ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compacted_at: Option<u64>,
+    /// A stopped relay still owes the compaction with the handoff, until
+    /// the mod reports it ran or failed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub compact_due: bool,
     /// Why that compaction failed, as the mod reported it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_failed: Option<String>,
@@ -223,6 +228,13 @@ impl Policy {
         *self == Policy::default()
     }
 
+    /// Whether the next judgment reads the handoff: a relay wrap's marker
+    /// waits to be judged or compacted on, or the conversation was compacted
+    /// after it and the resume never went in.
+    pub fn wants_handoff(&self) -> bool {
+        self.relay && self.marker.is_some() && (self.stopped.is_none() || (self.compact_due && self.compacted_at.is_none()))
+    }
+
     /// Where the count runs from: the operator's prompt, else the stretch.
     fn since(&self) -> Option<u64> {
         self.operator_at.or(self.stretch_from)
@@ -287,6 +299,7 @@ pub fn wrapped(p: &mut Policy, outcome: WrapOutcome, line: String, focus: Option
             p.wrap_id = None;
             p.compacted_at = None;
             p.compact_failed = None;
+            p.compact_due = false;
             p.handed = false;
         }
         p.marker = Some(m);
@@ -302,7 +315,9 @@ pub fn wrapped(p: &mut Policy, outcome: WrapOutcome, line: String, focus: Option
 /// `attend keepwarm compacted`: the compaction after the wrap ran, or why
 /// it failed. Only a wrapped stretch is compacted: a report that lands
 /// after the operator's prompt reset the ledger changes nothing. A relay
-/// compaction that failed stops the relay.
+/// compaction is recorded here and not when it is asked for, so one the
+/// mod deferred is asked for again. A relay compaction that failed stops
+/// the relay.
 ///
 /// References:
 /// - ADR-417 item 4: a compaction that is skipped or fails stops the relay.
@@ -311,6 +326,7 @@ pub fn compacted(p: &mut Policy, failed: Option<String>, now: u64) {
         return;
     }
     p.compacted_at.get_or_insert(now);
+    p.compact_due = false;
     if let (true, Some(why), None) = (p.relay, &failed, &p.stopped) {
         stop_relay(p, "compaction failed", format!("the compaction failed: {why}"));
     }
@@ -382,7 +398,7 @@ impl Marker {
             "none" => false,
             _ => return None,
         };
-        let wrap = wrap.strip_prefix("wrap=").filter(|w| (8..=64).contains(&w.len()) && w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))?;
+        let wrap = wrap.strip_prefix("wrap=").filter(|w| is_wrap_id(w))?;
         let head = head.strip_prefix("head=").filter(|h| (7..=40).contains(&h.len()) && h.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)))?;
         Some(Marker { stop, tasks, goal_active, wrap: wrap.into(), head: head.into() })
     }
@@ -397,6 +413,25 @@ pub fn stop_line(line: &str) -> Option<&'static str> {
     let rest = line.strip_prefix("relay: stop ")?;
     let word = rest.split(|c: char| c.is_whitespace() || matches!(c, ':' | ',' | '.' | ';')).next()?;
     STOP_REASONS.iter().find(|r| **r == word).copied()
+}
+
+/// `attend keepwarm wrap-id --record <id>`: a handoff-mode wrap names its
+/// id, which becomes the session's last. False, recording nothing, for an
+/// id the marker could not carry.
+///
+/// References:
+/// - ADR-417 item 3: the PreCompact hook asks attend for the last wrap's id.
+pub fn record_wrap_id(p: &mut Policy, id: &str) -> bool {
+    if !is_wrap_id(id) {
+        return false;
+    }
+    p.last_wrap_id = Some(id.to_string());
+    true
+}
+
+/// Whether `id` has a wrap id's shape: 8 to 64 letters, digits and `-`.
+fn is_wrap_id(id: &str) -> bool {
+    (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// `attend keepwarm off`: the policy stops until the operator's next prompt.
@@ -823,6 +858,9 @@ pub struct Handoff {
     pub wrap_id: Option<String>,
     /// The compaction's instructions built from it.
     pub instructions: String,
+    /// The file's text, whole: what a stopped relay sends the operator
+    /// when the wrap's reply is gone.
+    pub text: String,
 }
 
 impl Site {
@@ -1398,15 +1436,38 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
     if p.stopped.is_some() {
         let mut d = Decision::new(cfg, p, true, "stopped", format!("stopped: {}; nothing more until the operator's next prompt", p.stopped.as_deref().unwrap_or_default()));
         d.wrap = Some(route(cfg, site, now));
+        // A stop's compaction the mod has not run yet (a turn came first)
+        // is asked for again, while the handoff is still the wrap's.
+        let fresh = site.handoff.as_ref().filter(|h| h.wrap_id.is_some() && h.wrap_id == p.wrap_id);
+        if let (true, None, Some(h)) = (p.compact_due, p.compacted_at, fresh) {
+            d.reason = format!("{}; the mod compacts with the handoff", d.reason);
+            d.action = Action::Compact;
+            d.text = Some(h.instructions.clone());
+        }
         return Some(d);
     }
+    // Compacted, and the resume never reported: the mod that compacted is
+    // gone, since a live one reports the resume before it lets another
+    // check run. Whether its resume went in cannot be told, so the relay
+    // stops and the operator gets the handoff, rather than a second
+    // generation starting on a guess.
+    //
+    // References:
+    // - ADR-417 item 4: a resume that does not go in stops the relay.
     if p.compacted_at.is_some() {
-        return Some(Decision::new(cfg, p, true, "compacted", "compacted after the wrap; waiting for the resume to go in"));
+        let text = site.handoff.as_ref().filter(|h| h.wrap_id.is_some() && h.wrap_id == p.wrap_id).map(|h| h.text.clone());
+        let why = "the conversation was compacted after the wrap and the resume never went in (the mod reloaded or the session restarted)".to_string();
+        let mut d = stop(state, cfg, site, "resume lost", why, false, now);
+        d.text = text;
+        return Some(d);
     }
     // A `/wrap` whose skill saw relay on, judged once relay is off: the
-    // wrap stands as a handoff-mode one.
+    // wrap stands as a handoff-mode one, and its id is the session's last.
     if p.trigger.as_deref() == Some("wrap") && !cfg.relay {
         let p = &mut state.policy;
+        if let Some(m) = p.marker.as_deref().and_then(Marker::parse) {
+            p.last_wrap_id = Some(m.wrap);
+        }
         p.relay = false;
         p.marker = None;
         p.trigger = None;
@@ -1457,8 +1518,10 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
     } else {
         None
     };
-    state.policy.compacted_at = Some(now);
+    // The compaction is recorded once the mod reports it ran ([`compacted`]):
+    // a turn that starts first defers it, and the next check asks again.
     if let Some((short, why)) = ended {
+        state.policy.compact_due = true;
         let mut d = stop(state, cfg, site, &short, why, true, now);
         d.action = Action::Compact;
         d.text = Some(handoff.instructions);

@@ -33,6 +33,7 @@ fn site_with(id: Option<&str>) -> Site {
             path: PathBuf::from(HANDOFF),
             wrap_id: id.map(str::to_string),
             instructions: format!("Summarize this session as the handoff below; keep its TASKS and DO NEXT whole.\n\n2026-10-12 e6bbfbdd wrap={}", id.unwrap_or("none")),
+            text: format!("2026-10-12 e6bbfbdd wrap={}\nContinue the demo.\n\nDO NEXT — start #1.", id.unwrap_or("none")),
         }),
         ..site()
     }
@@ -288,6 +289,95 @@ fn a_slash_wrap_s_marker_is_a_wrap_of_its_own() {
     let d = s.check_at(&cfg(), Gate::Off, &site_with(Some(id)), MONDAY + 10 * MIN);
     assert_eq!(d.action, Action::None);
     assert!(!s.state.policy.relay);
+    // Its id is still the session's last wrap's, for the PreCompact hook.
+    assert_eq!(s.state.policy.last_wrap_id.as_deref(), Some(id));
+}
+
+/// A handoff-mode wrap records its id too (`attend keepwarm wrap-id
+/// --record`), so a relay wrap's id does not outlive a later `/wrap
+/// handoff` as the session's last.
+///
+/// References:
+/// - ADR-417 item 3: the PreCompact hook asks attend for the last wrap's id.
+#[test]
+fn a_handoff_mode_wrap_records_its_id_over_a_relay_wrap_s() {
+    let mut s = Session::new(MONDAY, 300_000);
+    let a = "20261012T0010Z-sid1abcd";
+    s.answer(Some(&marker(None, "none", a)), MONDAY + 10 * MIN);
+    s.check_at(&relay(), Gate::Off, &site_with(Some(a)), MONDAY + 10 * MIN);
+    compacted(&mut s.state.policy, None, MONDAY + 11 * MIN);
+    resumed(&mut s.state.policy, MONDAY + 11 * MIN);
+    reset(&mut s.state.policy, MONDAY + 20 * MIN);
+    assert_eq!(s.state.policy.last_wrap_id.as_deref(), Some(a));
+    let b = "20261012T0030Z-sid1abcd";
+    assert!(record_wrap_id(&mut s.state.policy, b));
+    assert_eq!(s.state.policy.last_wrap_id.as_deref(), Some(b));
+    assert!(!record_wrap_id(&mut s.state.policy, "bad id!"), "only an id of the marker's shape");
+    assert_eq!(s.state.policy.last_wrap_id.as_deref(), Some(b));
+}
+
+/// The compaction is recorded when the mod reports it ran, not when it is
+/// asked for: a check that asked for one and heard no report asks again,
+/// as when a turn started before the mod could compact.
+///
+/// References:
+/// - ADR-417 item 4: a turn between the wrap's answer and the compaction
+///   cancels it, and the next turn's end judges again.
+#[test]
+fn a_compaction_the_mod_did_not_run_is_asked_for_again() {
+    let mut s = Session::new(MONDAY, 700_000);
+    let (_, id) = fill_wrap(&mut s, MONDAY + MIN);
+    s.answer(Some(&marker(None, "none", &id)), MONDAY + 3 * MIN);
+    let first = s.check_at(&relay(), Gate::Off, &site_with(Some(&id)), MONDAY + 3 * MIN);
+    assert_eq!(first.action, Action::Compact);
+    assert_eq!(s.state.policy.compacted_at, None, "asked for, not run");
+    // A turn ran instead; its end judges again.
+    s.turn(MONDAY + 4 * MIN);
+    let again = s.check_at(&relay(), Gate::Off, &site_with(Some(&id)), MONDAY + 5 * MIN);
+    assert_eq!((again.action, again.state), (Action::Compact, "compacted"), "{again:?}");
+    assert_eq!((again.text.as_deref(), again.resume.as_deref()), (first.text.as_deref(), first.resume.as_deref()));
+    compacted(&mut s.state.policy, None, MONDAY + 6 * MIN);
+    assert_eq!(s.state.policy.compacted_at, Some(MONDAY + 6 * MIN));
+    resumed(&mut s.state.policy, MONDAY + 6 * MIN);
+    let r = s.check_at(&relay(), Gate::Off, &site(), MONDAY + 6 * MIN);
+    assert_eq!((r.state, r.relay_count), ("resumed", 1));
+
+    // A stop's compaction is asked for again too, with the reply handed
+    // over once.
+    let mut s = Session::new(MONDAY, 700_000);
+    let (_, id) = fill_wrap(&mut s, MONDAY + MIN);
+    s.answer(Some(&marker(Some("decision"), "none", &id)), MONDAY + 3 * MIN);
+    let first = s.check_at(&relay(), Gate::Off, &site_with(Some(&id)), MONDAY + 3 * MIN);
+    assert_eq!((first.action, first.send_handoff), (Action::Compact, true));
+    s.turn(MONDAY + 4 * MIN);
+    let again = s.check_at(&relay(), Gate::Off, &site_with(Some(&id)), MONDAY + 5 * MIN);
+    assert_eq!((again.action, again.state, again.send_handoff, again.resume.as_deref()), (Action::Compact, "stopped", false, None), "{again:?}");
+    compacted(&mut s.state.policy, None, MONDAY + 6 * MIN);
+    let after = s.check_at(&relay(), Gate::Off, &site_with(Some(&id)), MONDAY + 7 * MIN);
+    assert_eq!((after.action, after.state), (Action::None, "stopped"));
+}
+
+/// A check that finds the conversation compacted after a relay wrap and no
+/// resume reported has lost the mod that compacted (a reload, a restart):
+/// the relay stops and hands the handoff to the operator, once, and
+/// submits no resume it cannot tell went in already.
+///
+/// References:
+/// - ADR-417 item 4: a resume that does not go in stops the relay.
+#[test]
+fn a_compaction_with_no_resume_after_it_stops_and_hands_the_handoff_over() {
+    let mut s = Session::new(MONDAY, 700_000);
+    let (_, id) = fill_wrap(&mut s, MONDAY + MIN);
+    s.answer(Some(&marker(None, "none", &id)), MONDAY + 3 * MIN);
+    s.check_at(&relay(), Gate::Off, &site_with(Some(&id)), MONDAY + 3 * MIN);
+    compacted(&mut s.state.policy, None, MONDAY + 4 * MIN);
+    let d = s.check_at(&relay(), Gate::Off, &site_with(Some(&id)), MONDAY + 5 * MIN);
+    assert_eq!((d.action, d.state, d.relay_stop.as_deref(), d.send_handoff), (Action::None, "stopped", Some("resume lost"), true), "{d:?}");
+    assert_eq!(d.resume, None);
+    assert_eq!(d.text.as_deref(), Some(format!("2026-10-12 e6bbfbdd wrap={id}\nContinue the demo.\n\nDO NEXT — start #1.").as_str()), "the handoff, to send");
+    assert!(d.reason.contains("the resume never went in"), "{}", d.reason);
+    let again = s.check_at(&relay(), Gate::Off, &site_with(Some(&id)), MONDAY + 6 * MIN);
+    assert_eq!((again.state, again.send_handoff), ("stopped", false));
 }
 
 #[test]

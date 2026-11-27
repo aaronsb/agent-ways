@@ -765,7 +765,13 @@ pub enum KeepwarmCmd {
     /// Print the id of this session's last recorded wrap, or nothing and
     /// exit 1 when none is recorded. `ways hook pre-compact` reads it to
     /// tell whether .claude/handoff.wrap.md is fresh
-    WrapId,
+    WrapId {
+        /// Record ID as this session's last wrap instead: the wrap skill
+        /// names a handoff-mode wrap's id this way (a relay wrap's id comes
+        /// from its marker)
+        #[arg(long, value_name = "ID")]
+        record: Option<String>,
+    },
 }
 
 #[derive(Args, Clone, Debug, Default)]

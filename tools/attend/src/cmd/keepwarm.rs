@@ -138,7 +138,17 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 eprintln!("keepwarm: no relay has run since the operator's last prompt; nothing to stop");
             }
         }
-        KeepwarmCmd::WrapId => match read_ledger(&dir, sid).and_then(|l| l.policy.last_wrap_id) {
+        KeepwarmCmd::WrapId { record: Some(id) } => {
+            let mut took = false;
+            if !update_policy(&dir, sid, |p| took = policy::record_wrap_id(p, id.trim())) {
+                std::process::exit(1);
+            }
+            if !took {
+                eprintln!("keepwarm: {id:?} is no wrap id (8 to 64 letters, digits and -); nothing recorded");
+                std::process::exit(2);
+            }
+        }
+        KeepwarmCmd::WrapId { record: None } => match read_ledger(&dir, sid).and_then(|l| l.policy.last_wrap_id) {
             Some(id) => println!("{id}"),
             None => std::process::exit(1),
         },
@@ -303,9 +313,9 @@ fn site(ident: &attend_presence::session::SessionIdentity) -> Site {
 }
 
 /// The repository's handoff file under `project`, as the relay judges it:
-/// its path, the wrap id on its first line, and the compaction instructions
-/// built from it. `None` outside a repository or where the file cannot be
-/// read.
+/// its path, the wrap id on its first line, the compaction instructions
+/// built from it, and its text. `None` outside a repository or where the
+/// file cannot be read.
 ///
 /// References:
 /// - ADR-417 item 4: the relay compacts with the handoff only when it is fresh.
@@ -314,7 +324,12 @@ fn read_handoff(project: &str) -> Option<Handoff> {
     let root = handoff::repo_root(Path::new(project))?;
     let path = handoff::path(&root);
     let text = std::fs::read_to_string(&path).ok()?;
-    Some(Handoff { wrap_id: handoff::wrap_id_of(&text).map(str::to_string), instructions: handoff::instructions(&text, &path), path })
+    Some(Handoff {
+        wrap_id: handoff::wrap_id_of(&text).map(str::to_string),
+        instructions: handoff::instructions(&text, &path),
+        text: text.trim_end().to_string(),
+        path,
+    })
 }
 
 /// The mods.attend settings for the policy check: a read kept beside the
@@ -480,8 +495,8 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     let _lock = lock_session(&dir, sid).ok();
     let ledger = read_ledger(&dir, sid);
     // The handoff is read only while a relay wrap's marker waits to be
-    // judged, so a check every minute runs no git.
-    if ledger.as_ref().is_some_and(|l| l.policy.relay && l.policy.marker.is_some() && l.policy.compacted_at.is_none() && l.policy.stopped.is_none()) {
+    // judged or compacted on, so a check every minute runs no git.
+    if ledger.as_ref().is_some_and(|l| l.policy.wants_handoff()) {
         site.handoff = read_handoff(&ident.origin_path);
     }
     let mut state = State::resume(ledger);
