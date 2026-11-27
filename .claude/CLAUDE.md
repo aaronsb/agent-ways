@@ -32,21 +32,32 @@ A local build for this host takes about a minute. A tagged release takes a bump 
 
 ## Gates
 
-Run these before the push. The cargo workspace is `tools/Cargo.toml`.
+Gates come in two kinds. A focal gate checks what one change can reach, and the worker runs it on the branch. The ambient gate is one full pass over the combined tree where branches come together, and it runs once per tree. The gates way, code/testing/gates(softwaredev), defines both, and code/testing/gates/attention(softwaredev) covers how the worker picks the focal set. The cargo workspace is `tools/Cargo.toml`.
+
+### Focal gates
+
+Before the push, run each row below that the change reaches. Leave a row the change does not reach unrun, and record it in the gates way's discovered state with the reason "the change does not reach it".
 
 | Command | Checks |
 |---|---|
-| `make lint` | clippy over the workspace, `-D warnings` |
-| `cargo test --manifest-path tools/Cargo.toml -p <crate>` | the crate you changed; `make test-unit` runs every crate |
-| `cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features` | attend without its sensors, as CI runs it |
-| `cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features --features sensor-keepwarm` | attend with keepwarm only, as CI runs it |
-| `make test-hooks` | the hook scripts and the Makefile targets |
-| `CLAUDE_CODE_TYPES=<path>/claude-code.d.ts make test-plugins` | the mods; the type check needs the `claude-code.d.ts` that Claude Code bundles, and skips without it |
+| `cargo test --manifest-path tools/Cargo.toml -p <crate>` | the crate you changed |
+| `cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features` | attend without its sensors, as CI runs it, when attend changes |
+| `cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features --features sensor-keepwarm` | attend with keepwarm only, as CI runs it, when attend changes |
+| `make lint` | clippy over the workspace, `-D warnings`, when Rust code changes |
+| `make test-hooks` | the hook scripts and the Makefile targets, when either changes |
+| `CLAUDE_CODE_TYPES=<path>/claude-code.d.ts make test-plugins` | the mods, when a mod changes; the type check needs the `claude-code.d.ts` that Claude Code bundles, and skips without it |
 | `ways author lint <way-dir>`, `scripts/check-register.sh` | a changed way |
-| `reuse lint` | every file carries copyright and license information (REUSE 3.3); add a header to a new source file with `scripts/spdx-header FILE`, or `--license MIT` for the ADR and doc tooling |
 | `docs/scripts/adr cite --check --since origin/main` | ADR citations resolve and sit in a References block on the lines you changed, as CI's citation-placement job runs it |
+| `reuse lint` | every file carries copyright and license information (REUSE 3.3); add a header to a new source file with `scripts/spdx-header FILE`, or `--license MIT` for the ADR and doc tooling |
 | `scripts/check-portability.sh` | line endings, shebangs and hardcoded home paths in shell scripts and fixtures, as CI's portability job runs it |
-| `make test` | lint, smoke, unit, simulation, ADR tool, statusline and hook suites |
+
+### Ambient gate
+
+| Command | Checks |
+|---|---|
+| `make test` | lint, smoke, unit, simulation, ADR tool, statusline and hook suites; `make test-unit` runs every crate |
+
+Run `make test` once per tree: on the combined tree at integration, or leave it to CI. A fix round on a branch does not re-run it. A tree that passed it, locally or in CI, is not tested again until the tree changes (delivery/ci(softwaredev)).
 
 A TUI change gets its scenario script: `tools/ways-cli/shots/verify.sh` or `tools/attend-chat/shots/shots.sh`. The tui-verification way has the procedure.
 

@@ -35,6 +35,9 @@ considered:
     said: "Judgment + count first"
     via: Claude Code session 2026-11-05, question tool, the wip-limits probe
     covers: [wip-limits]
+  - operator: aaronsb
+    said: "we should change the adr"
+    via: "operator, 2026-11-27, in the agent-ways session that ran the ways refactor for #1365"
 status: accepted
 date: 2026-11-05
 deciders:
@@ -93,7 +96,9 @@ Starting a new card while one of yours waits in review or CI is the moment to ch
 
 ### 3. Plans are waves over issues
 
-A plan with more than one card is a parent issue with sub-issues. GitHub's `blockedBy` edges give the serial order, and ADR-180 already brings them into the task list. A wave is the set of ready cards (no open blocker) whose file sets barely overlap. Each card in a wave gets its own worktree and, where delegated, its own agent; the lead merges them one at a time and runs the gates after each merge.
+A plan with more than one card is a parent issue with sub-issues. GitHub's `blockedBy` edges give the serial order, and ADR-180 already brings them into the task list. A wave is the set of ready cards (no open blocker) whose file sets barely overlap. Each card in a wave gets its own worktree and, where delegated, its own agent. The card's worker runs the gates the card can reach, which is focal verification. The lead merges the cards one at a time and does not re-run their gates. One full pass over the combined tree, which is ambient verification, runs once per tree where the cards come together, at the integration branch or the wave candidate, usually in CI.
+
+> Edited 2026-11-27: the operator decided that the lead stops running the gates after each merge. At agent pace, CI's wall-clock time is the longest wait in the loop, so a second run of gates a worker already ran sits on the critical path. Workers run the focal gates their card reaches, the lead watches the streams and does not re-run gates, and one full pass runs per combined tree (code/testing/gates/attention, delivery/ci, subagents/lead). It read: "the lead merges them one at a time and runs the gates after each merge".
 
 A sweep (prose, strings, formatting, renames across many areas) runs only after the areas it covers have stopped changing, and fans out one agent per area. Review-bound and release stages run serially.
 
