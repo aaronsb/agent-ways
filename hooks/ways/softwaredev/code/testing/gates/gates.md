@@ -1,5 +1,5 @@
 ---
-description: verification gates before merge, whether the tests and checks actually ran, reporting each gate as executed, discovered, or absent, positive controls for empty results, gate depth by change class
+description: verification gates before merge, whether the tests and checks actually ran, reporting each gate as executed, discovered, or absent, positive controls for empty results, gate depth by change class, focal gates on a branch and the full suite once at integration
 vocabulary: gate gates ci check checks verification verify verified tests ran coverage scanner scan lint pass green ready merge executed discovered absent positive control null result zero findings clean instrument report zero-count three-state uninvoked glob breadth
 commands: (npm|pnpm|yarn)\ test|pytest|cargo\ test|go\ test|make\ test|make\ check
 scope: agent, subagent
@@ -47,6 +47,8 @@ A check you author counts what it examined and fails when that count is zero ins
 
 Escalate one row the moment a local change turns out to touch a shared surface. Run the cheap syntactic gates first and proceed to slower ones only when they pass. A broad battery on a provably local change spends attention and wall clock for nothing.
 
+The table sets focal depth: the gates a change can reach, run on its own branch. The full suite runs once, as ambient verification, on the combined tree where branches come together (code/testing/gates/attention). Record a gate the change does not reach as discovered, with the reason "the change does not reach it".
+
 ## The instrument is the first suspect
 
 When a check and its subject disagree, read the raw source at the cited location before recording the finding. Two contradictory measurements of your own indict the method. A line-oriented scan over a multi-line construct produces a number that looks like evidence. A tool that produced a false positive is fixed or deleted in the same change that retracts its output. A discredited tool left in place will be quoted again.
@@ -63,7 +65,7 @@ One line per gate, state first:
 - Linter: executed, `make lint`, PASS (2 warnings, both in docs/)
 - Unit tests: executed, `cargo test`, PASS (47 cases)
 - Secret scan: executed, `gitleaks detect`, 0 findings, control fixture detected
-- End-to-end: discovered, left unrun, suite exists under e2e/, out of scope for this change
+- End-to-end: discovered, left unrun, suite exists under e2e/, the change does not reach it
 - Smoke test: absent (2026-09-09), no deploy target yet
 ```
 
@@ -75,7 +77,7 @@ Close the report with what was deliberately left unverified, blocked distinguish
 |---|---|
 | "All gates green, I just disabled the flaky one" | Fix the flake or record the gate as discovered with the reason. Silent disabling is a hidden absent. |
 | "Tests pass locally, CI can wait" | Record where it ran. A gate that ran nowhere is a hope. |
-| "No time for the full suite this round" | Merge a smaller change. Depth follows the change class. |
+| "No time for the full suite this round" | Run the focal gates for this change. The full suite runs once, at integration. |
 | "The scan came back clean" | Clean against what? Without a control the zero is unread. |
 | "The check was wrong, so I fixed the file it reads" | The declaration now records a bug. Fix the instrument. |
 | "The step exited zero" | An exit code says a process ended. Did its assertions run? |
@@ -85,7 +87,9 @@ Close the report with what was deliberately left unverified, blocked distinguish
 ## See Also
 
 - code/testing/gates/assertions(softwaredev) — whether an executed assertion can have proved anything
-- code/testing/gates/delegated-runs(softwaredev) — the diff of a delegated run, piloting a bulk run
+- code/testing/gates/delegated-runs(softwaredev) — the files a delegated run changed, piloting a bulk run
+- code/testing/gates/attention(softwaredev) — child: focal gates on the branch, the full suite once per combined tree, an honest suite
 - code/testing(softwaredev) — parent: what to cover and what to assert
 - delivery/merge(softwaredev) — review depth and gate depth are chosen together
+- delivery/ci(softwaredev) — one run per tree, and checks still waiting for a runner
 - environment/recovery(softwaredev) — a gate red twice means the increment is wrong-sized
