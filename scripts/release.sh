@@ -12,7 +12,8 @@
 #   tag   — AFTER that PR merges to main: tag `<comp>-vX.Y.Z` on main for every
 #           listed component and push the tags. Pushing a tag is the one outward
 #           step — CI (build-<comp>.yml) then builds every platform and creates
-#           the GitHub Release.
+#           the GitHub Release; the darwin-arm64 binary attaches to it when its
+#           build completes.
 #
 # Usage:
 #   scripts/release.sh bump  <list> [patch|minor|major]

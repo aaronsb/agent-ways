@@ -190,6 +190,38 @@ JSON
   FAKE_GH_FAIL=api prebuilt_install ways latest "$FAKE/out-noapi" "$REPO" "make ways" >/dev/null 2>"$FAKE/err"
   check "an unreachable API fails the install" "1" "$?"
 
+  # The newest release still waits for this platform's binary, which a
+  # best-effort build attaches later: a request for the latest takes the
+  # newest release that carries it.
+  cat > "$FAKE/releases-page-1.json" <<JSON
+[
+  {"tag_name": "ways-v1.13.0", "draft": false, "prerelease": false, "assets": [{"name": "ways-linux-other"}]},
+  {"tag_name": "ways-v1.10.0", "draft": false, "prerelease": false, "assets": [{"name": "$bin"}, {"name": "checksums.txt"}]}
+]
+JSON
+  rm -f "$FAKE/releases-page-2.json"
+  printf '%s\n' ways-linux-other checksums.txt > "$FAKE/assets/ways-v1.13.0"
+  out="$FAKE/out-pending"
+  got=$(prebuilt_install ways latest "$out" "$REPO" "make ways" 2>"$FAKE/err")
+  check "a release without this platform's binary yet installs the newest that has it" "$out/ways:ways 1.10.0" \
+    "$got:$("$out/ways" --version 2>/dev/null)"
+  check "and says which release it used" "yes" "$(yn grep -qx "ways-v1.13.0 has no $platform binary; using ways-v1.10.0." "$FAKE/err")"
+  check "and prints the release it installs, not the newest" "Release:  ways-v1.10.0" "$(grep '^Release:' "$FAKE/err")"
+  out="$FAKE/out-pending-old"
+  mkdir -p "$out"
+  printf '#!/bin/sh\necho "ways 1.2.0 (old)"\n' > "$out/ways"
+  chmod +x "$out/ways"
+  prebuilt_install ways latest "$out" "$REPO" "make ways" >/dev/null 2>"$FAKE/err"
+  check "a binary replaced on the fallback names the release it installs" "Replacing ways 1.2.0 with ways-v1.10.0" \
+    "$(grep '^Replacing' "$FAKE/err")"
+  out="$FAKE/out-pending"
+  : > "$FAKE/calls"
+  got=$(prebuilt_install ways latest "$out" "$REPO" "make ways" 2>/dev/null)
+  check "a binary at that release's version is kept" "$out/ways" "$got"
+  check "and nothing is downloaded" "no" "$(yn grep -q '^gh release download' "$FAKE/calls")"
+  prebuilt_install ways ways-v1.13.0 "$FAKE/out-named" "$REPO" "make ways" >/dev/null 2>&1
+  check "a named tag without this platform's binary still fails" "1" "$?"
+
   ge() { if version_at_least "$1" "$2"; then echo yes; else echo no; fi; }
   check "version_at_least orders numeric cores" "yes:no:yes" "$(ge 0.10.0 0.9.0):$(ge 0.9.0 0.10.0):$(ge 1.2.0 1.2.0)"
   check "a pre-release is behind its release" "no:yes" "$(ge 1.2.0-rc1 1.2.0):$(ge 1.2.0 1.2.0-rc1)"
@@ -212,6 +244,7 @@ status=$?
 #   missing-line    installs unverified when checksums.txt lacks the binary
 #   shared-stage    stages every call in one directory
 #   copy-install    copies over the target instead of renaming
+#   no-fallback     fails a latest release that lacks this platform's binary
 mutate() {  # name sed-expression...
   local name="$1"; shift
   local args=() e
@@ -222,7 +255,7 @@ mutate() {  # name sed-expression...
     echo "  FAIL: mutant $name left the library unchanged; update its expression"; status=1
   fi
 }
-mutants=(first-match no-mismatch skip-checksums missing-line shared-stage copy-install)
+mutants=(first-match no-mismatch skip-checksums missing-line shared-stage copy-install no-fallback)
 mutate first-match 's/sort -V | tail -1/head -1/'
 mutate no-mismatch 's/if \[\[ "$actual" != "$expected" \]\]; then/if false; then/'
 mutate skip-checksums "s/if grep -qx 'checksums.txt' <<<\"\$assets\"; then/if false; then/"
@@ -230,6 +263,7 @@ mutate missing-line 's/if \[\[ -z "$expected" \]\]; then/if false; then/' \
   's/if \[\[ "$actual" != "$expected" \]\]; then/if [[ -n "$expected" \&\& "$actual" != "$expected" ]]; then/'
 mutate shared-stage 's|stage=$(mktemp -d "${out_dir}/.${comp}.XXXXXX")|stage="${out_dir}/.shared.stage"; mkdir -p "$stage"|'
 mutate copy-install 's|mv -f "$stage/$comp" "$out_file"|cp "$stage/$comp" "$out_file"|'
+mutate no-fallback 's/if \[\[ "$requested" == latest \]\]/if false/'
 
 for m in "${mutants[@]}"; do
   [[ -f "$WORK/mutant-$m.sh" ]] || continue

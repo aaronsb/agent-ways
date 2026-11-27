@@ -5,6 +5,18 @@ name: Build a component
 # checksums.txt, and on a <component>-v* tag publish the GitHub Release.
 # The callers own their triggers, so each component builds on its own paths
 # and releases on its own tags.
+#
+# The platforms split in two. The gating platforms, and the tests on Linux
+# runners, must pass before the release is published. The best-effort
+# platforms (darwin-arm64 by default) and the tests on macOS runners do not
+# gate it: a best-effort binary attaches to the published release once its
+# build and the macOS tests pass, and a failed or never-scheduled leg leaves
+# the release as it is. The macOS runner queue can hold a job for hours.
+#
+#   plan -> build ------------+-> collect -> release -+-> attach-best-effort
+#        -> test -------------'                       |
+#        -> build-best-effort ------------------------+
+#        -> test-best-effort -------------------------'
 
 on:
   workflow_call:
@@ -35,22 +47,62 @@ on:
         description: Runners for the test job, as a JSON list
         type: string
         default: '["ubuntu-latest"]'
+      best-effort-platforms:
+        description: Platforms, as a JSON list, whose builds do not gate the release; each attaches to it when its build completes
+        type: string
+        default: '["darwin-arm64"]'
       release-notes:
         description: Body of the GitHub Release
         type: string
         required: true
 
 jobs:
+  # Split the build matrix and the test runners into the gating set and the
+  # best-effort set, and name each set's artifacts as a download pattern.
+  plan:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      gating: ${{ steps.split.outputs.gating }}
+      gating_pattern: ${{ steps.split.outputs.gating_pattern }}
+      best_effort: ${{ steps.split.outputs.best_effort }}
+      best_effort_pattern: ${{ steps.split.outputs.best_effort_pattern }}
+      test_gating: ${{ steps.split.outputs.test_gating }}
+      test_best_effort: ${{ steps.split.outputs.test_best_effort }}
+    steps:
+      - id: split
+        env:
+          COMPONENT: ${{ inputs.component }}
+          MATRIX: ${{ inputs.matrix }}
+          BEST_EFFORT: ${{ inputs.best-effort-platforms }}
+          TEST_OS: ${{ inputs.test-os }}
+        run: |
+          # A brace pattern needs two names or more: download-artifact reads
+          # `{a}` as a literal name.
+          pattern='map(env.COMPONENT + "-" + .platform) | if length == 1 then .[0] else "{" + join(",") + "}" end'
+          gating=$(jq -c --argjson be "$BEST_EFFORT" '[.[] | select(.platform | IN($be[]) | not)]' <<<"$MATRIX")
+          best_effort=$(jq -c --argjson be "$BEST_EFFORT" '[.[] | select(.platform | IN($be[]))]' <<<"$MATRIX")
+          {
+            echo "gating=$gating"
+            echo "gating_pattern=$(jq -r "$pattern" <<<"$gating")"
+            echo "best_effort=$best_effort"
+            echo "best_effort_pattern=$(jq -r "$pattern" <<<"$best_effort")"
+            echo "test_gating=$(jq -c '[.[] | select(startswith("macos") | not)]' <<<"$TEST_OS")"
+            echo "test_best_effort=$(jq -c '[.[] | select(startswith("macos"))]' <<<"$TEST_OS")"
+          } | tee -a "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
+    if: needs.plan.outputs.gating != '[]'
     strategy:
       matrix:
-        include: ${{ fromJSON(inputs.matrix) }}
+        include: ${{ fromJSON(needs.plan.outputs.gating) }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-    env:
+    env: &build-env
       BIN: dist/${{ inputs.component }}-${{ matrix.platform }}
-    steps:
+    steps: &build-steps
       - uses: actions/checkout@v5
         with:
           submodules: ${{ inputs.kind == 'cmake' && 'recursive' || 'false' }}
@@ -127,38 +179,71 @@ jobs:
           name: ${{ inputs.component }}-${{ matrix.platform }}
           path: ${{ env.BIN }}
 
-  test:
-    if: inputs.test != ''
+  # The build steps again, through the YAML anchors. A failed leg shows on the
+  # run; only attach-best-effort waits on this job.
+  build-best-effort:
+    needs: plan
+    if: needs.plan.outputs.best_effort != '[]'
     strategy:
+      fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.test-os) }}
+        include: ${{ fromJSON(needs.plan.outputs.best_effort) }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-    steps:
+    env: *build-env
+    steps: *build-steps
+
+  test:
+    needs: plan
+    if: inputs.test != '' && needs.plan.outputs.test_gating != '[]'
+    strategy:
+      matrix:
+        os: ${{ fromJSON(needs.plan.outputs.test_gating) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps: &test-steps
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Run tests
         run: ${{ inputs.test }}
 
-  # Runs when the test job is skipped too (a component without tests). A
-  # cancelled build leg is neither cancelled() nor failure() at the workflow
-  # level, so the gate reads each result: every platform must have built.
-  # The leading !cancelled() replaces the implicit success(), which is false
-  # when test was skipped and would skip collect for a component with no tests.
+  # The tests on macOS runners. Only attach-best-effort waits on this job, so
+  # a failure keeps the darwin-arm64 binary off the release and does not hold
+  # the release itself.
+  test-best-effort:
+    needs: plan
+    if: inputs.test != '' && needs.plan.outputs.test_best_effort != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.plan.outputs.test_best_effort) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps: *test-steps
+
+  # Runs when the test job is skipped too (a component without tests, or
+  # with macOS test runners only). A cancelled build leg is neither
+  # cancelled() nor failure() at the workflow level, so the gate reads each
+  # result: every gating platform must have built. The leading !cancelled()
+  # replaces the implicit success(), which is false when test was skipped
+  # and would skip collect for a component with no tests.
   collect:
-    needs: [build, test]
+    needs: [plan, build, test]
     if: ${{ !cancelled() && needs.build.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      # Platform binaries only: a rerun of all jobs would otherwise merge an
+      # The gating platforms' binaries only. A best-effort binary that built
+      # early attaches later, and a rerun of all jobs would otherwise merge an
       # earlier attempt's -all-platforms artifact over this attempt's builds.
       - uses: actions/download-artifact@v5
         with:
           path: binaries
-          pattern: ${{ inputs.component }}-{linux,darwin}-*
+          pattern: ${{ needs.plan.outputs.gating_pattern }}
           merge-multiple: true
 
       - name: Generate checksums
@@ -182,10 +267,24 @@ jobs:
     permissions:
       contents: write
     steps:
+      - &checkout-merge-script
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/ci-merge-checksums.sh
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v5
         with:
           name: ${{ inputs.component }}-all-platforms
           path: binaries
+
+      # A release that exists already can hold a best-effort binary and its
+      # checksum line. The upload replaces checksums.txt, so the script keeps
+      # the old lines for the files the upload does not replace.
+      - name: Merge with the release's checksums.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-merge-checksums.sh "${GITHUB_REF#refs/tags/}" binaries
 
       - name: Create GitHub Release
         env:
@@ -205,3 +304,29 @@ jobs:
             --title "$COMPONENT ${TAG#"$COMPONENT"-}" \
             --notes "$NOTES" \
             binaries/*
+
+  # A best-effort binary joins the release this run published: upload it and
+  # add its line to the release's checksums.txt. The macOS runners are Apple
+  # Silicon, so a failed macOS test keeps the darwin-arm64 binary off the
+  # release; waiting for those tests delays the attach and never holds the
+  # release. A run of the workflow from before this job existed never
+  # attaches anything.
+  attach-best-effort:
+    needs: [plan, release, build-best-effort, test-best-effort]
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.build-best-effort.result == 'success' && (needs.test-best-effort.result == 'success' || needs.test-best-effort.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - *checkout-merge-script
+
+      - uses: actions/download-artifact@v5
+        with:
+          path: binaries
+          pattern: ${{ needs.plan.outputs.best_effort_pattern }}
+          merge-multiple: true
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-merge-checksums.sh --upload "${GITHUB_REF#refs/tags/}" binaries
