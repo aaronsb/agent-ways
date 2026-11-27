@@ -151,6 +151,9 @@ type World = {
   oldAttend?: boolean
   /** A hook skips `$.session.compact` with this reason. */
   compactFails?: string
+  /** Holds each `$.session.compact` in flight until it settles; one that
+   *  settles while a main-loop turn runs rejects, as Claude Code's does. */
+  holdCompact?: Promise<void>
   /** `autoCompactThreshold` in the usage breakdown; absent leaves it out. */
   nativeAt?: number
   /** The skill listing the usage breakdown carries; absent leaves it out. */
@@ -276,8 +279,16 @@ function host(on: On, world: World) {
     specs[e.name] = e as never
     return { value: { tool: `mcp__attend__${e.name}` } }
   })
-  on('turn.start', ($, e) => ({ turnId: e.turnId }))
-  on('turn.complete', () => ({ text: '' }))
+  // The main-loop turns running, for a compaction, which rejects while one runs.
+  const turns = new Set<string>()
+  on('turn.start', ($, e) => {
+    if (e.agentId === undefined) turns.add(e.turnId)
+    return { turnId: e.turnId }
+  })
+  on('turn.complete', ($, e) => {
+    turns.delete(e.turnId)
+    return { text: '' }
+  })
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     return h(Text, {}, 'engine-band') as never
@@ -374,7 +385,12 @@ function host(on: On, world: World) {
     return { value: undefined } as never
   })
   const compacts: string[] = []
-  on('session.compact', ($, e) => {
+  on('session.compact', async ($, e, next) => {
+    const held = world.holdCompact
+    if (held) await held
+    // A hook that throws is skipped, and the kit's core then rejects the
+    // call: the compaction rejects, as Claude Code's does while a turn runs.
+    if (turns.size > 0) throw new Error('a turn is running')
     if (world.compactFails) return { skip: world.compactFails } as never
     compacts.push((e as { instructions?: string }).instructions ?? '')
     return { messages: [SUMMARY] } as never
@@ -2756,18 +2772,72 @@ describe('relay mode', () => {
     expect(h.logs.some(l => l.includes("the relay's compaction failed"))).toBe(true)
   })
 
-  test('a turn that starts between the wrap\'s answer and the compaction defers it to that turn\'s end', async ($, on) => {
+  // attend records the compaction only once the mod reports it ran, so a
+  // check after a deferred one judges the marker again and answers the
+  // same compact (tools/attend/tests/keepwarm_check.rs,
+  // a_deferred_relay_compaction_is_asked_for_again_and_a_lost_resume_stops).
+  test('a turn that starts while attend judges the wrap defers the compaction to that turn\'s end, which judges again', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: RELAY, autocompact: false, policy: [wrap, compact, relayed({ state: 'resumed', relay_count: 1 })] })
+    let release = () => {}
+    const world: World = { config: RELAY, autocompact: false, policy: [wrap, compact, compact, relayed({ state: 'resumed', relay_count: 1 })] }
+    const h = host(on, world)
     await started($, clock)
     await turn($, 'tw', framedPluginPrompt('attend', WRAP), MARKER)
-    await $.turn.start({ text: 'a peer message', turnId: 'tp' } as never)
+    world.hold = new Promise<void>(r => (release = r))
+    // The check after the marker is in flight, held, when the turn starts.
+    await clock.advance(1_500)
+    await $.turn.start({ text: framedPluginPrompt('attend', 'a peer message'), turnId: 'tp' } as never)
+    release()
+    world.hold = undefined
+    await clock.advance(2_000)
+    expect(policyChecks(h).length).toBe(2)
+    expect(h.compacts).toEqual([])
+    expect(h.ran('keepwarm compacted')).toBe(false)
+    await $.turn.complete({ turnId: 'tp', reason: 'answer', answer: 'noted', durationMs: 1, isAborted: false } as never)
+    await clock.advance(2_000)
+    expect(policyChecks(h).length).toBe(3)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(h.argvs.filter(a => a[2] === 'compacted')).toEqual([['attend', 'keepwarm', 'compacted']])
+    expect(h.submitted).toEqual([WRAP, RESUME])
+  })
+
+  test('a turn that starts between attend\'s compact and the compaction defers it to that turn\'s end, with no failure reported', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    let release = () => {}
+    const world: World = { config: RELAY, autocompact: false, policy: [wrap, compact, compact, relayed({ state: 'resumed', relay_count: 1 })] }
+    const h = host(on, world)
+    await started($, clock)
+    await turn($, 'tw', framedPluginPrompt('attend', WRAP), MARKER)
+    world.holdCompact = new Promise<void>(r => (release = r))
+    await clock.advance(1_500)
+    expect(policyChecks(h).length).toBe(2)
+    await $.turn.start({ text: framedPluginPrompt('attend', 'a peer message'), turnId: 'tp' } as never)
+    release()
+    world.holdCompact = undefined
     await clock.advance(2_000)
     expect(h.compacts).toEqual([])
+    expect(h.ran('keepwarm compacted')).toBe(false)
+    expect(h.logs.some(l => l.includes("the relay's compaction waits for the turn that started"))).toBe(true)
     await $.turn.complete({ turnId: 'tp', reason: 'answer', answer: 'noted', durationMs: 1, isAborted: false } as never)
     await clock.advance(2_000)
     expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(h.argvs.filter(a => a[2] === 'compacted')).toEqual([['attend', 'keepwarm', 'compacted']])
     expect(h.submitted).toEqual([WRAP, RESUME])
+  })
+
+  // What the real attend answers when the ledger reads compacted and no
+  // resume was reported (tools/attend/tests/keepwarm_check.rs).
+  test('a reload between the compaction and the resume: attend\'s stop sends the handoff, and nothing resumes', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const text = `2026-11-26 e6bbfbdd wrap=${ID}\nContinue work.\n\nDO NEXT — start.`
+    const handoff = 'handoff: continuation prompt from Chaucer-alpha (agent-ways), wrapped at 07:30 while its operator was away. The relay stopped: the conversation was compacted after the wrap and the resume never went in (the mod reloaded or the session restarted).'
+    const lost = relayed({ state: 'stopped', relay_stop: 'resume lost', send_handoff: true, text, wrap: route({ handoff }) })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [lost, relayed({ state: 'stopped', relay_stop: 'resume lost' })] })
+    await started($, clock)
+    const sends = h.argvs.filter(a => a[1] === 'message' && a[2] === 'send')
+    expect(sends).toEqual([['attend', 'message', 'send', '--to', 'aaron', '--', `${handoff}\n${text}`]])
+    expect(h.compacts).toEqual([])
+    expect(h.submitted).toEqual([])
   })
 
   test('an operator prompt while attend judges the wrap compacts nothing', async ($, on) => {
@@ -2815,12 +2885,47 @@ describe('relay mode', () => {
     expect(h.compacts).toEqual([INSTRUCTIONS])
   })
 
-  test('with relay off a marker is no wrap and nothing is reported', async ($, on) => {
+  test('with relay off a marker is still reported, for its id, and nothing compacts', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { autocompact: false, policy: [decision()] })
     await started($, clock)
     await turn($, 't1', '/wrap', MARKER)
-    expect(h.ran('keepwarm wrapped')).toBe(false)
+    // A skill that read relay on: attend records the wrap's id, and with
+    // relay off by the time it judges, nothing compacts.
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'transcript', '--detail', '', '--marker', MARKER])
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([])
+    expect(h.submitted).toEqual([])
+  })
+
+  // ADR-417 item 1: the relay setting is read when attend judges, not at
+  // session start. attend's decision carries it.
+  test('relay turned off in the project mid-session: a keepalive attend judged with the gate off does not go in once autocompact reads on', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    let release = () => {}
+    const keepalive = decision({ action: 'keepalive', text: 'keepwarm: 50m idle. Reply with one word and no tools.', count: 1, relay: false })
+    const world: World = { config: RELAY, autocompact: false, policy: [keepalive] }
+    world.hold = new Promise<void>(r => (release = r))
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_500)
+    world.autocompact = true
+    release()
+    world.hold = undefined
+    await clock.advance(2_000)
+    expect(policyChecks(h).length).toBe(1)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('relay turned off mid-session: a fill past the threshold no longer asks attend with the fill', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: true, policy: [decision({ policy: false, state: 'off', relay: false, reason: 'autocompact is on' })] })
+    await started($, clock)
+    expect(policyChecks(h).length).toBe(1)
+    await turn($, 't1', 'more work', 'done')
+    await measured($, 190_000)
+    await clock.advance(2_000)
+    expect(policyChecks(h).length).toBe(1)
   })
 
   test('a resumed turn that ends with a stop line stops the relay and its reply goes to the operator', async ($, on) => {

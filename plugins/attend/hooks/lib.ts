@@ -309,6 +309,14 @@ export type Keepalive = {
   /** Moves at each operator prompt: a resume whose compaction an operator
    *  prompt followed is not submitted. */
   operatorEpoch: number
+  /** Relay mode as attend's last decision read it, from the project's
+   *  setting at that check; the mod's settings at session start until
+   *  attend first answers.
+   *
+   *  References:
+   *  - ADR-417 item 1: the relay setting is read when a wrap starts, not
+   *    at session start. */
+  relay: boolean
 }
 
 // ── tools ────────────────────────────────────────────────────────────────
