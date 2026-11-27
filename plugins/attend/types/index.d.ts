@@ -24,7 +24,7 @@ export type KeepaliveRow = {
   /** A dormant session draws the segment from its first keepalive until
    *  the operator's next prompt. */
   isShown: boolean
-  /** Relays since the operator's last prompt, of `maxRelays` (ADR-417). */
+  /** Relays since the operator's last prompt, of `maxRelays`. */
   relayCount: number
   maxRelays: number
   /** Why the relay stopped, in a few words; null while it runs. */

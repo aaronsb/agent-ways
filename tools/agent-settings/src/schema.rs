@@ -370,10 +370,13 @@ pub struct KeySpec {
     /// typed `*` is the pattern and binds nothing.
     pub star_instance: bool,
     /// The path the key had before a rename, read during the rename's
-    /// dual-read period (ADR-417 item 1). In each layer the key's own path
-    /// wins and this one is read where the layer does not set it, so an
-    /// old name in a higher layer still beats a new name in a lower one. A
-    /// file holding it loads, checked as this key. Fixed names only.
+    /// dual-read period. In each layer the key's own path wins and this one
+    /// is read where the layer does not set it, so an old name in a higher
+    /// layer still beats a new name in a lower one. A file holding it loads,
+    /// checked as this key. Fixed names only.
+    ///
+    /// References:
+    /// - ADR-417 item 1: a renamed key is read under both names for a while.
     pub was: Option<&'static [&'static str]>,
 }
 

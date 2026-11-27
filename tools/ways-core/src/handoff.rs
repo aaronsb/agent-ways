@@ -3,7 +3,7 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! The wrap's handoff file, `.claude/handoff.wrap.md` at the repository
-//! root (ADR-165), as compaction instructions (ADR-417 items 3 and 4).
+//! root, as compaction instructions.
 //! attend's check builds a relay compaction's instructions from it, and
 //! `ways hook pre-compact` builds a native compaction's from it, so both
 //! read freshness and cut the text the same way.
@@ -12,6 +12,11 @@
 //! file's first line. A handoff is fresh for a wrap when that line carries
 //! the wrap's id; where no wrap id is known, when it names today's date and
 //! the current HEAD.
+//!
+//! References:
+//! - ADR-165: the wrap writes its handoff to `.claude/handoff.wrap.md`.
+//! - ADR-417 items 3 and 4: a native compaction and a relay compaction both
+//!   take their instructions from the handoff.
 
 use std::path::{Path, PathBuf};
 

@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! Relay mode (ADR-417) over fixed ledgers and a fixed clock: the fill
-//! path, the marker, the compaction and the resume, the bounds and the
-//! stops. Each test steps the judgment as the mod's checks would, and
-//! reports what the mod would report between them.
+//! Relay mode over fixed ledgers and a fixed clock: the fill path, the
+//! marker, the compaction and the resume, the bounds and the stops. Each
+//! test steps the judgment as the mod's checks would, and reports what the
+//! mod would report between them.
+//!
+//! References:
+//! - ADR-417: relay mode follows a wrap with a compaction and a resume.
 
 use super::*;
 

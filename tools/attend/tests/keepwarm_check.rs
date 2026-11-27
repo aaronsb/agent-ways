@@ -770,11 +770,15 @@ fn a_check_prunes_other_sessions_stale_files() {
     drop(held);
 }
 
-/// Relay mode through the CLI (ADR-417 items 2 to 5): a fill past the
-/// threshold sends a wrap naming its id; the mod reports the wrap's marker;
-/// with the handoff the skill wrote, the check asks for a compaction with
-/// the handoff and a resume naming the file; `resumed` counts the relay;
-/// `wrap-id` gives the id to the PreCompact hook.
+/// Relay mode through the CLI: a fill past the threshold sends a wrap
+/// naming its id; the mod reports the wrap's marker; with the handoff the
+/// skill wrote, the check asks for a compaction with the handoff and a
+/// resume naming the file; `resumed` counts the relay; `wrap-id` gives the
+/// id to the PreCompact hook.
+///
+/// References:
+/// - ADR-417 items 2 to 5: the relay's fill trigger, compaction, resume and
+///   count.
 #[test]
 fn a_relay_wraps_on_fill_compacts_with_the_handoff_and_resumes() {
     let w = Warm::new("ka-relay");

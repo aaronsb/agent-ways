@@ -180,9 +180,12 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     assert!(c.status().contains("another writer holds it") && c.status().contains("nothing written"), "{}", c.status());
     assert!(!read(&file).contains("listening"), "{}", read(&file));
 
-    // The continuity policy's keys (ADR-414 item 8, ADR-417 item 1): listed
-    // with the rest; a choice is picked, a number or a list is typed in an
-    // entry dialog.
+    // The continuity policy's keys are listed with the rest; a choice is
+    // picked, a number or a list is typed in an entry dialog.
+    //
+    // References:
+    // - ADR-414 item 8: the keepalive policy's keys are settings a project sets.
+    // - ADR-417 item 1: those keys move under `mods.attend.continuity`.
     open_settings(&mut c);
     let s = shown(&mut c);
     for line in [

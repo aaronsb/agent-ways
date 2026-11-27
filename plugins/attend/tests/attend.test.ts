@@ -2670,8 +2670,11 @@ describe('keepalive policy', () => {
   })
 })
 
-// Relay mode (ADR-417): the fill trigger, the marker, the compaction with
-// the handoff, the resume, the stops, and /goal.
+// Relay mode: the fill trigger, the marker, the compaction with the
+// handoff, the resume, the stops, and /goal.
+//
+// References:
+// - ADR-417: relay mode follows a wrap with a compaction and a resume.
 describe('relay mode', () => {
   const S = T0 / 1000
   const RELAY = { 'continuity.relay': 'on' }

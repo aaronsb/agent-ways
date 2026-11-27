@@ -302,10 +302,13 @@ fn site(ident: &attend_presence::session::SessionIdentity) -> Site {
     }
 }
 
-/// The repository's handoff file under `project`, as the relay judges it
-/// (ADR-417 item 4): its path, the wrap id on its first line, and the
-/// compaction instructions built from it. `None` outside a repository or
-/// where the file cannot be read.
+/// The repository's handoff file under `project`, as the relay judges it:
+/// its path, the wrap id on its first line, and the compaction instructions
+/// built from it. `None` outside a repository or where the file cannot be
+/// read.
+///
+/// References:
+/// - ADR-417 item 4: the relay compacts with the handoff only when it is fresh.
 fn read_handoff(project: &str) -> Option<Handoff> {
     use ways_core::handoff;
     let root = handoff::repo_root(Path::new(project))?;

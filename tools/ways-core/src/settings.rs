@@ -153,7 +153,7 @@ pub const ATTEND_MOD_RETIRED: &str = "`attend_mod` was retired by ADR-512 and is
 /// under `mods`, with the doc of that entry. The plugins
 /// `plugins/.claude-plugin/marketplace.json` lists, in its order.
 pub const MODS: &[(&str, &str)] = &[
-    ("attend", "The attend mod in Claude Code (ADR-406, ADR-414, ADR-417): whether a session starts listening, keepwarm, the continuity policy (keepalive and relay), the install and poll timing."),
+    ("attend", "The attend mod in Claude Code: whether a session starts listening, keepwarm, the continuity policy (keepalive and relay), the install and poll timing."),
     ("ways-judge", "The ways-judge mod, the relevance gate's Claude Code internal engine (ADR-708): whether repair installs it."),
     ("ways-theme", "The ways-theme mod, which has Claude Code follow theme.active (ADR-514): whether repair installs it, what it draws, and the words it shows."),
     ("images", "The images mod, which draws pictures inline in the terminal transcript (ADR-517): whether repair installs it, and how it draws."),
@@ -391,7 +391,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Choice(&["on", "off"]),
         default: DefaultValue::Yaml("on"),
         doc: "Whether the attend mod drives cache wakes: on or off.",
-        long: "on keeps ADR-182's wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. It also lets the continuity policy (mods.attend.continuity.*) run in every interactive session with the mod, dormant ones included, while autocompact is off (ADR-414). off means no cache wake the mod drives in that project's sessions, the policy included, and arms nothing.",
+        long: "on keeps the mod's cache wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. It also lets the continuity policy (mods.attend.continuity.*) run in every interactive session with the mod, dormant ones included, while autocompact is off. off means no cache wake the mod drives in that project's sessions, the policy included, and arms nothing.",
         ..BASE
     },
     KeySpec {
@@ -465,7 +465,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
         doc: "Whether the attend mod keeps an idle session warm for a bounded stretch, then asks for a wrap (the idle path).",
-        long: "The idle path of the continuity policy (ADR-414) runs in an interactive session with the mod while autocompact is off, or whatever autocompact says while relay is on (ADR-417): one keepwarm: turn the margin before the prompt cache lapses, counted from the operator's last prompt, then one wrap: turn. With relay off the cache then lapses or the mod compacts (after_wrap); with relay on the mod compacts and resumes the work. false returns the project to ADR-182 alone, with relay's fill trigger still running where relay is on. Only an explicit true runs it: a bad value, or settings that cannot be read, leave it off. Was mods.attend.keepalive.enabled, which is still read until `ways settings fix mods.attend.continuity` moves it.",
+        long: "The idle path of the continuity policy runs in an interactive session with the mod while autocompact is off, or whatever autocompact says while relay is on: one keepwarm: turn the margin before the prompt cache lapses, counted from the operator's last prompt, then one wrap: turn. With relay off the cache then lapses or the mod compacts (after_wrap); with relay on the mod compacts and resumes the work. false leaves the project with the cache wakes of mods.attend.keepwarm alone, with relay's fill trigger still running where relay is on. Only an explicit true runs it: a bad value, or settings that cannot be read, leave it off. Was mods.attend.keepalive.enabled, which is still read until `ways settings fix mods.attend.continuity` moves it.",
         ..BASE
     },
     KeySpec {
@@ -553,7 +553,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Choice(&["lapse", "compact"]),
         default: DefaultValue::Yaml("lapse"),
         doc: "What follows the wrap: lapse, or compact the conversation.",
-        long: "lapse lets the prompt cache lapse an hour after the wrap. compact has the mod compact the conversation with the focus of the wrap's closing /compact line, leaving a small context for the operator's return; it is one more warm request. Either applies once the wrap has answered, or after after_wrap_keepalives more keepalives when that is set. Handoff mode only: with relay on, every wrap is followed by a compaction and a resume (ADR-417).",
+        long: "lapse lets the prompt cache lapse an hour after the wrap. compact has the mod compact the conversation with the focus of the wrap's closing /compact line, leaving a small context for the operator's return; it is one more warm request. Either applies once the wrap has answered, or after after_wrap_keepalives more keepalives when that is set. Handoff mode only: with relay on, every wrap is followed by a compaction and a resume.",
         ..BASE
     },
     KeySpec {
@@ -585,7 +585,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Choice(&["on", "off"]),
         default: DefaultValue::Yaml("off"),
         doc: "What follows a wrap: off ends it with a /compact line for the operator; on compacts and resumes the work.",
-        long: "off is handoff mode, wrap as it was: the wrap ends with a /compact <focus> line, and the idle path's wrap is followed by after_wrap. on is relay mode (ADR-417): the attend mod asks for a wrap when the context reaches relay_at_pct, compacts the conversation with the wrap's handoff, and submits a turn that reads .claude/handoff.wrap.md and starts its DO NEXT, up to max_relays times since the operator's last prompt. The agent stops the relay in its wrap's closing marker when no work is left, a decision only the operator can make is next, or its doubt is high, and the handoff then goes to the operator over attend. Relay starts turns nobody watches and spends tokens, so it is off unless set. It is its own setting, not Claude Code's autocompact switch; the project's value wins over the user's.",
+        long: "off is handoff mode, wrap as it was: the wrap ends with a /compact <focus> line, and the idle path's wrap is followed by after_wrap. on is relay mode: the attend mod asks for a wrap when the context reaches relay_at_pct, compacts the conversation with the wrap's handoff, and submits a turn that reads .claude/handoff.wrap.md and starts its DO NEXT, up to max_relays times since the operator's last prompt. The agent stops the relay in its wrap's closing marker when no work is left, a decision only the operator can make is next, or its doubt is high, and the handoff then goes to the operator over attend. Relay starts turns nobody watches and spends tokens, so it is off unless set. It is its own setting, not Claude Code's autocompact switch; the project's value wins over the user's.",
         ..BASE
     },
     KeySpec {
@@ -1007,9 +1007,13 @@ pub static SCHEMA: Schema = Schema {
 
 /// Keys of both scopes that the settings screens write to the project's
 /// `.claude/ways.yaml`, not the user file: how a project's sessions start
-/// is decided per project (ADR-406 item 2), and so is the continuity policy
-/// (ADR-414 item 8, ADR-417 item 1). `ways settings set` still writes
-/// the user file unless `--project` is given.
+/// is decided per project, and so is the continuity policy. `ways settings
+/// set` still writes the user file unless `--project` is given.
+///
+/// References:
+/// - ADR-406 item 2: each project decides how its sessions start.
+/// - ADR-414 item 8: the keepalive policy is set per project.
+/// - ADR-417 item 1: the relay and the other continuity keys are set per project.
 pub const SCREENS_WRITE_PROJECT: &[&str] = &[
     "mods.attend.listening",
     "mods.attend.keepwarm",
@@ -1195,10 +1199,13 @@ mod tests {
         agent_settings::load::resolve(spec, &[], layers).value
     }
 
-    /// ADR-417 item 1: the continuity keys read their old keepalive names
-    /// during the dual read. In one file the new name wins; across files a
-    /// project's old name beats the user's new one; `enabled` becomes
-    /// `keepalive`, and a bad old value still fails closed.
+    /// The continuity keys read their old keepalive names during the dual
+    /// read. In one file the new name wins; across files a project's old
+    /// name beats the user's new one; `enabled` becomes `keepalive`, and a
+    /// bad old value still fails closed.
+    ///
+    /// References:
+    /// - ADR-417 item 1: the keepalive keys move under mods.attend.continuity.
     #[test]
     fn continuity_keys_dual_read_their_keepalive_names() {
         let old = layer("user", LayerScope::User, "mods:\n  attend:\n    keepalive:\n      max_keepalives: 2\n      enabled: false\n");
@@ -1214,8 +1221,11 @@ mod tests {
         assert_eq!(resolved("mods.attend.continuity.keepalive", &[bad]), Some(Value::Bool(false)));
     }
 
-    /// ADR-417 item 1: relay is on or off, the project winning, and its
-    /// threshold and cap are held to their ranges.
+    /// Relay is on or off, the project winning, and its threshold and cap
+    /// are held to their ranges.
+    ///
+    /// References:
+    /// - ADR-417 item 1: the relay setting, its threshold and its cap.
     #[test]
     fn relay_resolves_with_the_project_winning_and_its_bounds_hold() {
         let user_on = layer("user", LayerScope::User, "mods:\n  attend:\n    continuity:\n      relay: 'on'\n");

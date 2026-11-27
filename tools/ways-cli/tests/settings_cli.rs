@@ -1695,7 +1695,10 @@ fn fix_moves_the_section_with_its_comments() {
     f.write(&f.user(), "# top\nattend_mod:\n  # why active\n  listening: active # inline\n  keepalive:\n    # weekdays only\n    windows: [\"Mon-Fri 08:00-19:00\"]\nother: 1\n");
     let (_, err, _) = f.run(&["settings", "fix", "mods.attend"]);
     // `fix mods.attend` covers the whole entry, so the keepalive section
-    // inside moves on to its continuity name as well (ADR-417 item 1).
+    // inside moves on to its continuity name as well.
+    //
+    // References:
+    // - ADR-417 item 1: the keepalive section moves to `mods.attend.continuity`.
     assert_eq!(
         std::fs::read_to_string(f.user()).unwrap(),
         "# top\nmods:\n  attend:\n    # why active\n    listening: active # inline\n    continuity:\n      # weekdays only\n      windows: [\"Mon-Fri 08:00-19:00\"]\nother: 1\n",
@@ -1758,7 +1761,10 @@ fn the_retired_settings_report_names_each_file_and_its_fix() {
     );
 }
 
-// ── the continuity rename (ADR-417 item 1) ─────────────────────
+// ── the continuity rename ─────────────────────
+//
+// References:
+// - ADR-417 item 1: `mods.attend.keepalive` moves to `mods.attend.continuity`.
 
 /// A file holding the old `mods.attend.keepalive` section still resolves
 /// through `get`, and `lint` names it with its fix as a warning: the file
@@ -1773,7 +1779,7 @@ fn an_old_keepalive_section_still_resolves_and_lint_names_it() {
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(
         out,
-        "<ROOT>/xdg/config/agent-ways/config.yaml:3: mods.attend.keepalive: warning: `mods.attend.keepalive` was renamed `mods.attend.continuity` by ADR-417, with `enabled` now `keepalive`; it is still read until `ways settings fix mods.attend.continuity` moves it\n"
+        "<ROOT>/xdg/config/agent-ways/config.yaml:3: mods.attend.keepalive: warning: `mods.attend.keepalive` was renamed `mods.attend.continuity`, with `enabled` now `keepalive`; it is still read until `ways settings fix mods.attend.continuity` moves it\n"
     );
 }
 

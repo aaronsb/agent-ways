@@ -41,9 +41,9 @@ pub enum HookEvent {
     /// PreToolUse and PostToolUse on the tools the template wires: match the
     /// tool name against `tool_name:` (check-tool.sh, ADR-704).
     Tool,
-    /// PreCompact: steer a compaction with the wrap's handoff (ADR-417
-    /// item 3). Wired as a command, with no adapter script; it reads its
-    /// own payload and never reaches [`HookInput::request`].
+    /// PreCompact: steer a compaction with the wrap's handoff. Wired as a
+    /// command, with no adapter script; it reads its own payload and never
+    /// reaches [`HookInput::request`].
     PreCompact,
 }
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! `ways hook pre-compact`: the classic PreCompact hook (ADR-417 item 3).
+//! `ways hook pre-compact`: the classic PreCompact hook.
 //!
 //! Claude Code adds what this hook prints to a compaction's instructions.
 //! When the compaction already carries instructions (an operator's
@@ -13,6 +13,9 @@
 //!
 //! The hook always exits 0 and never blocks: a block during context-limit
 //! recovery fails the request.
+//!
+//! References:
+//! - ADR-417 item 3: a PreCompact hook steers each compaction with the wrap's handoff.
 
 use std::ffi::OsStr;
 use std::path::Path;

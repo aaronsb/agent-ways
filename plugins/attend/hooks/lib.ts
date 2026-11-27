@@ -81,11 +81,15 @@ export function resetArgv(atS: number): string[] {
 }
 
 /** The continuity policy's judgment, once, with the autocompact gate and
- *  the session's skills the mod read (ADR-414 item 7). Unread skills pass
- *  `--skills-unread`, and attend runs no wrap; a listing the host's budget
- *  cut short adds `--skills-partial`. With `fill`, the context at a turn's
- *  end, relay's fill path judges it (ADR-417 item 2a). `legacy` is the
- *  form an attend from before the flags accepts. */
+ *  the session's skills the mod read. Unread skills pass `--skills-unread`,
+ *  and attend runs no wrap; a listing the host's budget cut short adds
+ *  `--skills-partial`. With `fill`, the context at a turn's end, relay's
+ *  fill path judges it. `legacy` is the form an attend from before the
+ *  flags accepts.
+ *
+ *  References:
+ *  - ADR-414 item 7: attend's check judges the policy and the mod acts on it.
+ *  - ADR-417 item 2a: a context fill past the threshold starts a wrap. */
 export function policyArgv(gate: Gate, skills: Skills | null, legacy = false, fill?: Fill): string[] {
   const argv = [ATTEND, 'keepwarm', 'check', '--policy', '--json', '--autocompact', gate]
   if (legacy) return argv
@@ -109,12 +113,18 @@ export function isUnknownFlag(r: { exitCode: number; stderr: string }): boolean 
 
 /** Where the wrap's reply went, for the status card; with `focus`, the
  *  wrap's closing `/compact` focus, which a compaction later uses; with
- *  `marker`, the relay marker its reply ended with (ADR-417 item 8). */
+ *  `marker`, the relay marker its reply ended with.
+ *
+ *  References:
+ *  - ADR-417 item 8: the relay marker a wrap in relay mode ends with. */
 export function wrappedArgv(outcome: WrapOutcome, detail: string, focus?: string, marker?: string): string[] {
   return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail), ...focusArgs(focus), ...(marker === undefined ? [] : ['--marker', marker])]
 }
 
-/** A relay's resume went in, or why it did not (ADR-417 item 4). */
+/** A relay's resume went in, or why it did not.
+ *
+ *  References:
+ *  - ADR-417 item 4: a resume that fails to go in stops the relay. */
 export function resumedArgv(failed?: string): string[] {
   return [ATTEND, 'keepwarm', 'resumed', ...(failed === undefined ? [] : ['--failed', oneLine(failed)])]
 }
@@ -284,7 +294,10 @@ export type Keepalive = {
   /** Claude Code's autocompact threshold, read with the gate. */
   nativeAt: number | undefined
   /** The context at the last main-loop turn's end, past relay's
-   *  threshold: attend is asked with it once no turn runs (ADR-417 item 2a). */
+   *  threshold: attend is asked with it once no turn runs.
+   *
+   *  References:
+   *  - ADR-417 item 2a: a context fill past the threshold starts a wrap. */
   fillDue: Fill | undefined
   /** A relay wrap's reply was reported and waits for attend's word: the
    *  next check judges it, and a turn that comes first defers it to that
@@ -425,15 +438,14 @@ export type ModConfig = {
   preambleEveryTurns: number
   /** Whether a `-p` run or an SDK session may poll. */
   headlessPoll: boolean
-  /** `mods.attend.continuity.keepalive`: the idle path may run (ADR-414). */
+  /** `mods.attend.continuity.keepalive`: the idle path may run. */
   keepalive: boolean
   /** `mods.attend.continuity.margin_minutes`: a keepalive is due this long
    *  before the cache lapses. attend judges; the mod uses it only to set a
    *  dormant session's timer. */
   marginMinutes: number
   /** `mods.attend.continuity.relay` is `on`: a wrap is followed by a
-   *  compaction and a resume, and the context fill can start one
-   *  (ADR-417). */
+   *  compaction and a resume, and the context fill can start one. */
   relay: boolean
   /** `mods.attend.continuity.relay_at_pct`. attend judges the fill; the mod
    *  uses it only to ask attend once a turn's end has passed it. */
@@ -500,7 +512,12 @@ export function parseConfig(stdout: string): ModConfig {
     preambleEveryTurns: num('preamble_every_turns', DEFAULT_CONFIG.preambleEveryTurns),
     headlessPoll: bool('headless_poll', DEFAULT_CONFIG.headlessPoll),
     // Only an explicit true: a ways that does not know the key runs none.
-    // ways reads the keys' names from before ADR-417's rename into these.
+    // ways reads the keys' old names from before the rename to
+    // `mods.attend.continuity` into these.
+    //
+    // References:
+    // - ADR-417 item 1: the keys move to `mods.attend.continuity`, and the
+    //   old names are still read for a while.
     keepalive: v('continuity.keepalive') === true,
     marginMinutes: num('continuity.margin_minutes', DEFAULT_CONFIG.marginMinutes),
     relay: v('continuity.relay') === 'on',
@@ -534,10 +551,14 @@ export function isContextReset(before: number | undefined, after: number | undef
 }
 
 /** Whether the continuity policy may run in a session started with
- *  `isInteractive` under `c` (ADR-414 item 1, ADR-417): never a -p run or
- *  an SDK session, whatever `headless_poll` says; autocompact is judged at
- *  each check. The idle path or relay turns it on. Where it applies, the
- *  policy drives every cache wake. */
+ *  `isInteractive` under `c`: never a -p run or an SDK session, whatever
+ *  `headless_poll` says; autocompact is judged at each check. The idle path
+ *  or relay turns it on. Where it applies, the policy drives every cache
+ *  wake.
+ *
+ *  References:
+ *  - ADR-414 item 1: the policy runs only in interactive sessions.
+ *  - ADR-417 item 1: relay turns the policy on as the idle path does. */
 export function keepaliveApplies(c: ModConfig, isInteractive: boolean): boolean {
   return isInteractive && c.install && c.keepwarm === 'on' && (c.keepalive || c.relay)
 }
@@ -545,7 +566,11 @@ export function keepaliveApplies(c: ModConfig, isInteractive: boolean): boolean 
 /** Claude Code's own autocompact threshold, in tokens, from
  *  `$.session.usage({ breakdown: 'summary' })`; undefined when autocompact
  *  is off or the breakdown has none. `session.measure` does not carry it:
- *  its `window` stays at the model's whole window (ADR-417 item 10). */
+ *  its `window` stays at the model's whole window.
+ *
+ *  References:
+ *  - ADR-417 item 10: the probe that found `session.measure` reports the
+ *    whole window. */
 export function nativeThresholdFrom(usage: unknown): number | undefined {
   const b = (usage as { context?: { breakdown?: { autoCompactThreshold?: unknown } } } | undefined)?.context?.breakdown
   const t = b?.autoCompactThreshold
@@ -560,7 +585,10 @@ export function relayAtTokens(c: ModConfig, window: number, gate: Gate, nativeAt
   return gate === 'on' && nativeAt !== undefined ? Math.min(at, nativeAt - Math.floor(window * 0.05)) : at
 }
 
-/** The relay marker a wrap's reply ends with (ADR-417 item 8). */
+/** The relay marker a wrap's reply ends with.
+ *
+ *  References:
+ *  - ADR-417 item 8: the marker's form and fields. */
 export const RELAY_MARKER = /^relay: (continue|stop (empty|decision|doubt)) tasks=\d+ goal=(active|none) wrap=[0-9A-Za-z-]{8,64} head=[0-9a-f]{7,40}$/
 
 /** The reply's last line with surrounding space and backticks taken off. */
@@ -675,7 +703,7 @@ export type Decision = {
   retry: boolean
   /** Why a running policy has nothing due: `under 50k`, `5m tier`. */
   idle: string | null
-  /** Relay mode is on (ADR-417). */
+  /** Relay mode is on. */
   relay: boolean
   relayCount: number
   maxRelays: number
@@ -802,7 +830,10 @@ function nextIn(nextAt: number, nowMs: number): string {
 /** `⟳ 2/8 · next 41m · wrap ~21:40`, `⟳ 0/1 · idle: under 50k`,
  *  `⟳ wrapped 21:40`, `⟳ wrapped 21:40 · 1/3 · next 41m · compact ~00:10`,
  *  `⟳ compacted 00:10`, `⟳ stopped`; in relay mode `⟳ relay 2/5` once a
- *  relay has run and `⟳ relay stopped: decision` (ADR-417 item 4). */
+ *  relay has run and `⟳ relay stopped: decision`.
+ *
+ *  References:
+ *  - ADR-417 item 4: the row's words for a relay and for its stop. */
 export function keepaliveSegment(k: KeepaliveRow, nowMs: number): string {
   if (k.relayStop) return `⟳ relay stopped: ${k.relayStop}`
   if (k.relayCount > 0 && (k.state === 'running' || k.state === 'resumed')) return `⟳ relay ${k.relayCount}/${k.maxRelays}`
@@ -861,8 +892,12 @@ export function planCheck(d: Decision, isListening: boolean): CheckPlan {
 
 /** Whether a planned turn may still go in: no prompt or main-loop turn came
  *  since the check began (the epoch held), none runs now, and for the
- *  policy's own turn the gate, read again, is still off (ADR-414 item 2),
- *  unless relay is on, which runs whatever autocompact says (ADR-417). */
+ *  policy's own turn the gate, read again, is still off, unless relay is
+ *  on, which runs whatever autocompact says.
+ *
+ *  References:
+ *  - ADR-414 item 2: the policy's turns go in only while autocompact is off.
+ *  - ADR-417 item 2: with relay on, the gate ignores autocompact. */
 export function maySubmit(o: { epochThen: number; epochNow: number; running: number; isPolicy: boolean; gate: Gate; isRelay?: boolean }): boolean {
   return o.epochThen === o.epochNow && o.running === 0 && (!o.isPolicy || o.gate === 'off' || o.isRelay === true)
 }

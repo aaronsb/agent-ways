@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-// attend's agent-facing driver in Claude Code (ADR-406).
+// attend's agent-facing driver in Claude Code.
 //
 // Dormant is plain Claude Code: one tool, `attend_listen`, and no polling,
 // delivery or row of this module's. A session is active from session start
@@ -12,7 +12,7 @@
 // messages as framed turns, serves the send/reply/join/peers tools, draws one
 // status row, drives keepwarm, and keeps the session's sensor host running.
 //
-// The continuity policy (ADR-414, ADR-417) runs in every interactive
+// The continuity policy runs in every interactive
 // session with the mod, dormant ones included, while autocompact is off or
 // relay is on: attend judges, and this module supplies the operator's
 // prompts, the autocompact gate, the context fill and the wrap's relay
@@ -20,12 +20,16 @@
 // routes the wrap's reply. A dormant session polls nothing, delivers
 // nothing and joins nothing for it: one timer, set again at each main-loop
 // turn's end. Where the policy applies, it drives every cache wake,
-// ADR-182's armed windows included.
+// keepwarm's armed windows included.
 //
 // Every message travels through attend's signal store by the attend CLI, as
 // an argv array with no shell. The mod never uses $.session.send.
 //
 // References:
+// - ADR-406: the attend mod as attend's driver in Claude Code.
+// - ADR-414: the keepalive policy, which is the continuity policy's idle path.
+// - ADR-417: relay mode and the context fill trigger of the continuity policy.
+// - ADR-182: keepwarm's cache wakes and the windows that arm them.
 // - ADR-416 item 2: the sensor host the mod spawns for a listening session.
 
 import { atom, read, update } from 'claude-code'
@@ -947,7 +951,10 @@ async function checkKeepalive($: $, mod: Mod) {
   await serialize(ka, async () => {
     const gate = await readGate($, ka)
     const isListening = await isOn($, mod)
-    // Relay runs whatever autocompact says (ADR-417 item 2).
+    // Relay runs whatever autocompact says.
+    //
+    // References:
+    // - ADR-417 item 2: with relay on, the gate ignores autocompact.
     if (!isListening && gate !== 'off' && !isRelay) return
     // The fill a turn's end left past relay's threshold, judged once.
     const due = ka.fillDue
@@ -977,7 +984,10 @@ async function checkKeepalive($: $, mod: Mod) {
       if (!maySubmit({ epochThen: epoch, epochNow: ka.epoch, running: mod.running.size, isPolicy, gate: gateNow, isRelay })) {
         if (plan.submit.kind === 'wrap') await run($, wrappedArgv('unfinished', 'a turn started before the wrap went in'))
         // A turn that starts before a relay's compaction defers it: that
-        // turn's end judges again (ADR-417 item 4).
+        // turn's end judges again.
+        //
+        // References:
+        // - ADR-417 item 4: the mod compacts and resumes only between turns.
         if (plan.submit.kind === 'compact' && d.relay) ka.isRelayPending = true
         else if (plan.submit.kind === 'compact') await run($, compactedArgv('a turn started before the compaction'))
         return
@@ -1064,8 +1074,12 @@ async function keepaliveTurnEnded($: $, mod: Mod, e: { turnId: string; reason: s
 }
 
 /** A main-loop turn that was not a wrap the mod sent ended in relay mode:
- *  a reply ending in a relay marker is a `/wrap` (ADR-417 item 2b); one
- *  ending in a `relay: stop` line after a relay stops the relay (item 5). */
+ *  a reply ending in a relay marker is a `/wrap`; one ending in a
+ *  `relay: stop` line after a relay stops the relay.
+ *
+ *  References:
+ *  - ADR-417 item 2b: a `/wrap` in relay mode ends with the marker.
+ *  - ADR-417 item 5: a resumed turn may stop the relay with a stop line. */
 async function relayTurnEnded($: $, mod: Mod, answer: string) {
   const ka = mod.ka
   const marker = relayMarkerOf(answer)
@@ -1099,7 +1113,10 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
   const plan = wrapPlan(w.route, w.reply !== undefined ? 'answer' : reason, reply)
   // A relay wrap's reply stays in the transcript: attend judges its marker
   // and the handoff, and the next check compacts and resumes, or stops and
-  // hands the reply over (ADR-417 item 4).
+  // hands the reply over.
+  //
+  // References:
+  // - ADR-417 item 4: the compaction and the resume after a relay wrap.
   if (w.route.after === 'relay') {
     ka.relayReply = reply
     ka.isRelayPending = plan.kind !== 'unfinished'
@@ -1145,11 +1162,13 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
 }
 
 /** A relay's compaction with the handoff as its instructions, then, where
- *  attend gave one and no operator prompt came meanwhile, the resume turn
- *  (ADR-417 item 4). Only a compaction that ran without a skip is
- *  followed by the resume. attend hears how each went; a failure stops the
- *  relay, and the next check hands the reply over. The caller holds the
- *  keepalive chain. */
+ *  attend gave one and no operator prompt came meanwhile, the resume turn.
+ *  Only a compaction that ran without a skip is followed by the resume.
+ *  attend hears how each went; a failure stops the relay, and the next
+ *  check hands the reply over. The caller holds the keepalive chain.
+ *
+ *  References:
+ *  - ADR-417 item 4: the compaction and the resume after a relay wrap. */
 async function relayCompact($: $, mod: Mod, d: Decision, instructions: string) {
   const ka = mod.ka
   const operatorThen = ka.operatorEpoch
@@ -1185,7 +1204,10 @@ async function relayCompact($: $, mod: Mod, d: Decision, instructions: string) {
 
 /** A stopped relay's reply, sent over attend to the route's recipient,
  *  opening with its handoff line, which names why the relay stopped; a
- *  refused send is written to the wrap file instead (ADR-417 item 5). */
+ *  refused send is written to the wrap file instead.
+ *
+ *  References:
+ *  - ADR-417 item 5: a stopped relay hands its reply to the operator. */
 async function sendRelayHandoff($: $, ka: Keepalive, route: WrapRoute) {
   const reply = ka.relayReply ?? 'The reply is in the session transcript.'
   ka.relayReply = undefined
@@ -1361,9 +1383,12 @@ export const register: Register = on => {
     const before = mod.contextTokens
     mod.contextTokens = e.context.tokens
     if (isContextReset(before, e.context.tokens)) await markCompacted($)
-    // Relay's fill path (ADR-417 item 2a): a turn's end past the threshold
-    // asks attend, once no turn runs. The native threshold may lower it,
-    // so the mod asks wherever attend could find it past.
+    // Relay's fill path: a turn's end past the threshold asks attend, once
+    // no turn runs. The native threshold may lower it, so the mod asks
+    // wherever attend could find it past.
+    //
+    // References:
+    // - ADR-417 item 2a: a context fill past the threshold starts a wrap.
     const { tokens, window } = e.context
     const ka = mod.ka
     if (ka.applies && mod.config.relay && tokens !== undefined && window > 0 && tokens >= relayAtTokens(mod.config, window, 'on', ka.nativeAt)) {
@@ -1374,8 +1399,11 @@ export const register: Register = on => {
   })
 
   // A /goal typed while the mod is loaded: attend records whether one is
-  // active, and stops the relay once one that was active has ended
-  // (ADR-417 item 6). `/goal clear` clears it; `/goal` alone shows it.
+  // active, and stops the relay once one that was active has ended.
+  // `/goal clear` clears it; `/goal` alone shows it.
+  //
+  // References:
+  // - ADR-417 item 6: the end of a goal ends the relay.
   on('command.run', { command: 'goal' }, async ($, e, next) => {
     const done = await next(e)
     const args = (e.args ?? '').trim()

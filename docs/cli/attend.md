@@ -559,13 +559,13 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `off` — Disarm and forget the window
 * `status` — Cache state, context size, cold price, window left, and this session's cold writes
 * `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). The attend mod polls it
-* `reset` — The operator prompted: the keepalive and relay counts start again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
-* `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
-* `compacted` — Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends (ADR-414 item 6)
-* `resumed` — Record that a relay's resume turn went in: the relay count goes up by one and the keepalive count starts again. The attend mod runs it once the compaction after a relay wrap has run (ADR-417 item 4)
-* `goal` — Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended (ADR-417 item 6)
-* `stopped` — Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt (ADR-417 item 5)
-* `wrap-id` — Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh (ADR-417 item 3)
+* `reset` — The operator prompted: the keepalive and relay counts start again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session
+* `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
+* `compacted` — Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends
+* `resumed` — Record that a relay's resume turn went in: the relay count goes up by one and the keepalive count starts again. The attend mod runs it once the compaction after a relay wrap has run
+* `goal` — Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended
+* `stopped` — Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt
+* `wrap-id` — Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh
 
 
 
@@ -605,7 +605,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 
 ###### **Options:**
 
-* `--policy` — Apply the continuity policy (ADR-414, ADR-417): from each turn's end, one wake the margin before the cache lapses, counted from the operator's last prompt and bounded by mods.attend.continuity, then one wrap turn; in relay mode, a compaction and a resume after it
+* `--policy` — Apply the continuity policy: from each turn's end, one wake the margin before the cache lapses, counted from the operator's last prompt and bounded by mods.attend.continuity, then one wrap turn; in relay mode, a compaction and a resume after it
 * `--json` — Print the decision as one JSON object: action (none, keepalive, wrap or compact), text, next_at, count, max, wraps_at and reason
 * `--autocompact <AUTOCOMPACT>` — The autocompact gate as the host read it: on, off or unknown. The policy runs only with off; unknown counts as on
 
@@ -616,7 +616,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 * `--skills <SKILLS>` — The skills the session lists, comma-separated, as the host read them. The wrap and the compaction after it run only when mods.attend.continuity.wrap_skill names one of them. Absent, as from a host that predates the flag, the wrap is not held to a listing
 * `--skills-unread` — The host could not read the session's skills: no wrap or compaction
 * `--skills-partial` — The --skills listing was cut short by the host's budget: a skill missing from it is not held against the wrap
-* `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path (ADR-417 item 2a): with relay on, a fill past mods.attend.continuity.relay_at_pct of --window sends a wrap
+* `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window sends a wrap
 * `--window <WINDOW>` — The model's whole context window, in tokens
 * `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the fill path wraps five points of the window under it where that is lower
 
@@ -624,7 +624,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 
 ## `attend keepwarm reset`
 
-The operator prompted: the keepalive and relay counts start again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
+The operator prompted: the keepalive and relay counts start again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session
 
 **Usage:** `attend keepwarm reset [OPTIONS]`
 
@@ -636,7 +636,7 @@ The operator prompted: the keepalive and relay counts start again, and a sent wr
 
 ## `attend keepwarm wrapped`
 
-Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
+Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
 
 **Usage:** `attend keepwarm wrapped [OPTIONS] <OUTCOME>`
 
@@ -652,13 +652,13 @@ Record where the keepalive policy's wrap reply went, for the status card. The at
 * `--path <PATH>` — With --save: the wrap file to write the reply to, checked again under the ways state root's wrap/ directory
 * `--save` — Write the reply read on stdin to --path (outcome file or refused), through a temp file renamed over it
 * `--focus <FOCUS>` — The focus of the wrap's closing `/compact` line, kept for the compaction `after_wrap: compact` asks for after the wrap's keepalives
-* `--marker <MARKER>` — The relay marker the reply ended with (ADR-417 item 8). With no relay wrap waiting, it records a `/wrap` run in relay mode
+* `--marker <MARKER>` — The relay marker the reply ended with. With no relay wrap waiting, it records a `/wrap` run in relay mode
 
 
 
 ## `attend keepwarm compacted`
 
-Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends (ADR-414 item 6)
+Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends
 
 **Usage:** `attend keepwarm compacted [OPTIONS]`
 
@@ -670,7 +670,7 @@ Record the compaction after the wrap, for the status card and so nothing more fo
 
 ## `attend keepwarm resumed`
 
-Record that a relay's resume turn went in: the relay count goes up by one and the keepalive count starts again. The attend mod runs it once the compaction after a relay wrap has run (ADR-417 item 4)
+Record that a relay's resume turn went in: the relay count goes up by one and the keepalive count starts again. The attend mod runs it once the compaction after a relay wrap has run
 
 **Usage:** `attend keepwarm resumed [OPTIONS]`
 
@@ -682,7 +682,7 @@ Record that a relay's resume turn went in: the relay count goes up by one and th
 
 ## `attend keepwarm goal`
 
-Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended (ADR-417 item 6)
+Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended
 
 **Usage:** `attend keepwarm goal <STATE>`
 
@@ -697,7 +697,7 @@ Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. Th
 
 ## `attend keepwarm stopped`
 
-Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt (ADR-417 item 5)
+Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt
 
 **Usage:** `attend keepwarm stopped [OPTIONS] <REASON>`
 
@@ -718,7 +718,7 @@ Record that a resumed turn ended with a `relay: stop <reason>` line, which stops
 
 ## `attend keepwarm wrap-id`
 
-Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh (ADR-417 item 3)
+Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh
 
 **Usage:** `attend keepwarm wrap-id`
 

@@ -91,8 +91,12 @@ pub(super) fn file_label(file: &str) -> &'static str {
 ///
 /// Without `--file`, a section a rename moved ([`retired::MOVES`]) is
 /// reported in every file that holds it ([`retired::files_holding`]), not
-/// only the files layered here, each with its own fix command (ADR-512
-/// item 2, ADR-417 item 1). An old section that is still read is a warning.
+/// only the files layered here, each with its own fix command. An old
+/// section that is still read is a warning.
+///
+/// References:
+/// - ADR-512 item 2: `attend_mod` moves under `mods.attend`.
+/// - ADR-417 item 1: `mods.attend.keepalive` moves to `mods.attend.continuity`.
 pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
@@ -258,9 +262,8 @@ fn carries(covered: &[Covered]) -> Vec<&'static retired::Move> {
 ///   removed.
 ///
 /// `fix mods.attend` (or `fix mods`) first moves a retired `attend_mod`
-/// section to `mods.attend` (ADR-512 item 2), then an old
-/// `mods.attend.keepalive` section to `mods.attend.continuity` with
-/// `enabled` renamed `keepalive` (ADR-417 item 1); `fix
+/// section to `mods.attend`, then an old `mods.attend.keepalive` section to
+/// `mods.attend.continuity` with `enabled` renamed `keepalive`; `fix
 /// mods.attend.continuity` makes the second move alone. Each value is
 /// written under the new name unless the file already holds one there,
 /// which stays; fix names each value it dropped, and removes the old

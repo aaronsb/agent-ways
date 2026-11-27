@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! `ways hook pre-compact` as Claude Code runs it (ADR-417 item 3): the
-//! payload on stdin, the instructions on stdout, and exit 0 whatever the
-//! payload holds. The attend it asks for the wrap id is the one on PATH.
+//! `ways hook pre-compact` as Claude Code runs it: the payload on stdin,
+//! the instructions on stdout, and exit 0 whatever the payload holds. The
+//! attend it asks for the wrap id is the one on PATH.
+//!
+//! References:
+//! - ADR-417 item 3: a PreCompact hook steers each compaction with the wrap's handoff.
 
 #![cfg(unix)]
 

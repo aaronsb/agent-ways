@@ -4,13 +4,17 @@
 
 //! What the `≡` menu's Settings ▸ lists and writes: the attend mod's
 //! `mods.attend.listening`, `mods.attend.keepwarm` and continuity policy
-//! (`mods.attend.continuity.*`, ADR-414, ADR-417), ways keys a project can set, then
-//! the chat's own `attend.chat.*` keys, which only the user
-//! file holds ([`crate::settings`]). Each shows the value in effect and the
-//! layer it comes from. A write goes to the file of the place chosen, the
-//! user's or a project's, through the agent-settings writer, as
-//! `ways settings set <key> <value> [--project <dir>]` writes it: the same
-//! file, header and edit.
+//! (`mods.attend.continuity.*`), ways keys a project can set, then the
+//! chat's own `attend.chat.*` keys, which only the user file holds
+//! ([`crate::settings`]). Each shows the value in effect and the layer it
+//! comes from. A write goes to the file of the place chosen, the user's or a
+//! project's, through the agent-settings writer, as `ways settings set <key>
+//! <value> [--project <dir>]` writes it: the same file, header and edit.
+//!
+//! References:
+//! - ADR-414: the keepalive policy and its keys under `mods.attend`.
+//! - ADR-417: the relay, and the move of the policy's keys under
+//!   `mods.attend.continuity`.
 
 use std::path::{Path, PathBuf};
 

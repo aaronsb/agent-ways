@@ -620,7 +620,10 @@ pub fn resolve(spec: &KeySpec, bound: &[String], layers: &[Layer]) -> Resolved {
             continue;
         }
         // The key's own path first; its name before a rename where this
-        // layer does not set the new one (ADR-417 item 1).
+        // layer does not set the new one.
+        //
+        // References:
+        // - ADR-417 item 1: a renamed key is read under both names for a while.
         if let Some(v) = l.get(&path).or_else(|| spec.was_path().and_then(|w| l.get(&w))) {
             value = Some(v.clone());
             from = Some(i);
@@ -839,10 +842,13 @@ mod tests {
         assert!(!is_higher(&layers, elsewhere, user));
     }
 
-    /// ADR-417 item 1: a renamed key reads its old path where a layer does
-    /// not set the new one, the new path wins inside one layer, and an old
-    /// name in a higher layer beats a new name in a lower one. The old path
-    /// loads, checked as the key, and a bad value there fails its section.
+    /// A renamed key reads its old path where a layer does not set the new
+    /// one, the new path wins inside one layer, and an old name in a higher
+    /// layer beats a new name in a lower one. The old path loads, checked as
+    /// the key, and a bad value there fails its section.
+    ///
+    /// References:
+    /// - ADR-417 item 1: a renamed key is read under both names for a while.
     #[test]
     fn a_renamed_key_reads_its_old_path_layer_by_layer() {
         const RENAMED: KeySpec = KeySpec { name: "matching.prob", section: "matching", path: &["prob"], kind: Kind::Float { min: 0.0, max: 1.0 }, default: DefaultValue::Yaml("0.5"), was: Some(&["presets", "oldprob"]), ..BASE };

@@ -107,8 +107,11 @@ pub struct WhatIf {
     pub local: Vec<String>,
     pub actions: Vec<(Mark, String)>,
     pub dev: Vec<DevLink>,
-    /// The files that still hold a section a rename moved (ADR-512 item 2,
-    /// ADR-417 item 1).
+    /// The files that still hold a section a rename moved.
+    ///
+    /// References:
+    /// - ADR-512 item 2: `attend_mod` moves under `mods.attend`.
+    /// - ADR-417 item 1: `mods.attend.keepalive` moves to `mods.attend.continuity`.
     pub retired: Vec<Held>,
     /// Why the update's `git pull --ff-only` would stop, on the release
     /// channel: `detached`, `no-upstream` or `diverged`.
@@ -796,7 +799,11 @@ pub fn render(w: &WhatIf) -> Report {
 
 /// The files that still hold a section a rename moved, one ⚠ line each
 /// saying whether it is still read, with the command that moves it.
-/// Nothing in the update rewrites them (ADR-512 item 2, ADR-417 item 1).
+/// Nothing in the update rewrites them.
+///
+/// References:
+/// - ADR-512 item 2: `attend_mod` moves under `mods.attend`.
+/// - ADR-417 item 1: `mods.attend.keepalive` moves to `mods.attend.continuity`.
 pub fn retired_section(r: &mut Report, held: &[Held]) {
     if held.is_empty() {
         return;

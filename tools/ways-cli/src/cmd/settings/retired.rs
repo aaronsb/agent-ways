@@ -4,15 +4,19 @@
 
 //! Settings sections a rename moved, in one table ([`MOVES`]):
 //!
-//! - `attend_mod`, now `mods.attend` (ADR-512 item 2). Nothing configures
-//!   anything from the old section.
+//! - `attend_mod`, now `mods.attend`. Nothing configures anything from the
+//!   old section.
 //! - `mods.attend.keepalive`, now `mods.attend.continuity` with `enabled`
-//!   renamed `keepalive` (ADR-417 item 1). The old keys are still read
-//!   during the dual-read period, so a file holding them loads.
+//!   renamed `keepalive`. The old keys are still read during the dual-read
+//!   period, so a file holding them loads.
 //!
 //! `lint` and `ways manage update` name every file that still holds an old
 //! section, with the command that moves it; `fix` moves it when the
 //! operator runs that command. Nothing else rewrites the files.
+//!
+//! References:
+//! - ADR-512 item 2: `attend_mod` moves under `mods.attend`.
+//! - ADR-417 item 1: `mods.attend.keepalive` moves to `mods.attend.continuity`.
 
 use std::path::{Path, PathBuf};
 
@@ -95,7 +99,10 @@ impl Move {
 /// The retired top-level key.
 pub const KEY: &str = "attend_mod";
 
-/// `attend_mod`, now `mods.attend` (ADR-512 item 2).
+/// `attend_mod`, now `mods.attend`.
+///
+/// References:
+/// - ADR-512 item 2: `attend_mod` moves under `mods.attend`.
 pub const ATTEND_MOD: Move = Move {
     from: &[KEY],
     to: &["mods", "attend"],
@@ -105,14 +112,17 @@ pub const ATTEND_MOD: Move = Move {
     message: ways_core::settings::ATTEND_MOD_RETIRED,
 };
 
-/// `mods.attend.keepalive`, now `mods.attend.continuity` (ADR-417 item 1).
+/// `mods.attend.keepalive`, now `mods.attend.continuity`.
+///
+/// References:
+/// - ADR-417 item 1: the keepalive section moves to `mods.attend.continuity`.
 pub const KEEPALIVE: Move = Move {
     from: &["mods", "attend", "keepalive"],
     to: &["mods", "attend", "continuity"],
     renames: &[("enabled", "keepalive")],
     fix: "mods.attend.continuity",
     read: true,
-    message: "`mods.attend.keepalive` was renamed `mods.attend.continuity` by ADR-417, with `enabled` now `keepalive`; it is still read until `ways settings fix mods.attend.continuity` moves it",
+    message: "`mods.attend.keepalive` was renamed `mods.attend.continuity`, with `enabled` now `keepalive`; it is still read until `ways settings fix mods.attend.continuity` moves it",
 };
 
 /// Every move, in the order `fix` applies them: `attend_mod` first, since
@@ -562,9 +572,12 @@ mod tests {
         assert_eq!(carried("mods:\n  attend:\n    listening: active\n"), ("mods:\n  attend:\n    listening: active\n".to_string(), Carried::default()));
     }
 
-    /// ADR-417 item 1: the keepalive section is renamed in place at its own
-    /// depth, `enabled` becomes `keepalive`, and a key of the same name
-    /// deeper down keeps its name.
+    /// The keepalive section is renamed in place at its own depth, `enabled`
+    /// becomes `keepalive`, and a key of the same name deeper down keeps its
+    /// name.
+    ///
+    /// References:
+    /// - ADR-417 item 1: the keepalive section moves to `mods.attend.continuity`.
     #[test]
     fn the_keepalive_section_is_renamed_in_place_with_enabled_renamed() {
         let input = "mods:\n  attend:\n    keepalive:\n      # on here\n      enabled: true # inline\n      nested:\n        enabled: x\n    keepwarm: on\n";

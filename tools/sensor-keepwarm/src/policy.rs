@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! The continuity policy (ADR-414, ADR-417). Its idle path: in an
+//! The continuity policy. Its idle path: in an
 //! interactive session with autocompact off, or with relay on, an idle
 //! session is kept warm from every turn's end, one `keepwarm:` wake
 //! `margin` before its cache would lapse, counted from the operator's last
@@ -27,6 +27,10 @@
 //! context fill, the wrap's marker) and carries out what [`step`] returns.
 //! The counts and their marks ride the keepwarm ledger ([`Policy`]), so the
 //! plain check and the sensor keep them.
+//!
+//! References:
+//! - ADR-414: the keepalive policy, which is the idle path here.
+//! - ADR-417: one continuity policy with a relay mode and a fill path.
 
 use crate::windows::Windows;
 use crate::{
@@ -38,19 +42,28 @@ use std::path::{Path, PathBuf};
 /// `mods.attend.continuity.max_keepalives`.
 pub const DEFAULT_MAX: u32 = 8;
 pub const MAX_RANGE: (u32, u32) = (0, 48);
-/// `mods.attend.continuity.margin_minutes`: ADR-182's 50-minute point on the
-/// hour tier.
+/// `mods.attend.continuity.margin_minutes`. The default puts the wake at
+/// the 50-minute point on the hour tier, where keepwarm's own wake falls.
+///
+/// References:
+/// - ADR-182: keepwarm wakes an idle session after 50 minutes on the hour tier.
 pub const DEFAULT_MARGIN_MIN: u64 = 10;
 pub const MARGIN_RANGE: (u64, u64) = (3, 30);
 /// `mods.attend.continuity.after_wrap_keepalives`.
 pub const DEFAULT_AFTER_MAX: u32 = 0;
 pub const AFTER_RANGE: (u32, u32) = (0, 48);
 /// `mods.attend.continuity.relay_at_pct`: the context fill, in percent of
-/// the window, at which relay mode asks for a wrap (ADR-417 item 2a).
+/// the window, at which relay mode asks for a wrap.
+///
+/// References:
+/// - ADR-417 item 2a: a context fill past the threshold starts a wrap.
 pub const DEFAULT_RELAY_AT_PCT: u32 = 75;
 pub const RELAY_AT_RANGE: (u32, u32) = (50, 95);
 /// `mods.attend.continuity.max_relays`: resumes since the operator's last
-/// prompt (ADR-417 item 5).
+/// prompt.
+///
+/// References:
+/// - ADR-417 item 5: the resumes are capped per operator prompt.
 pub const DEFAULT_MAX_RELAYS: u32 = 5;
 pub const MAX_RELAYS_RANGE: (u32, u32) = (0, 50);
 /// With Claude Code's autocompact on, the fill trigger sits this many
@@ -152,8 +165,11 @@ pub struct Policy {
     /// which reads the settings alone, follows it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub old_host: bool,
-    /// The wrap now judged runs in relay mode (ADR-417): a compaction and a
-    /// resume follow it, not `after_wrap`.
+    /// The wrap now judged runs in relay mode: a compaction and a resume
+    /// follow it, not `after_wrap`.
+    ///
+    /// References:
+    /// - ADR-417 item 4: in relay mode a compaction and a resume follow the wrap.
     #[serde(default, skip_serializing_if = "is_false")]
     pub relay: bool,
     /// What started that wrap: `idle`, `fill`, or `wrap` (a `/wrap`).
@@ -165,7 +181,10 @@ pub struct Policy {
     pub wrap_id: Option<String>,
     /// The id of this session's last recorded wrap, which outlives the
     /// operator's prompts: `attend keepwarm wrap-id` gives it to the
-    /// PreCompact hook (ADR-417 item 3).
+    /// PreCompact hook.
+    ///
+    /// References:
+    /// - ADR-417 item 3: the PreCompact hook asks attend for the last wrap id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_wrap_id: Option<String>,
     /// The relay marker the wrap's reply ended with, as the mod reported it.
@@ -220,7 +239,11 @@ pub fn reset(p: &mut Policy, now: u64) {
 
 /// A relay's resume went in (`attend keepwarm resumed`): the relay count
 /// goes up by one, the keepalive count starts again, and the wrap is
-/// cleared, so the next generation can wrap again (ADR-417 item 4).
+/// cleared, so the next generation can wrap again.
+///
+/// References:
+/// - ADR-417 item 4: a submitted resume counts one relay and restarts the
+///   keepalive count.
 pub fn resumed(p: &mut Policy, now: u64) {
     *p = Policy {
         operator_at: p.operator_at,
@@ -247,8 +270,12 @@ pub fn stop_relay(p: &mut Policy, short: &str, why: impl Into<String>) {
 /// `attend keepwarm wrapped`: where the wrap's reply went (`line`, the
 /// card's words for `outcome`), the focus of its closing `/compact` line,
 /// and its relay marker. A marker with no relay wrap waiting is a `/wrap`
-/// run in relay mode, recorded as a wrap now (ADR-417 item 2b). An
-/// unfinished relay wrap stops the relay.
+/// run in relay mode, recorded as a wrap now. An unfinished relay wrap
+/// stops the relay.
+///
+/// References:
+/// - ADR-417 item 2b: a `/wrap` in relay mode ends with the marker and is
+///   handled as a wrap the policy sent.
 pub fn wrapped(p: &mut Policy, outcome: WrapOutcome, line: String, focus: Option<String>, marker: Option<String>, now: u64) {
     // An unfinished wrap wrote no handoff: nothing compacts after it.
     let focus = focus.filter(|_| outcome != WrapOutcome::Unfinished);
@@ -275,7 +302,10 @@ pub fn wrapped(p: &mut Policy, outcome: WrapOutcome, line: String, focus: Option
 /// `attend keepwarm compacted`: the compaction after the wrap ran, or why
 /// it failed. Only a wrapped stretch is compacted: a report that lands
 /// after the operator's prompt reset the ledger changes nothing. A relay
-/// compaction that failed stops the relay (ADR-417 item 4).
+/// compaction that failed stops the relay.
+///
+/// References:
+/// - ADR-417 item 4: a compaction that is skipped or fails stops the relay.
 pub fn compacted(p: &mut Policy, failed: Option<String>, now: u64) {
     if p.wrapped_at.is_none() {
         return;
@@ -314,9 +344,12 @@ pub fn goal(p: &mut Policy, active: bool) {
     p.goal = Some(if active { "active" } else { "none" }.into());
 }
 
-/// A wrap's relay marker (ADR-417 item 8), the last line of its reply:
+/// A wrap's relay marker, the last line of its reply:
 /// `relay: continue tasks=3 goal=none wrap=<id> head=<sha>`, or
 /// `relay: stop <empty|decision|doubt>` and the same fields.
+///
+/// References:
+/// - ADR-417 item 8: the marker's form and fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Marker {
     /// `None` for `continue`; `empty`, `decision` or `doubt` for a stop.
@@ -531,7 +564,10 @@ pub struct Config {
     /// Keepalives after the wrap before `after_wrap` applies.
     pub after_max: u32,
     pub wrap_skill: WrapSkill,
-    /// `relay`: what follows a wrap is a compaction and a resume (ADR-417).
+    /// `relay`: what follows a wrap is a compaction and a resume.
+    ///
+    /// References:
+    /// - ADR-417 item 1: the `relay` setting picks relay mode or handoff mode.
     pub relay: bool,
     pub relay_at_pct: u32,
     pub max_relays: u32,
@@ -544,7 +580,10 @@ pub struct Config {
 }
 
 /// The context fill at a main-loop turn's end (`--fill`, `--window`,
-/// `--native-at`), for relay's fill path (ADR-417 item 2a).
+/// `--native-at`), for relay's fill path.
+///
+/// References:
+/// - ADR-417 item 2a: a context fill past the threshold starts a wrap.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Fill {
     pub tokens: u64,
@@ -600,8 +639,13 @@ impl Config {
     /// except `keepalive`, which fails closed: only an explicit true runs
     /// the idle path; and `relay`, which only an explicit `on` turns on. No
     /// document, or one that does not parse, is the policy off. ways reads
-    /// a key's name from before ADR-417's rename where a layer still holds
-    /// it, so every key arrives here under its continuity name.
+    /// a key's name from before the rename to `mods.attend.continuity` where
+    /// a layer still holds it, so every key arrives here under its
+    /// continuity name.
+    ///
+    /// References:
+    /// - ADR-417 item 1: the keys move to `mods.attend.continuity`, and the old
+    ///   names are still read for a while.
     pub fn from_settings(doc: Option<&str>) -> Config {
         let d = Config::default();
         let Some(v) = doc.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()) else {
@@ -711,7 +755,11 @@ impl Config {
 
     /// This config with what the mode rules out: in relay mode no
     /// keepalives and no `after_wrap` follow the wrap, since a compaction
-    /// and a resume do (ADR-417 item 2c).
+    /// and a resume do.
+    ///
+    /// References:
+    /// - ADR-417 item 2c: in relay mode the idle wrap is followed by a
+    ///   compaction and a resume.
     pub fn for_mode(&self) -> Config {
         let mut c = self.clone();
         if c.relay {
@@ -722,9 +770,12 @@ impl Config {
     }
 
     /// Why the policy does not run with `gate`, or `None` when it runs.
-    /// With relay on it runs whatever autocompact says (ADR-417 item 2):
-    /// relay drives its own compaction, and its fill path runs even where
-    /// `keepalive` turns the idle path off.
+    /// With relay on it runs whatever autocompact says: relay drives its own
+    /// compaction, and its fill path runs even where `keepalive` turns the
+    /// idle path off.
+    ///
+    /// References:
+    /// - ADR-417 item 2: with relay on, the idle path's gate ignores autocompact.
     pub fn why_off(&self, gate: Gate) -> Option<&'static str> {
         if !self.settings_ok {
             Some("the mods.attend settings could not be read")
@@ -1010,7 +1061,7 @@ pub struct Decision {
     /// Why a running policy has no due point, in a few words for the mod's
     /// row: `under 50k`, `5m tier`, `no request yet`.
     pub idle: Option<&'static str>,
-    /// Whether relay mode is on (ADR-417).
+    /// Whether relay mode is on.
     pub relay: bool,
     /// Resumes since the operator's last prompt, of `max_relays`.
     pub relay_count: u32,
@@ -1208,7 +1259,10 @@ enum Cause {
     Bound,
     /// Outside the keepalive hours.
     Hours,
-    /// The context reached relay's threshold (ADR-417 item 2a).
+    /// The context reached relay's threshold.
+    ///
+    /// References:
+    /// - ADR-417 item 2a: a context fill past the threshold starts a wrap.
     Fill { tokens: u64, window: u64, at: u64 },
 }
 
@@ -1217,7 +1271,11 @@ fn tokens(n: u64) -> String {
     fmt_tok(n).replace(".0M", "M")
 }
 
-/// The wrap turn's text (ADR-414 item 6, ADR-417 item 2).
+/// The wrap turn's text: its first line says why the wrap goes out.
+///
+/// References:
+/// - ADR-414 item 6: the wrap turn the policy submits.
+/// - ADR-417 item 2: the fill threshold as one more reason for a wrap.
 fn wrap_text(cfg: &Config, site: &Site, p: &Policy, route: &WrapRoute, cause: Cause, now: u64) -> String {
     let since = p.since().map_or_else(|| "a long idle stretch".to_string(), |t| format!("{} since the operator's last prompt", fmt_duration(now.saturating_sub(t))));
     let first = match cause {
@@ -1277,15 +1335,20 @@ fn route(cfg: &Config, site: &Site, now: u64) -> WrapRoute {
 }
 
 /// A wrap id for a wrap the policy sends: the UTC time to the second and
-/// the session id's first eight characters, as `20261126T214012Z-3f9a1c2e`
-/// (ADR-417 item 8).
+/// the session id's first eight characters, as `20261126T214012Z-3f9a1c2e`.
+///
+/// References:
+/// - ADR-417 item 8: each wrap carries an id unique to it.
 fn issue_wrap_id(site: &Site, now: u64) -> String {
     let at = jiff::Timestamp::from_second(now as i64).map_or_else(|_| now.to_string(), |t| t.strftime("%Y%m%dT%H%M%SZ").to_string());
     let sid: String = site.session_id.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
     format!("{at}-{}", if sid.is_empty() { "session" } else { &sid })
 }
 
-/// The resume turn's text (ADR-417 item 4), for relay `n` of `max`.
+/// The resume turn's text, for relay `n` of `max`.
+///
+/// References:
+/// - ADR-417 item 4: the exact text of the resume.
 fn resume_text(handoff: &Path, n: u32, max: u32) -> String {
     format!(
         "relay: the conversation was compacted after a wrap; this is relay {n} of {max} since the operator's last prompt. Read {}. The task list survived the compaction; work from it and the handoff's TASKS, then start its DO NEXT. The operator is away: ask no questions. If a step needs a decision only the operator can make, or your doubt about the direction is high, do not start it; end your reply with one line, relay: stop decision or relay: stop doubt, followed by the reason, and the mod sends the handoff to the operator over attend.",
@@ -1315,9 +1378,13 @@ fn send_wrap(state: &mut State, cfg: &Config, site: &Site, cause: Cause, reason:
 }
 
 /// The relay's judgment of a wrap that ran in relay mode, once the mod
-/// reported its answer (ADR-417 items 4 and 5): a compaction and a resume,
-/// or a stop. `None` where no relay wrap waits, or where a `/wrap` came
-/// while relay is off, which is cleared.
+/// reported its answer: a compaction and a resume, or a stop. `None` where
+/// no relay wrap waits, or where a `/wrap` came while relay is off, which is
+/// cleared.
+///
+/// References:
+/// - ADR-417 items 4 and 5: the compaction and resume, and the stops that
+///   end the relay.
 fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option<Decision> {
     // A stop a report recorded (a resumed turn's stop line, a compaction or
     // a resume that failed, an unfinished wrap) hands the reply over once.
@@ -1499,7 +1566,10 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
         return (out, d);
     }
     // Relay's fill path: one wrap per generation, once the context reaches
-    // the threshold (ADR-417 item 2a).
+    // the threshold.
+    //
+    // References:
+    // - ADR-417 item 2a: a context fill past the threshold starts a wrap.
     let fill_at = cfg.relay_at_tokens(gate);
     if let (Some(at), Some(f)) = (fill_at, cfg.fill) {
         let p = &state.policy;
@@ -1730,8 +1800,8 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u6
     lines
 }
 
-/// The card's relay line (ADR-417): the mode, the count against the cap,
-/// the threshold, and where the relay stands or why it stopped.
+/// The card's relay line: the mode, the count against the cap, the
+/// threshold, and where the relay stands or why it stopped.
 fn relay_line(p: &Policy, cfg: &Config) -> String {
     if !cfg.relay {
         return "relay       off: a wrap ends with a /compact line for the operator (handoff mode)".into();
