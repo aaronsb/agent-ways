@@ -1845,3 +1845,27 @@ fn lint_names_a_target_holding_the_keepalive_section() {
     assert_eq!(code, 0, "{err}");
     assert_eq!(std::fs::read_to_string(&tcfg).unwrap(), "mods:\n  attend:\n    continuity:\n      wrap: send\n");
 }
+
+/// `unset` of a renamed key removes it in that layer under both names, so
+/// the old name's value does not read back through the dual read.
+///
+/// References:
+/// - ADR-417 item 1: a renamed key is read under both names for a while.
+#[test]
+fn unset_removes_a_renamed_key_under_its_old_name_too() {
+    let f = Fx::new();
+    let p = f.root.join("proj");
+    f.write(&f.overlay(), "mods:\n  attend:\n    listening: active\n    keepalive:\n      enabled: false\n      margin_minutes: 5\n");
+    let get = |k: &str| f.run(&["settings", "get", k, "--project", p.to_str().unwrap()]).0;
+    assert_eq!(get("mods.attend.continuity.keepalive"), "false\n");
+    let (out, err, code) = f.run(&["settings", "unset", "mods.attend.continuity.keepalive", "--project", p.to_str().unwrap()]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(get("mods.attend.continuity.keepalive"), "true\n", "the default, from no layer");
+    let text = std::fs::read_to_string(f.overlay()).unwrap();
+    assert_eq!(parsed(&text), parsed("mods: {attend: {listening: active, keepalive: {margin_minutes: 5}}}"), "{text}");
+    // Both names in one layer: both go.
+    f.write(&f.overlay(), "mods:\n  attend:\n    continuity:\n      margin_minutes: 9\n    keepalive:\n      margin_minutes: 5\n");
+    assert_eq!(f.run(&["settings", "unset", "mods.attend.continuity.margin_minutes", "--project", p.to_str().unwrap()]).2, 0);
+    let text = std::fs::read_to_string(f.overlay()).unwrap();
+    assert!(!text.contains("margin_minutes"), "{text}");
+}

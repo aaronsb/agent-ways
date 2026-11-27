@@ -311,14 +311,26 @@ pub fn set_at(name: &str, raw: &str, place: &Place, dir: &Path) -> Result<Done, 
     Ok(with_override(said, &key, &read_at(place, dir), &file, false))
 }
 
-/// Remove `name` from `place`'s file. Says what is in effect after, read
-/// where the chat runs (`dir`) or at the project written, and which higher
-/// file still sets it.
+/// Remove `name` from `place`'s file, under its old name too where it was
+/// renamed, since the layer is still read by that name. Says what is in
+/// effect after, read where the chat runs (`dir`) or at the project
+/// written, and which higher file still sets it.
+///
+/// References:
+/// - ADR-417 item 1: a renamed key is read under both names for a while.
 pub fn unset_at(name: &str, place: &Place, dir: &Path) -> Result<Done, String> {
     let key = Key::of(name).ok_or_else(|| format!("{name} is not a setting the chat lists"))?;
     let (file, _) = key.file(place)?;
     let kp = key.path();
-    edit_file_within(&file, None, Some(LOCK_WAIT), |d| d.unset(&kp)).map_err(|e| format!("{e}; nothing written"))?;
+    let was = key.spec().was_path();
+    edit_file_within(&file, None, Some(LOCK_WAIT), |d| {
+        d.unset(&kp)?;
+        if let Some(w) = &was {
+            d.unset(w)?;
+        }
+        Ok(())
+    })
+    .map_err(|e| format!("{e}; nothing written"))?;
     let at = read_at(place, dir);
     let (value, from) = key.effect(&at);
     let said = format!("{name} unset in {}; {value} ({from}) in effect", short(&file));
@@ -562,6 +574,23 @@ mod tests {
         let done = unset_at("mods.attend.listening", &here, &proj).unwrap();
         assert!(!read(&proj.join(".claude/ways.yaml")).contains("listening"));
         assert!(!done.overridden && !done.said.contains("not in effect"), "{done:?}");
+    }
+
+    /// An unset of a renamed key removes its old name in that file too,
+    /// which the dual read would otherwise still find.
+    ///
+    /// References:
+    /// - ADR-417 item 1: a renamed key is read under both names for a while.
+    #[test]
+    fn an_unset_of_a_renamed_key_removes_its_old_name_too() {
+        let _env = crate::test_dir::env_lock();
+        let home = home();
+        let proj = home.proj().to_path_buf();
+        let here = Place::Project(proj.clone());
+        write(&proj.join(".claude/ways.yaml"), "mods:\n  attend:\n    keepalive:\n      enabled: false\n");
+        let done = unset_at("mods.attend.continuity.keepalive", &here, &proj).unwrap();
+        assert!(!read(&proj.join(".claude/ways.yaml")).contains("enabled"), "{}", read(&proj.join(".claude/ways.yaml")));
+        assert!(done.said.contains("true (default) in effect"), "{}", done.said);
     }
 
     /// Unset in the user file is read where the chat runs: the project
