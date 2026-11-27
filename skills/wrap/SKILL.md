@@ -14,7 +14,7 @@ The deliverable is two things that survive a reset: a **TaskList that honestly m
 
 ## Arguments
 
-- `/wrap` — full flow: land work (offer), square the TaskList, write the handoff, hand off to `/compact`.
+- `/wrap` — full flow: land work (offer; relay mode lands nothing), square the TaskList, write the handoff, then end with a `/compact` line in handoff mode or the relay marker in relay mode (Step 4).
 - `/wrap stay` — wrapping mid-work on purpose: **skip** the land/merge step. Don't land anything; just capture state accurately and produce the handoff. Use when the seam is "I'm pausing", not "I'm done".
 - `/wrap handoff` — forces handoff mode for this run, whatever the relay setting says. The wrap ends with a `/compact` line and no relay marker, so the operator can stop a relay-mode session by hand.
 
@@ -30,8 +30,8 @@ ways settings get mods.attend.continuity.relay --project "$(git rev-parse --show
 The wrap runs in one of two modes. **Handoff mode** ends the wrap with a `/compact <focus>` line for the operator to run. **Relay mode** ends it with a relay marker line, and the attend mod then compacts the conversation with the handoff and submits a turn that resumes the work. Pick the mode in this order:
 
 1. The argument `handoff` forces handoff mode.
-2. A wrap turn that the attend mod submitted says which mode it is in and, in relay mode, names the wrap id to use (Step 3). Follow the turn.
-3. Otherwise the setting decides. `on` is relay mode. Any other output, `off` or an error, is handoff mode.
+2. A wrap turn from the attend mod that names relay mode and a wrap id is in relay mode. Use that wrap id (Step 3).
+3. Otherwise the setting decides. `on` is relay mode. Any other output, `off` or an error, is handoff mode. A wrap turn from the attend mod that names no relay mode is decided here too.
 
 **In relay mode the skill runs with `stay` semantics, whoever invoked it.** It lands nothing: Step 1 records stranded work in the handoff and offers no merge. It asks nothing: do not call AskUserQuestion, because the operator may be away. It starts no new work. A choice that only the operator can make goes into the handoff's DECISIONS section, and the wrap ends with the `stop decision` marker (Step 4).
 
@@ -98,12 +98,13 @@ Do not compress the descriptions here. This block and Step 3's prompt carry diff
 
 Produce a single copy-pastable block. Compaction keeps the session alive; this prompt is the harder guarantee — it survives even a `/clear` or a brand-new window. Also save it to `.claude/handoff.wrap.md` at the repository root (`git rev-parse --show-toplevel`), where `start` and a successor session look for it. When `.gitignore` does not cover it, list it in `.git/info/exclude` so the working tree stays clean.
 
-The file's first line is `<YYYY-MM-DD> <short HEAD> wrap=<wrap id>` in both modes, such as `2026-11-26 e6bbfbdd wrap=20261126T2140Z-3f9a1c2e`, and the prompt starts on the next line. The wrap id names this one wrap. The attend mod and the PreCompact hook treat the file as fresh only when its first line carries the id of the wrap they judge, so a handoff left over from an earlier wrap is never taken for this one. When a wrap turn from the attend mod names a wrap id, use that id. Otherwise make one from the UTC time and the first 8 characters of the session id:
+The file's first line is `<YYYY-MM-DD> <short HEAD> wrap=<wrap id>` in both modes, such as `2026-11-26 e6bbfbdd wrap=20261126T214012Z-3f9a1c2e`, and the prompt starts on the next line. The wrap id names this one wrap. The attend mod and the PreCompact hook treat the file as fresh when its first line carries the id of the wrap they judge, so a handoff left over from an earlier wrap is not taken for this one. When a wrap turn from the attend mod names a wrap id, set `WRAP_ID` to that id and skip the two lines that make one. Otherwise make one from the UTC time and the first 8 letters and digits of the session id, or, where no session id is set, the shell's process id and a random number. In either case record the id with attend, in both modes, so the PreCompact hook knows this wrap:
 
 ```bash
-SESSION=$(ways context --json | jq -r .session)
-WRAP_ID="$(date -u +%Y%m%dT%H%MZ)-${SESSION:0:8}"
-echo "$(date +%F) $(git rev-parse --short HEAD) wrap=$WRAP_ID"   # the handoff's first line
+SID="$(printf '%s' "${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID}}" | tr -cd '0-9A-Za-z' | cut -c1-8)"
+WRAP_ID="$(date -u +%Y%m%dT%H%M%SZ)-${SID:-p$$r${RANDOM:-0}}"
+attend keepwarm wrap-id --record "$WRAP_ID" >/dev/null 2>&1 || true   # no attend, nothing recorded
+echo "$(date +%F) $(git rev-parse --short HEAD) wrap=$WRAP_ID"        # the handoff's first line
 ```
 
 Shell variables do not survive between Bash calls, so keep the printed id: the relay marker in Step 4 repeats it.
