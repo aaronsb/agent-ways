@@ -60,7 +60,7 @@ Late-interaction reads only the EN corpus. On a localized install the multilingu
 
 ### Other surfaces
 
-- **Bash** (`scan::command`): `commands:` on the command, then `pattern:` on the tool description, fire on the regex alone. Its semantic lane is single-vector only (`semantic:bash:en|multi`, `p ≥ τ_s` after parent-boost) over the command, the description and Claude's prose since the last human turn (`lookbehind::intent`). State-triggered ways are excluded, and nothing is logged as a near-miss.
+- **Bash** (`scan::command`): `commands:` on the command, then `pattern:` on the tool description, fire on the regex alone. Its semantic lane is single-vector only (`semantic:bash:en|multi`, `p ≥ τ_s` after parent-boost) over each operative segment's verb (program, subcommand and flags) and the tool description (`ShellCommand::embed_surface`). A check's semantic score reads the command, the description and Claude's prose since the last human turn (`lookbehind::intent`), embedded only when a check in scope asks for it. State-triggered ways are excluded, and nothing is logged as a near-miss.
 - **File** (`scan::file`): `files:` regex only.
 - **Tool** (`scan::tool`): `tool_name:` regex on the tool name, on the hook events `tool_event:` lists (`[PreToolUse]` by default). The envelope names the real event. Lint warns when the regex matches no wired tool or an event is not wired (ADR-704).
 
