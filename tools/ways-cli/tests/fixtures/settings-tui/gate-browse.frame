@@ -10,11 +10,11 @@ agent-tui frame 100x30
 |│       provider                anthropic             ││                                           │|
 |│       model                   claude-haiku-4-5      ││                                           │|
 |│       threshold               0.3                   ││                                           │|
-|│       timeout_ms              2000                  ││                                           │|
+|│       timeout_ms              2800                  ││                                           │|
 |│       turns                   1                     ││                                           │|
 |│       max_turn_chars          1200                  ││                                           │|
 |│       concurrency             8                     ││                                           │|
-|│       max_candidates          8                     ││                                           │|
+|│       max_candidates          14                    ││                                           │|
 |│       tool_timeout_ms         3000                  ││                                           │|
 |│       tool_candidates         16                    ││                                           │|
 |│       price_in_per_mtok                             ││                                           │|

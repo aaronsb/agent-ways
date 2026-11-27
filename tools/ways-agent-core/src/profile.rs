@@ -202,7 +202,8 @@ pub struct Profile {
     pub model: String,
     /// P(yes) below this blocks a candidate in enforce mode.
     pub threshold: f64,
-    /// The judge call's deadline. Past it the gate fails open.
+    /// The judge's deadline on the prompt and state lanes, which send one
+    /// request per scan. Past it the gate fails open.
     pub timeout_ms: u64,
     /// Conversation turns sent as context, counted back from the last.
     pub turns: usize,
@@ -210,9 +211,9 @@ pub struct Profile {
     pub max_turn_chars: usize,
     /// Provider calls the agent runs at once, across all sessions.
     pub concurrency: usize,
-    /// Candidates judged per request on the prompt and state lanes, taken
-    /// in the matcher's order; past it the next ones go in a further request
-    /// within the same deadline. Judge latency grows with each candidate.
+    /// The most candidates the prompt and state lanes' one request carries,
+    /// in the matcher's order. A candidate past it gets no verdict and is
+    /// shown as the matcher decided. Judge latency grows with each candidate.
     pub max_candidates: usize,
     /// The judge's deadline on a tool lane (command, file, tool, task,
     /// post-tool), which sends one request per call. The hook cuts it to
@@ -633,7 +634,7 @@ mod tests {
         let p = &shipped()["claude-code"];
         assert_eq!((p.provider, p.model.as_str()), (Provider::ClaudeCode, "claude-haiku-4-5"));
         assert_eq!(p.display_name.as_deref(), Some("Claude Code internal"));
-        assert_eq!((p.threshold, p.timeout_ms, p.max_candidates), (0.3, 2000, 8));
+        assert_eq!((p.threshold, p.timeout_ms, p.max_candidates), (0.3, 2800, 14));
         assert!(Provider::ClaudeCode.keyless());
         assert!(!Provider::ALL.contains(&Provider::ClaudeCode));
         assert!(Provider::ALL.iter().all(|p| !p.keyless()));

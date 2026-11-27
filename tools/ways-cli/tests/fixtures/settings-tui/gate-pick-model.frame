@@ -10,7 +10,7 @@ agent-tui frame 100x30
 |│       provider                anthropic             ││model scores on its own scale. `ways agent │|
 |│▌      model                   claude-haiku-4-5      ││models` lists what a provider serves and   │|
 |│       threshold               0.3                   ││keeps the list this key offers; until it   │|
-|│       timeout_ms              2000                  ││has run for the profile's provider the key │|
+|│       timeout_ms              2800                  ││has run for the profile's provider the key │|
 |│       turns            ┌pick one: gate.profiles.anthropic.model─────────┐ and a list that has    │|
 |│       max_turn_chars   │ ● claude-haiku-4-5  current                    │ed.                     │|
 |│       concurrency      │   claude-haiku-4-5-20251001                    │                        │|

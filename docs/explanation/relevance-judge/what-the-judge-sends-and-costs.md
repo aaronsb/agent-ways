@@ -22,10 +22,10 @@ A request goes out only when all of these hold:
 - `gate.mode` is `enforce` or `shadow`;
 - the engine's provider has a key that passed its last check.
 
-Then the agent makes one HTTPS request per batch of candidates, to `api.anthropic.com/v1/messages` or `openrouter.ai/api/v1/chat/completions`, depending on the engine's provider. The request holds:
+Then the agent makes one HTTPS request per scan, to `api.anthropic.com/v1/messages` or `openrouter.ai/api/v1/chat/completions`, depending on the engine's provider. The request holds:
 
 - a fixed system instruction and the `record_judgements` tool schema;
-- for each candidate: the way's path through the ways tree, with `›` between segments, and its `description`. The way's body is not sent. A tool lane sends one request of up to `tool_candidates` candidates (16 shipped); the prompt lane's requests carry at most `max_candidates` (8), and a prompt with more sends further requests while the deadline holds them;
+- for each candidate: the way's path through the ways tree, with `›` between segments, and its `description`. The way's body is not sent. A tool lane sends one request of up to `tool_candidates` candidates (16 shipped); the prompt and state lanes' request carries at most `max_candidates` (14), and a candidate past it is not sent;
 - the conversation: the last `turns` turns, each with whitespace collapsed, `<` replaced by `‹`, and cut to its last `max_turn_chars` characters (1,200 shipped).
 
 On the prompt lane the hook offers the agent at most two turns: Claude's last reply and the prompt. The reply is the text blocks of Claude's last message, the first 2,000 bytes, as the Stop hook recorded it; tool calls and their results are not part of it. The prompt is sent lowercased, as the matcher sees it. The shipped profiles set `turns: 1`, so by default only the prompt is sent. Setting `turns` to 2 or more adds Claude's reply, and no setting sends more than these two. On the queued-message lane the turn is the queued messages joined together, with no reply.

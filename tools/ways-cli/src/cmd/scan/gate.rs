@@ -12,13 +12,12 @@
 //! reach the judge is one switch, [`JUDGED`]: every kind (semantic,
 //! keyword, `pattern_strict` and declared: `commands:`, `files:`,
 //! `tool_name:`, state triggers, postchecks), or only the semantic and
-//! keyword ones the gate's first release judged. A tool lane sends one
-//! request per call, of up to the profile's `tool_candidates` within
-//! `tool_timeout_ms`; the prompt and state lanes send requests of up to
-//! `max_candidates`, in the matcher's order, within `timeout_ms`, each
-//! further one only while what is left of that deadline holds it
-//! ([`Budget`]). Each request is held to what is left of its lane's
-//! deadline, the same figure the loop counts. A way under a blocked
+//! keyword ones the gate's first release judged. Every lane sends one
+//! request per scan, in the matcher's order: a tool lane of up to the
+//! profile's `tool_candidates` within `tool_timeout_ms`, the prompt and
+//! state lanes of up to `max_candidates` within `timeout_ms` ([`Budget`]).
+//! The request is held to what is left of its lane's deadline, the same
+//! figure the gate counts. A candidate past the cap gets no verdict. A way under a blocked
 //! ancestor that the judge did not see is blocked with it and logged as a
 //! `block` with `reason: ancestor`, the ancestor's id and its verdict's
 //! fields. Every verdict and fallback is logged to `events.jsonl` with its
@@ -413,46 +412,44 @@ fn apply_from(
     }
 }
 
-/// How a lane's candidates go to the judge: the deadline all of a scan's
-/// requests share, counted from the gate's start, the most candidates one
-/// request carries, and whether the lane sends one request or several.
+/// How a lane's candidates go to the judge: the deadline of a scan's one
+/// request, counted from the gate's start, and the most candidates it
+/// carries. A candidate past `cap` gets no verdict.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Budget {
     pub timeout: Duration,
     pub cap: usize,
-    /// One request per scan: the tool lanes. A candidate past `cap` gets no
-    /// verdict ([`settle_unjudged`]).
-    pub single: bool,
 }
 
 impl Budget {
-    /// The prompt and state lanes judge in requests of `max_candidates`
-    /// within `timeout_ms`. The tool lanes (command, file, tool, task,
-    /// post-tool) send one request of up to `tool_candidates` within
-    /// `tool_timeout_ms`: nothing on them waits for a second, and a second
-    /// started with what the first left of the deadline was aborted.
+    /// The tool lanes (command, file, tool, task, post-tool) send up to
+    /// `tool_candidates` within `tool_timeout_ms`; the prompt and state
+    /// lanes send up to `max_candidates` within `timeout_ms`. Either way it
+    /// is one request: a second, started with what the first left of the
+    /// deadline, was aborted or never sent.
     ///
     /// References:
     /// - ADR-197: the per-request cap.
-    /// - ADR-712 §5: a scan's requests share one deadline.
+    /// - ADR-712 §5: one request per scan, within one deadline.
     pub(super) fn for_lane(p: &Profile, lane: &str) -> Budget {
         if tool_lane(lane) {
-            Budget { timeout: Duration::from_millis(p.tool_timeout_ms), cap: p.tool_candidates.max(1), single: true }
+            Budget { timeout: Duration::from_millis(p.tool_timeout_ms), cap: p.tool_candidates.max(1) }
         } else {
-            Budget { timeout: Duration::from_millis(p.timeout_ms), cap: p.max_candidates.max(1), single: false }
+            Budget { timeout: Duration::from_millis(p.timeout_ms), cap: p.max_candidates.max(1) }
         }
     }
 }
 
-/// Whether `lane` is a tool lane, which sends one judge request per call
-/// and keeps a semantic candidate with no verdict out.
+/// Whether `lane` is a tool lane, which keeps a semantic candidate with no
+/// verdict out. The prompt and state lanes fail open.
 pub(super) fn tool_lane(lane: &str) -> bool {
     !matches!(lane, "prompt" | "state")
 }
 
-/// What a judge request over `n` candidates takes, as a week of the claude-code
-/// engine's calls measured it: about 515 ms plus 112 ms per candidate. A
-/// further request is sent only when what is left of the deadline holds it.
+/// What a judge request over `n` candidates takes on average, as the
+/// claude-code engine's calls measured it: about 515 ms plus 112 ms per
+/// candidate. The shipped caps are sized from it.
+#[cfg(test)]
 fn expected_latency(n: usize) -> Duration {
     Duration::from_millis(515 + 112 * n as u64)
 }
@@ -658,17 +655,17 @@ fn run(
     run_on(&SystemClock, Instant::now(), budget, pending, turns, settings, log, judges, call)
 }
 
-/// The gate with the engine call injected. Every candidate `judges` sends
-/// ([`JUDGED`] on the hook path) goes to the judge in the matcher's order,
-/// `budget.cap` to a request, and every request shares `budget.timeout`
+/// The gate with the engine call injected. The first `budget.cap` of the
+/// candidates `judges` sends ([`JUDGED`] on the hook path), in the
+/// matcher's order, go to the judge in one request, within `budget.timeout`
 /// from `begun`. `call` is handed what is left of that deadline, which is
 /// the request's own deadline: the job or the agent's provider call is held
-/// to it, and the caller adds the read grace. A tool lane sends one request
-/// and the candidates past its cap get no verdict. On the other lanes a
-/// further request is sent only when what is left holds it
-/// ([`expected_latency`]); one that is not sent fails open for its own
-/// candidates. A candidate left without a verdict is settled by
-/// [`settle_unjudged`].
+/// to it, and the caller adds the read grace. The candidates past the cap
+/// get no verdict, with reason [`OVERFLOW`], and so do those of a request
+/// that failed, with its reason. On a tool lane in enforce mode they are
+/// settled by [`settle_unjudged`]. The prompt and state lanes fail open for
+/// them: the overflow is logged as a `gate_fallback` of its own, and a
+/// failed request's `gate_fallback` names its reason.
 #[allow(clippy::too_many_arguments)]
 fn run_on(
     clock: &dyn Clock,
@@ -686,28 +683,28 @@ fn run_on(
         return Gate { status: Status::Idle, ..Gate::default() };
     }
     let elapsed = || clock.now().saturating_duration_since(begun);
-    let mut gate = Gate { status: Status::Idle, ..Gate::default() };
-    let mut unjudged: Vec<(&Pending<'_>, String)> = Vec::new();
-    for (i, batch) in judged.chunks(budget.cap).enumerate() {
-        if budget.single && i > 0 {
-            unjudged.extend(batch.iter().map(|p| (*p, OVERFLOW.to_string())));
-            continue;
+    let (sent, over) = judged.split_at(judged.len().min(budget.cap));
+    let remaining = budget.timeout.saturating_sub(elapsed());
+    let mut gate = if remaining < MIN_JOB {
+        fallback("deadline: before call", sent.len(), log, &elapsed().as_millis().to_string())
+    } else {
+        judge_batch(sent, &turns, settings, log, remaining, &mut call)
+    };
+    if tool_lane(log.lane) {
+        if settings.mode == Mode::Enforce {
+            let reason = match &gate.status {
+                Status::Fallback { reason } => reason.clone(),
+                _ => "no_verdict".to_string(),
+            };
+            let mut unjudged: Vec<(&Pending<'_>, String)> =
+                sent.iter().filter(|p| !gate.judgements.contains_key(p.id)).map(|p| (*p, reason.clone())).collect();
+            unjudged.extend(over.iter().map(|p| (*p, OVERFLOW.to_string())));
+            settle_unjudged(&mut gate, &unjudged, log);
         }
-        let remaining = budget.timeout.saturating_sub(elapsed());
-        let next = if remaining < MIN_JOB || (i > 0 && remaining < expected_latency(batch.len())) {
-            fallback("deadline: before call", batch.len(), log, &elapsed().as_millis().to_string())
-        } else {
-            judge_batch(batch, &turns, settings, log, remaining, &mut call)
-        };
-        let reason = match &next.status {
-            Status::Fallback { reason } => reason.clone(),
-            _ => "no_verdict".to_string(),
-        };
-        unjudged.extend(batch.iter().filter(|p| !next.judgements.contains_key(p.id)).map(|p| (*p, reason.clone())));
-        gate.merge(next);
-    }
-    if budget.single && settings.mode == Mode::Enforce {
-        settle_unjudged(&mut gate, &unjudged, log);
+    } else if !over.is_empty() {
+        // The scan's status stays the request's; this line counts the
+        // candidates past the cap, which pass as the matcher decided.
+        fallback(OVERFLOW, over.len(), log, &elapsed().as_millis().to_string());
     }
     // A way's guidance presumes its parent's: a candidate the judge did not
     // see under a blocked ancestor goes with it.
@@ -717,7 +714,9 @@ fn run_on(
     gate
 }
 
-/// The reason a tool lane's candidate past the request's cap has no verdict.
+/// The reason a candidate past the request's cap has no verdict: a tool
+/// lane's `way_unjudged` line and the prompt and state lanes' `gate_fallback`
+/// line give it.
 const OVERFLOW: &str = "overflow";
 
 /// What becomes of a tool-lane candidate the judge gave no verdict, in
@@ -764,27 +763,7 @@ fn settle_unjudged(gate: &mut Gate, unjudged: &[(&Pending<'_>, String)], log: &L
     }
 }
 
-impl Gate {
-    /// Folds one request's outcome into the scan's. Judged requests add
-    /// their latencies; a fallback after a judged request leaves the status
-    /// judged, since its own `gate_fallback` line is already logged.
-    fn merge(&mut self, next: Gate) {
-        self.blocked.0.extend(next.blocked.0);
-        self.judgements.extend(next.judgements);
-        self.unjudged.extend(next.unjudged);
-        self.status = match (std::mem::take(&mut self.status), next.status) {
-            (Status::Idle, s) => s,
-            (Status::Judged { engine, model, judge_ms: a }, Status::Judged { judge_ms: b, .. }) => {
-                Status::Judged { engine, model, judge_ms: a + b }
-            }
-            (s @ Status::Judged { .. }, _) => s,
-            (_, s @ Status::Judged { .. }) => s,
-            (s, _) => s,
-        };
-    }
-}
-
-/// One judge request over `batch`, held to `timeout`.
+/// The scan's one judge request over `batch`, held to `timeout`.
 fn judge_batch(
     batch: &[&Pending<'_>],
     turns: &[Turn],
@@ -1066,7 +1045,8 @@ mod tests {
             assert_eq!(req.turns[1].role, Role::User);
             assert!(req.candidates[0].text.starts_with("softwaredev › code › security › secrets\n"));
             // The judge's own deadline; the reader adds the read grace.
-            assert!(timeout <= Duration::from_millis(2000) && timeout > Duration::from_millis(1900), "{timeout:?}");
+            let deadline = Duration::from_millis(settings(Mode::Enforce).profile.timeout_ms);
+            assert!(timeout <= deadline && timeout > deadline - Duration::from_millis(100), "{timeout:?}");
             assert_eq!(req.deadline_ms, Some(timeout.as_millis() as u64), "the agent is told the same deadline");
             Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.92), ("data/migrations", 0.05)]))
         });
@@ -1189,30 +1169,69 @@ mod tests {
         }
     }
 
+    /// #1378: the prompt and state lanes send one request per scan. Up to
+    /// `max_candidates` go in it; the one past the cap gets no verdict and
+    /// passes as the matcher decided, counted by a `gate_fallback` line
+    /// that names `overflow`. The scan's status is the request's.
     #[test]
-    fn past_the_cap_the_rest_go_in_a_further_request() {
-        let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
-        let many: Vec<Pending<'_>> =
-            ids.iter().map(|id| Pending { id, description: "d", trigger: Trigger::Keyword }).collect();
+    fn a_prompt_or_state_lane_scan_sends_one_request_and_the_one_past_the_cap_fails_open() {
         let s = settings(Mode::Enforce);
-        assert_eq!(s.profile.max_candidates, 8);
+        let cap = s.profile.max_candidates;
+        assert_eq!(cap, 14);
+        for lane in ["prompt", "state"] {
+            for n in [1, cap, cap + 1] {
+                let ids: Vec<String> = (0..n).map(|i| format!("w/{i}")).collect();
+                let events = Events::default();
+                let sink = recorder(&events);
+                let lc = LogContext { lane, ..log(&sink) };
+                let mut requests: Vec<Vec<String>> = Vec::new();
+                let g = run(&pending_ids(&ids, 0), turns("q", None), &s, &lc, Judges::Every, |req, _| {
+                    let sent: Vec<String> = req.candidates.iter().map(|c| c.id.clone()).collect();
+                    let low: Vec<(&str, f64)> = sent.iter().map(|id| (id.as_str(), 0.05)).collect();
+                    let reply = judged(Mode::Enforce, &low);
+                    requests.push(sent);
+                    Ok(reply)
+                });
+                let judged_n = n.min(cap);
+                assert_eq!(requests, [ids[..judged_n].to_vec()], "{lane} {n}: one request, at most the cap");
+                assert_eq!(g.ids(), ids[..judged_n].iter().cloned().collect::<HashSet<_>>(), "{lane} {n}: the one past the cap is not blocked");
+                assert_eq!(g.judgements.len(), judged_n);
+                assert_eq!(g.status, Status::Judged { engine: "anthropic".into(), model: "claude-haiku-4-5".into(), judge_ms: 800 });
+                let events = events.borrow();
+                assert_eq!(calls_in(&events).len(), 1);
+                assert_eq!(events.iter().filter(|e| field(e, "event") == "way_judged").count(), judged_n);
+                assert!(events.iter().all(|e| field(e, "event") != "way_unjudged"), "{lane}: no tool-lane settling");
+                let fallbacks: Vec<(&str, &str, &str)> = events
+                    .iter()
+                    .filter(|e| field(e, "event") == "gate_fallback")
+                    .map(|e| (field(e, "reason"), field(e, "candidates"), field(e, "lane")))
+                    .collect();
+                let expected: &[(&str, &str, &str)] = if n > cap { &[("overflow", "1", lane)] } else { &[] };
+                assert_eq!(fallbacks, expected, "{lane} {n}");
+            }
+        }
+    }
+
+    /// On the prompt lane a failed request fails open for every candidate
+    /// in it, and the overflow past the cap is counted on a line of its own.
+    #[test]
+    fn a_failed_prompt_lane_request_and_its_overflow_fail_open_with_their_reasons() {
+        let s = settings(Mode::Enforce);
+        let ids: Vec<String> = (0..s.profile.max_candidates + 2).map(|i| format!("w/{i}")).collect();
+        let many: Vec<Pending<'_>> = ids.iter().map(|id| Pending { id, description: "d", trigger: Trigger::Semantic }).collect();
         let events = Events::default();
         let sink = recorder(&events);
-        let mut requests: Vec<Vec<String>> = Vec::new();
-        let g = run(&many, turns("q", None), &s, &log(&sink), Judges::Matched, |req, _| {
-            let sent: Vec<String> = req.candidates.iter().map(|c| c.id.clone()).collect();
-            let low: Vec<(&str, f64)> = sent.iter().map(|id| (id.as_str(), 0.05)).collect();
-            let reply = judged(Mode::Enforce, &low);
-            requests.push(sent);
-            Ok(reply)
-        });
-        assert_eq!(requests, [ids[..8].to_vec(), ids[8..].to_vec()], "8, then the 2 past the cap");
-        assert_eq!(g.ids(), ids.iter().cloned().collect::<HashSet<_>>(), "every candidate judged");
-        assert_eq!(g.status, Status::Judged { engine: "anthropic".into(), model: "claude-haiku-4-5".into(), judge_ms: 1600 });
+        let g = run(&many, turns("q", None), &s, &log(&sink), Judges::Every, |_, _| Err("deadline".into()));
+        assert!(g.ids().is_empty(), "nothing is blocked");
+        assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
         let events = events.borrow();
-        assert!(events.iter().all(|e| field(e, "event") != "gate_capped"));
-        assert_eq!(events.iter().filter(|e| field(e, "event") == "way_judged").count(), 10);
-        assert_eq!(calls_in(&events).len(), 2);
+        let fallbacks: Vec<(&str, &str)> =
+            events.iter().filter(|e| field(e, "event") == "gate_fallback").map(|e| (field(e, "reason"), field(e, "candidates"))).collect();
+        assert_eq!(fallbacks, [("deadline", "14"), ("overflow", "2")]);
+        // The one request that timed out is counted as one call; the
+        // overflow made none.
+        let calls = calls_in(&events);
+        assert_eq!(calls.iter().map(|c| field(c, "candidates")).collect::<Vec<_>>(), ["14"]);
     }
 
     // ── #1372: a tool lane's one request, and what gets no verdict ──
@@ -1227,7 +1246,7 @@ mod tests {
     }
 
     /// A tool lane sends every candidate the refire check left open in one
-    /// request, past the prompt lane's cap of 8, and each gets a verdict.
+    /// request, and each gets a verdict.
     #[test]
     fn a_tool_lane_scan_of_twelve_candidates_sends_one_request_and_judges_all_twelve() {
         let ids: Vec<String> = (0..12).map(|i| format!("w/{i}")).collect();
@@ -1353,14 +1372,14 @@ mod tests {
         assert!(unjudged.iter().all(|(k, _)| k != "critique"));
     }
 
-    /// The budget a request is handed is the judge's own deadline, counted
-    /// from the gate's start: the job is written with it and the loop
-    /// decides on it. It carries no read grace, which is the hook's to add
-    /// when it reads.
+    /// The budget the scan's request is handed is the judge's own deadline,
+    /// counted from the gate's start: the job is written with it and the
+    /// gate decides on it. It carries no read grace, which is the hook's to
+    /// add when it reads. Past the cap no second request takes what is left.
     #[test]
-    fn each_request_is_handed_the_budget_its_job_is_written_with() {
+    fn the_scans_one_request_is_handed_the_budget_its_job_is_written_with() {
         let s = settings(Mode::Enforce);
-        let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
+        let ids: Vec<String> = (0..s.profile.max_candidates + 3).map(|i| format!("w/{i}")).collect();
         let sink = |_: &[(&str, &str)]| {};
         let mut handed: Vec<Duration> = Vec::new();
         run(&pending_ids(&ids, 0), turns("q", None), &s, &log(&sink), Judges::Matched, |req, budget| {
@@ -1368,8 +1387,27 @@ mod tests {
             Ok(all_pass(&req))
         });
         let deadline = Duration::from_millis(s.profile.timeout_ms);
-        assert_eq!(handed.len(), 2);
-        assert!(handed.iter().all(|b| *b <= deadline && *b > deadline - Duration::from_millis(200)), "{handed:?} against {deadline:?}");
+        assert_eq!(handed.len(), 1);
+        assert!(handed[0] <= deadline && handed[0] > deadline - Duration::from_millis(200), "{handed:?} against {deadline:?}");
+    }
+
+    /// Each shipped cap leaves room for a slow call: a full request's
+    /// average latency ([`expected_latency`]) plus 0.5 s, about the slowest
+    /// 1% of the prompt and state lanes' calls over that average (#1378),
+    /// fits its lane's deadline, and the prompt lane's deadline, its agent
+    /// start and its read grace fit [`PROMPT_WAIT`].
+    #[test]
+    fn the_shipped_caps_leave_a_slow_call_room_inside_their_deadlines() {
+        let slow = Duration::from_millis(500);
+        for (name, p) in profile::shipped() {
+            for lane in ["prompt", "state", "command"] {
+                let b = Budget::for_lane(&p, lane);
+                assert!(expected_latency(b.cap) + slow <= b.timeout, "{name} {lane}: {b:?}");
+            }
+            let prompt = Budget::for_lane(&p, "prompt").timeout;
+            assert!(prompt <= budget_within(PROMPT_WAIT), "{name}: {prompt:?}");
+            assert!(prompt + ways_agent_core::client::START_WAIT + READ_GRACE <= PROMPT_WAIT);
+        }
     }
 
     /// The switch on its hook-path setting sends every trigger kind, strict
@@ -1492,29 +1530,18 @@ mod tests {
 
     #[test]
     fn ways_the_switch_leaves_unjudged_do_not_count_against_the_cap() {
-        let ids: Vec<String> = (0..9).map(|i| format!("w/{i}")).collect();
+        let s = settings(Mode::Enforce);
+        let cap = s.profile.max_candidates;
+        let ids: Vec<String> = (0..cap + 1).map(|i| format!("w/{i}")).collect();
         let events = Events::default();
         let sink = recorder(&events);
         let mut sizes = Vec::new();
-        run(&pending_ids(&ids, 1), turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |req, _| {
+        run(&pending_ids(&ids, 1), turns("q", None), &s, &log(&sink), Judges::Matched, |req, _| {
             sizes.push(req.candidates.len());
             Ok(judged(Mode::Enforce, &[]))
         });
-        assert_eq!(sizes, [8], "one full request");
-    }
-
-    #[test]
-    fn each_request_that_falls_back_counts_its_own_candidates() {
-        let ids: Vec<String> = (0..12).map(|i| format!("w/{i}")).collect();
-        let events = Events::default();
-        let sink = recorder(&events);
-        let blocked =
-            run(&pending_ids(&ids, 0), turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |_, _| Err("deadline".into()));
-        assert!(blocked.ids().is_empty());
-        let events = events.borrow();
-        let counts: Vec<&str> = events.iter().filter(|e| field(e, "event") == "gate_fallback").map(|e| field(e, "candidates")).collect();
-        assert_eq!(counts, ["8", "4"]);
-        assert_eq!(calls_in(&events).iter().map(|c| c.iter().find(|(k, _)| k == "candidates").unwrap().1.clone()).collect::<Vec<_>>(), ["8", "4"]);
+        assert_eq!(sizes, [cap], "one full request");
+        assert!(events.borrow().iter().all(|e| field(e, "reason") != OVERFLOW), "nothing past the cap");
     }
 
     #[test]
@@ -1671,7 +1698,8 @@ mod tests {
         assert!(taken.job.prompt.ends_with(ways_agent_core::judge::JSON_ONLY), "{}", taken.job.prompt);
         assert!(taken.job.prompt.contains("<guidance id=\"g2\">"));
         assert_eq!(taken.job.max_tokens, ways_agent_core::judge::max_tokens(3));
-        assert!(taken.job.timeout_ms > 0 && taken.job.timeout_ms <= 2000, "{}", taken.job.timeout_ms);
+        let deadline = profile::shipped()["claude-code"].timeout_ms;
+        assert!(taken.job.timeout_ms > 0 && taken.job.timeout_ms <= deadline, "{}", taken.job.timeout_ms);
         // One call, named for its engine, with the answer's usage and no price.
         let calls = calls(&events);
         assert_eq!(calls.len(), 1, "{calls:?}");
@@ -1703,41 +1731,53 @@ mod tests {
             handoff(&s.store, &settings, req, b)
         });
         let taken = h.join().unwrap().unwrap();
-        assert!(taken.job.timeout_ms <= 1500 && taken.job.timeout_ms > 1000, "{}", taken.job.timeout_ms);
-        assert_eq!(taken.job.timeout_ms, handed.as_millis() as u64, "the job carries the budget the loop handed it");
+        let deadline = settings.profile.timeout_ms;
+        assert!(taken.job.timeout_ms <= deadline - 500 && taken.job.timeout_ms > deadline - 1000, "{}", taken.job.timeout_ms);
+        assert_eq!(taken.job.timeout_ms, handed.as_millis() as u64, "the job carries the budget the gate handed it");
         // Under the least budget a call can use, no job is written.
-        let late = Instant::now() - Duration::from_millis(1970);
+        let late = Instant::now() - Duration::from_millis(deadline - 30);
         let g = run_on(&SystemClock, late, budget, &pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, b| handoff(&s.store, &settings, req, b));
         assert_eq!(g.status, Status::Fallback { reason: "deadline: before call".into() });
         assert_eq!(s.store.take().unwrap(), None);
     }
 
-    /// The loop counts the same deadline the job is written with, so a
-    /// further request on the prompt lane starts only when what the first
-    /// left of it holds the request: here the first takes 1.5 s of 2 s, and
-    /// the 500 ms left cannot hold two candidates, so none is sent and
-    /// nothing is spent on a call bound to be aborted.
+    /// A prompt-lane scan waits on one request: a host that takes the job
+    /// and never answers holds the gate for the shipped deadline plus the
+    /// read grace, and no second request follows for the candidates past
+    /// the cap. That wait, with the agent's start, stays inside
+    /// [`PROMPT_WAIT`].
     #[test]
-    fn a_further_request_starts_only_when_what_is_left_holds_it() {
+    fn a_prompt_lane_scans_whole_wait_is_one_deadline_inside_prompt_wait() {
         use crate::clock::ManualClock;
-        let s = settings(Mode::Enforce);
-        let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
+        let s = Session::new("one-wait", CLAUDE_CODE);
+        s.store.register_host().unwrap();
         let events = Events::default();
         let sink = recorder(&events);
-        let clock = ManualClock::new();
-        let mut handed: Vec<Duration> = Vec::new();
-        let g = run_on(&clock, clock.now(), Budget::for_lane(&s.profile, "prompt"), &pending_ids(&ids, 0), turns("q", None), &s, &log(&sink), Judges::Matched, |req, b| {
-            handed.push(b);
-            clock.sleep(Duration::from_millis(1500));
-            Ok(all_pass(&req))
+        let settings = Settings { engine: "claude-code".into(), engine_set: true, profile: profile::shipped()["claude-code"].clone(), mode: Mode::Enforce };
+        let ids: Vec<String> = (0..settings.profile.max_candidates + 4).map(|i| format!("w/{i}")).collect();
+        let store = s.store.clone();
+        let clock = ManualClock::new().at_first_sleep(move || {
+            store.take().unwrap().expect("the job is waiting for a host");
         });
-        assert_eq!(handed, [Duration::from_millis(2000)], "one request, handed the whole deadline");
-        assert_eq!(g.judgements.len(), 8);
-        let events = events.borrow();
-        let fallback = events.iter().find(|e| field(e, "event") == "gate_fallback").expect("the second request fell back");
-        assert_eq!((field(fallback, "reason"), field(fallback, "candidates")), ("deadline: before call", "2"));
-        assert_eq!(calls_in(&events).len(), 1, "no call was made for the second");
+        let budget = Budget::for_lane(&settings.profile, "prompt");
+        let mut handed: Vec<Duration> = Vec::new();
+        let g = run_on(&clock, clock.now(), budget, &pending_ids(&ids, 0), turns("q", None), &settings, &log(&sink), Judges::Every, |req, b| {
+            handed.push(b);
+            handoff_on(&clock, CLAIM_WINDOW, &s.store, &settings, req, b)
+        });
+        let deadline = Duration::from_millis(settings.profile.timeout_ms);
+        assert_eq!(handed, [deadline], "one request, handed the whole deadline");
+        let took = clock.elapsed();
+        assert!(took >= deadline + READ_GRACE && took < deadline + READ_GRACE + crate::session::judge_jobs::POLL * 2, "{took:?}");
+        assert!(took + ways_agent_core::client::START_WAIT <= PROMPT_WAIT, "{took:?}");
+        assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
         assert!(g.blocked.ids().is_empty(), "the prompt lane fails open");
+        let events = events.borrow();
+        let fallbacks: Vec<(&str, &str)> =
+            events.iter().filter(|e| field(e, "event") == "gate_fallback").map(|e| (field(e, "reason"), field(e, "candidates"))).collect();
+        assert_eq!(fallbacks, [("deadline", "14"), ("overflow", "4")]);
+        assert_eq!(calls_in(&events).len(), 1, "one call, of unknown cost");
+        assert_eq!(s.store.take().unwrap(), None, "no second job");
     }
 
     /// The gate over the claim-window handoff on a clock the test advances,
@@ -1794,7 +1834,7 @@ mod tests {
 
     /// The shipped claim window, on the real clock: a host that is registered
     /// and never claims leaves the job unclaimed, and the prompt fails open
-    /// as `deadline: unclaimed`, after the window and well inside the 2 s
+    /// as `deadline: unclaimed`, after the window and well inside the
     /// budget. The reason proves the order: a gate that waited out the budget
     /// would say `deadline`.
     #[test]

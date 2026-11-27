@@ -33,8 +33,8 @@ The judge writes four event types to the event log, beside the matcher's own. Ea
 |---|---|---|
 | `way_judged` | judged candidate | `p_yes` against `threshold`, and `verdict`: `pass`, `block` or `would_block`. `judge_ms` shows how close calls run to the deadline. |
 | `judge_call` | provider call | Tokens and `cost_usd`, which the spend views sum. `reason` when the call ended in a fallback. |
-| `gate_fallback` | failed request | `reason`: why the matcher decided alone. |
-| `gate_capped` | request over the cap, in releases that judged only the first `max_candidates` | `ways`: the candidates that passed unjudged. A current gate judges the rest in further requests and writes none. |
+| `gate_fallback` | failed request, or the prompt or state lane's candidates past the cap | `reason`: why the matcher decided alone; `overflow` for the candidates past `max_candidates`. |
+| `gate_capped` | request over the cap, in releases that judged only the first `max_candidates` | `ways`: the candidates that passed unjudged. A current gate sends one request per scan and writes none. |
 
 A `way_judged` block with `reason: ancestor` names the blocked `ancestor` and carries its verdict. The judge never saw that way, so the line has no `judge_ms`, `gate_ms` or `candidates`, and a count of the judge's own verdicts skips it.
 
@@ -64,7 +64,8 @@ The settings a tuner reaches for, and why:
 | `gate.engine` | unset | To pin a provider. Unset, the first shipped profile whose provider has a key file is used, `anthropic` before `openrouter`, and adding a key never switches it. |
 | `gate.profiles.<p>.threshold` | 0.3 | Higher blocks more, at the risk of losing relevant ways. A new model needs its own threshold, since confidence scales differ by model. |
 | `gate.profiles.<p>.turns` | 1 | 2 adds Claude's last reply to what the judge reads, and to what is sent ([what leaves the machine](what-the-judge-sends-and-costs.md#what-leaves-the-machine)). |
-| `gate.profiles.<p>.max_candidates` | 8 | Higher judges more of a busy prompt's candidates, at about 0.1 s each. |
+| `gate.profiles.<p>.timeout_ms` | 2800 | The prompt and state lanes' judge deadline. |
+| `gate.profiles.<p>.max_candidates` | 14 | The most candidates the prompt and state lanes' one request carries; past it a candidate passes unjudged. Higher judges more of a busy prompt's candidates, at about 0.1 s each; raise it with `timeout_ms`. |
 | `gate.profiles.<p>.tool_timeout_ms` | 3000 | A tool lane's judge deadline; the hook cuts it to 3,000 ms. |
 | `gate.profiles.<p>.tool_candidates` | 16 | The most candidates a tool lane's one request carries; past it a semantic candidate is not shown. Raise it with `tool_timeout_ms`. |
 | `gate.profiles.<p>.price_in_per_mtok`, `price_out_per_mtok` | unset | To price calls to a model whose provider reports no cost. |

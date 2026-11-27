@@ -128,6 +128,8 @@ The judge came late to this project because it needed a separate API key to mana
    - model `claude-haiku-4-5`, the model every engine uses. The operator chose Haiku 4.5 over Haiku 5.5 as the more effective judge for this build, and the choice is re-evaluated once the engine and the Bash lane work end to end. The alias `haiku` is not used: under Claude Code it resolves to claude-haiku-5-5, which thinks, and at judge sizes it ran slower and passed the 2000 ms deadline more often (ADR-709 finding 5);
    - threshold 0.3, timeout_ms 2000, turns 1, max_turn_chars 1200, concurrency 8, max_candidates 8, as the shipped profiles, until the agreement and latency observables say otherwise.
 
+     > Edited 2026-11-27: the shipped profiles now carry timeout_ms 2800 and max_candidates 14, because the prompt and state lanes send one request per scan (#1378, ADR-712 §5). The tool lanes use tool_timeout_ms 3000 and tool_candidates 16 (#1372, ADR-197).
+
    The user layer patches it like any profile. `SHIPPED_ORDER` stays anthropic then openrouter: an unset engine picks the first profile whose provider has a key, and `claude-code` has none, so it is chosen only by name. The profile is selectable, not a default. A release offers it only once the probe round trip in `observable` is recorded.
 
 2. **One engine per session.** Each session resolves its judge engine once and holds it for the session, for every lane the gate covers.

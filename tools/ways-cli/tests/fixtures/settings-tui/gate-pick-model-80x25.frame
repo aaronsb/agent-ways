@@ -14,7 +14,7 @@ agent-tui frame 80x25
 |│       turns  │   claude-opus-4-5                              │ the profile's│|
 |│       max_tur│   claude-sonnet-5-5                            │es any model  │|
 |│       concurr└────────────────────────────────────────────────┘has aged is   │|
-|│       max_candidates    8                ││still offered.                    │|
+|│       max_candidates    14               ││still offered.                    │|
 |│       tool_timeout_ms   3000             ││                                  │|
 |│       tool_candidates   16               ││value    claude-haiku-4-5         │|
 |│       price_in_per_mtok                  ││type     one of claude-haiku-4-5 |│|

@@ -17,8 +17,8 @@
 // those settings hooks judge (JUDGED_TOOLS), it starts `next(e)` without
 // awaiting it and, while that runs, keeps a `ways judge take` waiting
 // beside it. On a job it starts the next take at once, so a second job
-// written meanwhile (a second batch, a second settings hook, another
-// loop's call) is claimed within the window. Each claimed job is judged
+// written meanwhile (a second settings hook, another loop's call) is
+// claimed within the window. Each claimed job is judged
 // apart from the event that claimed it: the request goes through
 // `$.model.complete` unchanged, and the reply's text and usage, or the
 // failure reason, go to `ways judge answer`. A take claims the session's
