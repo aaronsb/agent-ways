@@ -2898,8 +2898,11 @@ describe('relay mode', () => {
     expect(h.submitted).toEqual([])
   })
 
-  // ADR-417 item 1: the relay setting is read when attend judges, not at
-  // session start. attend's decision carries it.
+  // The relay setting is read when attend judges, not at session start:
+  // attend's decision carries it.
+  //
+  // References:
+  // - ADR-417 item 1: the value is read when a wrap starts.
   test('relay turned off in the project mid-session: a keepalive attend judged with the gate off does not go in once autocompact reads on', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     let release = () => {}
