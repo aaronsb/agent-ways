@@ -69,7 +69,7 @@ jobs:
         cargo build --manifest-path tools/Cargo.toml -p ways
         tools/target/debug/ways author lint --check hooks/ways
       release-notes: |-
-        Pre-built ways CLI binaries for linux-x86_64, linux-aarch64 and darwin-x86_64; the darwin-arm64 binary attaches when its build completes.
+        Pre-built ways CLI binaries for linux-x86_64 and linux-aarch64; the macOS binaries (darwin-x86_64, darwin-arm64) attach when their builds complete.
 
         Install: `bash tools/scripts/download-prebuilt.sh ways`
         Or build from source: `make ways`

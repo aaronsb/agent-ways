@@ -6,12 +6,13 @@ name: Build a component
 # The callers own their triggers, so each component builds on its own paths
 # and releases on its own tags.
 #
-# The platforms split in two. The gating platforms, and the tests on Linux
-# runners, must pass before the release is published. The best-effort
-# platforms (darwin-arm64 by default) and the tests on macOS runners do not
-# gate it: a best-effort binary attaches to the published release once its
-# build and the macOS tests pass, and a failed or never-scheduled leg leaves
-# the release as it is. The macOS runner queue can hold a job for hours.
+# The platforms split in two. The gating platforms (linux-x86_64 and
+# linux-aarch64 by default), and the tests on Linux runners, must pass before
+# the release is published. The best-effort platforms (darwin-x86_64 and
+# darwin-arm64 by default) and the tests on macOS runners do not gate it: the
+# best-effort binaries attach to the published release once their builds and
+# the macOS tests pass, and a failed or never-scheduled leg leaves the release
+# as it is. The macOS runner queue can hold a job for hours.
 #
 #   plan -> build ------------+-> collect -> release -+-> attach-best-effort
 #        -> test -------------'                       |
@@ -50,7 +51,7 @@ on:
       best-effort-platforms:
         description: Platforms, as a JSON list, whose builds do not gate the release; each attaches to it when its build completes
         type: string
-        default: '["darwin-arm64"]'
+        default: '["darwin-x86_64", "darwin-arm64"]'
       release-notes:
         description: Body of the GitHub Release
         type: string
@@ -210,8 +211,8 @@ jobs:
         run: ${{ inputs.test }}
 
   # The tests on macOS runners. Only attach-best-effort waits on this job, so
-  # a failure keeps the darwin-arm64 binary off the release and does not hold
-  # the release itself.
+  # a failure keeps the macOS binaries off the release and does not hold the
+  # release itself.
   test-best-effort:
     needs: plan
     if: inputs.test != '' && needs.plan.outputs.test_best_effort != '[]'
@@ -305,12 +306,14 @@ jobs:
             --notes "$NOTES" \
             binaries/*
 
-  # A best-effort binary joins the release this run published: upload it and
-  # add its line to the release's checksums.txt. The macOS runners are Apple
-  # Silicon, so a failed macOS test keeps the darwin-arm64 binary off the
-  # release; waiting for those tests delays the attach and never holds the
-  # release. A run of the workflow from before this job existed never
-  # attaches anything.
+  # The best-effort binaries join the release this run published: upload them
+  # and add their lines to the release's checksums.txt. A failed macOS test
+  # keeps the macOS binaries off the release; waiting for those tests delays
+  # the attach and never holds the release. GitHub judges a matrix job as a
+  # whole, so the binaries attach together once every build-best-effort and
+  # test-best-effort leg has finished. A hung or failed leg keeps all of them
+  # off until a rerun (`gh run rerun <id> --failed`). A run of the workflow
+  # from before this job existed never attaches anything.
   attach-best-effort:
     needs: [plan, release, build-best-effort, test-best-effort]
     if: ${{ !cancelled() && needs.release.result == 'success' && needs.build-best-effort.result == 'success' && (needs.test-best-effort.result == 'success' || needs.test-best-effort.result == 'skipped') }}
