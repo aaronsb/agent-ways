@@ -31,9 +31,16 @@
 //   the span's line is drawn in: the reply's prose, less an open list item's
 //   indentation. A span that wraps inside a frame has the frame's border
 //   beside each of its lines, which no drawing of the span inside the frame
-//   avoids, and a span that starts late in its line wraps sooner than its
-//   width alone says, so the span leaves the frame. A narrower span stays in
-//   its sentence.
+//   avoids, so the span leaves the frame. A narrower span stays in its
+//   line.
+//
+// A code span becomes a block only alone on its line (`loneSpan`): a list
+// marker may sit before it and punctuation after it, and nothing else. A
+// reply names a command or quotes code inside a sentence, a bold phrase or a
+// list item far more often than it hands the span over, and a cut there
+// splits the sentence and its emphasis across blocks. A span with prose
+// beside it, of any form, stays in its line inside the frame and wraps with
+// the text.
 //
 // A suggestion, shell or slash, is one of three forms:
 //
@@ -43,15 +50,9 @@
 //   (`/clear`) and nothing else, since a line that starts `/compact is
 //   useful` or `/dev and /proc` is prose. A lead-in sentence on the line
 //   before stays prose.
-// - An inline code span whose content, less the one space CommonMark strips
-//   from each side, is a suggestion, arguments and all. A shell one cuts the
-//   line there: the prose before the span, the suggestion, the prose after
-//   it. A slash one counts only alone on its line, as the closing
-//   `/compact ...` of a wrap is: a reply names a command in a sentence, a
-//   bold phrase or a list item far more often than it hands one over, and a
-//   cut there splits the sentence and its emphasis across blocks. A list
-//   marker alone before the span, and punctuation alone after it, go with the
-//   span. A `span` block cuts its line the same way.
+// - An inline code span alone on its line whose content, less the one space
+//   CommonMark strips from each side, is a suggestion, arguments and all, as
+//   the closing `/compact ...` of a wrap is.
 // - A closed fence whose code is one suggestion. For a shell one the fence
 //   has no language or a shell's (markdown.ts, SHELLS), the first line is a
 //   suggestion, and every line before the last ends in a continuation, `\`,
@@ -65,10 +66,10 @@
 // Nothing else is a suggestion: a `!` inside a sentence ("that's it!"),
 // `!=`, `!!`, `!important`, an image (`![alt](src)`), `!` with no space
 // after it, prose such as `! This is not a command` or a TeX log's
-// `! Undefined control sequence.`, a `/` inside a sentence, a slash
-// command's span with prose beside it on its line, a path, a span whose
-// content starts otherwise, and anything inside other markdown: a
-// quote, a table row, link text, an HTML comment (a `<!--` inside a code span
+// `! Undefined control sequence.`, a `/` inside a sentence, a span with
+// prose beside it on its line, a path, a span whose content starts
+// otherwise, and anything inside other markdown: a quote, a table row, link
+// text, an HTML comment (a `<!--` inside a code span
 // opens none), an indented code block (four columns past the open list
 // item's content, or past the margin outside a list, after a blank line), and
 // a fence still streaming. The same markdown keeps a `span` block in its
@@ -109,22 +110,19 @@ export type IsCommand = (name: string) => boolean
 
 /** The answer while Claude Code's command list is unread: any name but a top-level directory. */
 export const notRoot: IsCommand = name => !ROOTS.has(name)
-/** The share of its row a span's content may take before it leaves its sentence. */
+/** The share of its row a span's content may take before, alone on its line, it leaves the frame. */
 const SPAN_SHARE = 0.6
 /** A line that a shell reads on past. */
 const CONTINUES = /(?:\\|&&|\|)[ \t]*$/
 /** A code span on one line: a run of backticks, the content, a run of the same length. */
 const SPAN = /(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g
-/** Prose beside a span that goes with it: a list marker before, punctuation after. */
+/** What may sit beside a span alone on its line: a list marker before, punctuation after. */
 const MARKER_ONLY = /^[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]*)?$/
 const PUNCTUATION_ONLY = /^[\s.,;:!?)\]]*$/
-/** Lines whose spans are never lifted out: a quote, a table row. */
-const QUOTE_OR_ROW = /^[ \t]*[>|]/
+/** A table row, where a shell continuation stops. */
 const TABLE_ROW = /^[ \t]*\|/
 /** A list item's opening: its indentation, its marker and the spaces after it. */
 const LIST_ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)\S/
-/** A link's text, up to the `(` or `[` that follows it. */
-const LINK_TEXT = /\[[^\]]*\][([]/g
 /** A quick test before the split: a line or a span that starts a suggestion, or a fence. */
 const MAY_HOLD = /(?:^|\n)[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]+)?(?:! \S|\/[a-z])|` ?(?:! \S|\/[a-z])|(?:^|\n)[ \t]*(?:`{3}|~{3})/
 
@@ -158,6 +156,15 @@ function itemContent(line: string): number | null {
   const marker = indentOf(item[1]!) + item[2]!.length
   const gap = indentOf(item[3]!)
   return marker + (gap > 4 ? 1 : gap)
+}
+
+/** The code span `line` holds alone, or null: its first span, with at most a
+ *  list marker before it and punctuation after it. A span with anything else
+ *  beside it, a quote's `>`, a table's `|` or a link's `[` included, is part
+ *  of its line. */
+function loneSpan(line: string): RegExpMatchArray | null {
+  const [span] = line.matchAll(SPAN)
+  return span !== undefined && MARKER_ONLY.test(line.slice(0, span.index)) && PUNCTUATION_ONLY.test(line.slice(span.index + span[0].length)) ? span : null
 }
 
 /** `line` with its code spans taken out, so a `<!--` inside one opens no comment. */
@@ -254,24 +261,11 @@ export function copyPieces(text: string, width?: number, isPicture: (lang: strin
       continue
     }
 
-    const links = [...line.matchAll(LINK_TEXT)].map(link => [link.index, link.index + link[0].length] as const)
-    const isLinkText = (at: number) => links.some(([from, to]) => at > from && at < to)
-    let at = 0
-    for (const span of QUOTE_OR_ROW.test(line) ? [] : line.matchAll(SPAN)) {
-      const content = spanContent(span[2]!)
-      const isAlone = MARKER_ONLY.test(line.slice(0, span.index)) && PUNCTUATION_ONLY.test(line.slice(span.index + span[0].length))
-      const suggested = suggestionForm(content, isCommand)
-      const form = (suggested === 'slash' && !isAlone ? null : suggested) ?? (isWide(content, width, item ?? 0) ? 'span' : null)
-      if (form === null || isLinkText(span.index)) continue
-      const before = line.slice(at, span.index)
-      const isFirst = at === 0
-      if (!(isFirst ? MARKER_ONLY : PUNCTUATION_ONLY).test(before)) prose.push(isFirst ? before.trimEnd() : before.trim())
-      copy({ kind: 'copy', form, text: form === 'span' ? content : content.trimEnd(), raw: span[0] })
-      at = span.index + span[0].length
-    }
-    const rest = line.slice(at)
-    if (at === 0) prose.push(line)
-    else if (!PUNCTUATION_ONLY.test(rest)) prose.push(rest.trimStart())
+    const span = loneSpan(line)
+    const content = span === null ? null : spanContent(span[2]!)
+    const spanForm = content === null ? null : (suggestionForm(content, isCommand) ?? (isWide(content, width, item ?? 0) ? 'span' : null))
+    if (spanForm === null) prose.push(line)
+    else copy({ kind: 'copy', form: spanForm, text: spanForm === 'span' ? content! : content!.trimEnd(), raw: span![0] })
   }
   flush()
 

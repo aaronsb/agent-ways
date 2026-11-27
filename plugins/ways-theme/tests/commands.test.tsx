@@ -82,7 +82,7 @@ describe('which suggestions match', () => {
   test('a command that opens with an environment assignment or a test bracket, as a line and as a span', () => {
     const lines = ['! CLAUDE_CODE_TYPES=/x make test-plugins', '! VAR=1 cmd', '! RUST_LOG=debug cargo run', '! [ -f x ] && echo y']
     expect(commands(lines.join('\n'))).toEqual(lines)
-    expect(commands('Run `! VAR=1 cmd` or `! [ -f x ] && echo y`.')).toEqual(['! VAR=1 cmd', '! [ -f x ] && echo y'])
+    expect(commands('Run:\n\n`! VAR=1 cmd`\n\n- `! [ -f x ] && echo y`.')).toEqual(['! VAR=1 cmd', '! [ -f x ] && echo y'])
   })
 
   test('a paragraph indented four columns inside a list item is the item\'s, and a command', () => {
@@ -99,17 +99,19 @@ describe('which suggestions match', () => {
     expect(commands('- item\n    ! git status')).toEqual(['! git status'])
   })
 
-  test('an inline code span: the prose before it, the command, the prose after it', () => {
-    expect(copyPieces('Run `! git status` to see what moved.')).toEqual([
-      { kind: 'text', text: 'Run' },
+  test('an inline code span alone on its line is the command; inside a sentence or bold it stays there', () => {
+    expect(copyPieces('Run this:\n`! git status`.')).toEqual([
+      { kind: 'text', text: 'Run this:' },
       { kind: 'copy', form: 'shell', text: '! git status', raw: '`! git status`' },
-      { kind: 'text', text: 'to see what moved.' },
     ])
+    for (const text of ['Run `! git status` to see what moved.', '1. **Run `! git status` first.** Then look.', 'Run `! VAR=1 cmd` or `! ls`.']) {
+      expect(copyPieces(text, 80)).toEqual([{ kind: 'text', text }])
+    }
   })
 
   test('a span with CommonMark padding, a double-backtick span, and punctuation after a span', () => {
-    expect(commands('Try `` ! echo `date` `` or ` ! ls `.')).toEqual(['! echo `date`', '! ls'])
-    expect(prose('Try `` ! echo `date` `` or ` ! ls `.')).toEqual(['Try', 'or'])
+    expect(commands('Try:\n\n`` ! echo `date` ``\n\n` ! ls `.')).toEqual(['! echo `date`', '! ls'])
+    expect(prose('Try:\n\n`` ! echo `date` ``\n\n` ! ls `.')).toEqual(['Try:'])
   })
 
   test('a list item that is only a span keeps no empty bullet', () => {
@@ -127,9 +129,9 @@ describe('which suggestions match', () => {
   })
 
   test('several suggestions in one reply, each its own', () => {
-    const text = ['Three steps:', '', COMMAND, '', 'then `! git status`, and last:', '', '```', '! git log -1', '```'].join('\n')
+    const text = ['Three steps:', '', COMMAND, '', 'then:', '', '`! git status`,', '', 'and last:', '', '```', '! git log -1', '```'].join('\n')
     expect(commands(text)).toEqual([COMMAND, '! git status', '! git log -1'])
-    expect(prose(text)).toEqual(['Three steps:', 'then', ', and last:'])
+    expect(prose(text)).toEqual(['Three steps:', 'then:', 'and last:'])
   })
 
   test('a reply on the terminal carries them as command segments, fences split out as cards included', () => {
@@ -305,7 +307,7 @@ describe('a command draws as one string outside every frame', () => {
   test('each of several commands copies its own text', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(full('One:\n\n! git status\n\nand `! git diff --stat`.'))
+    const ui = await $.ui.mount(full('One:\n\n! git status\n\nand:\n\n`! git diff --stat`.'))
     for (const button of await ui.findAll({ type: 'Button', text: /^Copy$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
     expect(h.copies).toEqual(['! git status', '! git diff --stat'])
@@ -564,12 +566,11 @@ const LONG = 'git worktree remove ../vtium-glyph-fix36 && git branch -d feat/gly
 const ROOMY = Math.ceil(LONG.length / 0.6)
 
 describe('a code span wider than its row', () => {
-  test('leaves its sentence as a span block; a narrower one stays', () => {
-    const text = `Then \`${LONG}\` clears them, and \`git status\` shows it.`
+  test('alone on its line it is a span block; a narrower one, or one with no width, stays', () => {
+    const text = `Then:\n\n\`${LONG}\`.`
     expect(copyPieces(text, 76)).toEqual([
-      { kind: 'text', text: 'Then' },
+      { kind: 'text', text: 'Then:' },
       { kind: 'copy', form: 'span', text: LONG, raw: `\`${LONG}\`` },
-      { kind: 'text', text: 'clears them, and `git status` shows it.' },
     ])
     expect(copyPieces(text, ROOMY).every(piece => piece.kind === 'text')).toBe(true)
     expect(copyPieces(text).every(piece => piece.kind === 'text')).toBe(true)
@@ -577,22 +578,29 @@ describe('a code span wider than its row', () => {
     expect(holdsCopy(text, ROOMY)).toBe(false)
   })
 
-  test('a span wider than 60% of its row leaves it, so one that starts late in its line does not wrap', () => {
-    const late = (span: string) => `${'word '.repeat(10)}\`${span}\` ends it.`
-    expect(copyPieces(late('x'.repeat(50)), 76).map(piece => piece.kind)).toEqual(['text', 'copy', 'text'])
-    expect(copyPieces(late('x'.repeat(45)), 76).every(piece => piece.kind === 'text')).toBe(true)
-    expect(holdsCopy(late('x'.repeat(50)), 76)).toBe(true)
-    expect(holdsCopy(late('x'.repeat(45)), 76)).toBe(false)
+  test('inside a sentence or bold it stays there and wraps with the text', () => {
+    for (const text of [`Then \`${LONG}\` clears them, and \`git status\` shows it.`, `1. **Then \`${LONG}\` clears them.** Done.`]) {
+      expect(copyPieces(text, 76)).toEqual([{ kind: 'text', text }])
+      expect(holdsCopy(text, 76)).toBe(false)
+    }
+  })
+
+  test('a span alone on its line leaves it when wider than 60% of its row', () => {
+    const alone = (span: string) => `Then:\n\n\`${span}\`.`
+    expect(copyPieces(alone('x'.repeat(50)), 76).map(piece => piece.kind)).toEqual(['text', 'copy'])
+    expect(copyPieces(alone('x'.repeat(45)), 76).every(piece => piece.kind === 'text')).toBe(true)
+    expect(holdsCopy(alone('x'.repeat(50)), 76)).toBe(true)
+    expect(holdsCopy(alone('x'.repeat(45)), 76)).toBe(false)
   })
 
   test("an open list item's indentation comes off the row", () => {
     const span = 'x'.repeat(60)
     const spans = (text: string) => copyPieces(text, 100).filter(piece => piece.kind === 'copy').map(piece => (piece as Copy).text)
-    expect(spans(`Then \`${span}\` clears them.`)).toEqual([])
-    expect(spans(`- Then \`${span}\` clears them.`)).toEqual([span])
-    expect(spans(`10. First:\n\n    then \`${span}\` clears them.`)).toEqual([span])
-    expect(holdsCopy(`- Then \`${span}\` clears them.`, 100)).toBe(true)
-    expect(holdsCopy(`Then \`${span}\` clears them.`, 100)).toBe(false)
+    expect(spans(`\`${span}\`.`)).toEqual([])
+    expect(spans(`- \`${span}\`.`)).toEqual([span])
+    expect(spans(`10. First:\n\n    \`${span}\`.`)).toEqual([span])
+    expect(holdsCopy(`- \`${span}\`.`, 100)).toBe(true)
+    expect(holdsCopy(`\`${span}\`.`, 100)).toBe(false)
   })
 })
 
@@ -690,7 +698,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
   test('a wide span copies what its rows draw: one Text, clear of every frame, with no glyph, padding or break', async ($, on) => {
     const h = hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    const ui = await $.ui.mount(full(`Then \`${LONG}\` clears them, and \`${LONG.replace('worktree', 'branch')}\` too.`))
+    const ui = await $.ui.mount(full(`Then:\n\n\`${LONG}\`\n\n\`${LONG.replace('worktree', 'branch')}\`.`))
     const tree = await ui.drawn()
     for (const button of await ui.findAll({ type: 'Button', text: /^Copy$/ })) await ui.press({ key: button.key! })
     await ui.unmount()
@@ -760,7 +768,7 @@ describe('a copy block draws clear of every frame and copies its text alone', ()
 
 /** A reply holding one block of each kind a copy control offers forms for. */
 const TABLE = ['| name | note |', '|---|---|', '| **a, b** | say "hi" |', '| [link](https://x.example) | *it*<br>two |'].join('\n')
-const BLOCKS = ['! git status', '', 'then:\n`/clear`.', '', '```sh\nls -la\n```', '', TABLE, '', `Then \`${LONG}\` clears them.`].join('\n')
+const BLOCKS = ['! git status', '', 'then:\n`/clear`.', '', '```sh\nls -la\n```', '', TABLE, '', `Then:\n\`${LONG}\`.`].join('\n')
 const CSV = 'name,note\n"a, b","say ""hi"""\nlink,"it\ntwo"'
 const TEXT = 'name  note\na, b  say "hi"\nlink  it two'
 const ACCENT = setupOf(MIAMI_NIGHTS as never).skin.palette.user
@@ -841,7 +849,7 @@ describe('the forms a block copies', () => {
     await ui.press({ key: 'copy-reply-markdown' })
     await ui.press({ key: 'copy-reply-text' })
     await ui.unmount()
-    expect(h.copies).toEqual([BLOCKS, ['! git status', 'then:', '/clear', 'ls -la', TEXT, 'Then', LONG, 'clears them.'].join('\n\n')])
+    expect(h.copies).toEqual([BLOCKS, ['! git status', 'then:', '/clear', 'ls -la', TEXT, 'Then:', LONG].join('\n\n')])
   })
 })
 
@@ -978,7 +986,7 @@ describe('the fullscreen gate', () => {
   test('on the main screen a copy block draws clear of every frame, with no control line', async ($, on) => {
     hostWithClipboard(on, { mod: json(MIAMI_NIGHTS) })
     await $.session.start(INTERACTIVE)
-    for (const [text, line] of [[SLASH_REPLY, SLASH], [`Then \`${LONG}\` clears them.`, LONG], [FENCED, '  println!("{x}");']] as const) {
+    for (const [text, line] of [[SLASH_REPLY, SLASH], [`Then:\n\n\`${LONG}\``, LONG], [FENCED, '  println!("{x}");']] as const) {
       const ui = await $.ui.mount(at(text))
       const tree = await ui.drawn()
       await ui.unmount()
