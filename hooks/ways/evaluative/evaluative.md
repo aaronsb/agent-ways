@@ -21,7 +21,7 @@ These hold in every loop type below.
 - **A provisional baseline is not yet a judge.** While the design or layout is still being decided, keep frozen baselines few and provisional, and pin behaviour with state or transition checks (code/testing/gates/assertions, rapid iteration phase). Changing a provisional baseline during that phase does not touch the judge. Marking a baseline provisional, or promoting it once the operator accepts the result, is a reviewed change.
 - **The verdict is the exit status.** A harness that prints failures and exits zero leaves the agent as the only gate. The run fails when a check fails.
 - **Gates and instruments are proven as code/testing/gates requires:** a skipped check reads as skipped, and each instrument has been seen red on a planted defect (core.md).
-- **A cited count comes from a run in this change.** A pass count in a commit, PR, or handoff names the command and was produced after the last edit.
+- **A cited count comes from a run on this tree.** A pass count in a commit, PR, or handoff names the command and was produced on the tree it describes, after the last edit. A later push, merge or bump of that same tree does not need a new run (code/testing/gates/attention).
 - **The harness grows with the product.** A feature ships its check in the same change. A defect that escaped the harness becomes a case before the fix lands.
 
 ## Choose the loop

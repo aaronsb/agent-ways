@@ -1,5 +1,5 @@
 ---
-description: the evaluation loop that decides a fix or a test is done; reproduce the reported failure in the reporter's environment, drive the path the real program takes, fix every review finding and re-review on the scenarios that found them, and state how many runs a flaky or intermittent test result rests on
+description: the evaluation loop that decides a fix or a test is done; reproduce the reported failure in the reporter's environment, drive the path the real program takes, fix every review finding and re-review on the scenarios that found them with the re-review sized to the fix and the rounds per branch capped, and state how many runs a flaky or intermittent test result rests on
 vocabulary: reproduce reproduced repro reporter reported environment real path real loop event loop stateful headless driver tick ticks redraw draw between keys calls hand directly test-only shortcut reviewer review finding findings re-review round rounds original scenario replay loop count runs looped repeat thousand times denominator failure rate once a week intermittent sometimes fails passed locally passed 50 times race call it fixed reproduced before fix confirm fixed flaky flake can't reproduce run-count unreproduced statistics
 pattern: \bre-?review(ed|ing)?\b|(can.?t|cannot|unable to|could ?n.?t) (repro|reproduce)\b
 scope: agent, subagent
@@ -26,7 +26,7 @@ A test-only entry point or flag is part of the subject. Check that it runs the s
 
 ## Fix every finding, then re-review
 
-Remediate each finding as delivery/merge requires, then review again. The re-review replays each finding's original scenario against the fixed code: the input, the key sequence, and the environment that exposed the defect. Reading the new diff is one part of the re-review. A stateful change often takes several rounds. Keep reviewing while rounds still find defects.
+Remediate each finding as delivery/merge requires, then review again. The re-review replays each finding's original scenario against the fixed code: the input, the key sequence, and the environment that exposed the defect. The re-review is sized to the fix: it reads the lines the fix changed and the code they call, not the whole branch again. A stateful change often takes several rounds, so cap the rounds on one branch, at three unless the brief or the plan sets another number. Breadth across the change and its neighbors is deferred to integration, where the combined tree is reviewed once (code/testing/gates/attention). When the round at the cap still finds defects, the fixes still land, and findings that keep coming back are a reason to ask the operator (core.md).
 
 ## Count what ran
 
@@ -47,6 +47,7 @@ Report each evaluation with three facts: the command that ran, how many times, a
 | "It passes on my machine" | Run it in the reporter's setup, or name what differs. |
 | "The unit test covers that state" | Does the test reach the state the way the real loop does? |
 | "The diff addresses each comment" | Replay each finding's scenario on the fixed code. |
+| "One more full review of the branch, to be safe" | Size the re-review to the fix. Breadth comes at integration. |
 | "Ran it 20 times, all green" | State the failure rate those 20 runs can rule out. |
 | "I couldn't reproduce it, but the fix looks right" | Record it as unreproduced and unverified. |
 
@@ -54,6 +55,7 @@ Report each evaluation with three facts: the command that ran, how many times, a
 
 - code/testing/evaluation/screens(softwaredev) — child: the visual loop for terminal screens
 - code/testing/gates(softwaredev) — plant the defect so a gate is seen red; read state through the client's path
+- code/testing/gates/attention(softwaredev) — focal checks on the branch, breadth once at integration
 - code/testing/gates/assertions(softwaredev) — golden baselines and the enumerated-delta review
 - environment/recovery(softwaredev) — classifying a flaky failure and the evidence that confirms an intermittent fix
 - environment/hostparity(softwaredev) — a result on one host is evidence about that host
