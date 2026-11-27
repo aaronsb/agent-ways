@@ -157,6 +157,7 @@ mod tests {
         computed: None,
         fail_closed: None,
         star_instance: false,
+        was: None,
     };
     static SCHEMA: Schema = Schema {
         component: "t",

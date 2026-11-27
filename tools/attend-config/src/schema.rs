@@ -162,6 +162,7 @@ const BASE: KeySpec = KeySpec {
     computed: None,
     fail_closed: None,
     star_instance: false,
+    was: None,
 };
 
 /// A whole number of seconds, at least one.
