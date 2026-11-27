@@ -43,32 +43,36 @@ pub fn command(
     let mut context = String::new();
     let mut budget = ContextBudget::hook();
 
-    // One embed pass for the whole surface (ways and checks share it).
-    // ADR-130: cap embed input. Heredoc bodies (gh pr create --body
-    // "$(cat <<EOF…)"), curl -d JSON payloads, and similar argument-
-    // body bash commands can run kilobytes long. The regex matchers
-    // below see every operative segment in full; only the embed query is
-    // reduced.
-    // ADR-160 stage 1 (contextualize): a bare command is an action, not intent.
-    // Prepend the assistant's prose since the last human turn — the reasoning that
-    // led to this tool call — so the semantic lane matches on intent. Fail-safe:
-    // None → command + tool description only (unchanged). The reducer trims the
-    // combined surface to the command budget by sentence salience.
-    let lookbehind = lookbehind::intent(session_id);
-    let query_for_embed = format!(
-        "{} {} {}",
-        lookbehind.as_deref().unwrap_or(""),
-        cmd,
-        description.unwrap_or("")
-    );
-    let reduced_for_embed = reduce::reduce_for_embed(&query_for_embed, BUDGET_COMMAND);
+    // The ways' semantic match reads the call's operative verbs and its
+    // description, never the agent's prose.
+    //
+    // References:
+    // - ADR-188 item 3b: the matcher's text.
+    let command = ShellCommand::parse(cmd);
+    let reduced_for_embed = reduce::reduce_for_embed(&command.embed_surface(description), BUDGET_COMMAND);
     let embed_matches = batch_embed_score(&reduced_for_embed);
 
-    let command = ShellCommand::parse(cmd);
     let surface = CommandSurface { command: &command, description, session_id, scope: &scope, project_dir: &project_dir };
     let hits = command_hits(&surface, &candidates, &embed_matches, &HashSet::new());
     let checks = collect_checks(&project_dir);
-    let matched_checks = check_hits(&checks, &command, session_id, &scope, &project_dir, &embed_matches);
+    // A check's semantic score keeps the lookbehind: the assistant's prose
+    // since the last human turn, the command and the description, cut to the
+    // command budget, since heredoc bodies and payloads can run kilobytes.
+    // The pass runs only when a check in scope asks for it.
+    //
+    // References:
+    // - ADR-160 stage 1: the lookbehind.
+    // - ADR-130: the embed input is capped.
+    // - ADR-188 item 3e: the check-scoring pass keeps the lookbehind.
+    let check_scores = std::cell::OnceCell::new();
+    let check_embed = || {
+        check_scores.get_or_init(|| {
+            let lookbehind = lookbehind::intent(session_id);
+            let query = format!("{} {} {}", lookbehind.as_deref().unwrap_or(""), cmd, description.unwrap_or(""));
+            batch_embed_score(&reduce::reduce_for_embed(&query, BUDGET_COMMAND))
+        })
+    };
+    let matched_checks = check_hits(&checks, &command, session_id, &scope, &project_dir, &check_embed);
 
     // The matcher's hits, then the checks, each marked by the read-only
     // refire check, go to the judge (scan/judged.rs) before any fire is
@@ -151,13 +155,13 @@ fn way_trigger(way: &WayCandidate, command: &ShellCommand, regex: bool) -> Trigg
 /// The checks that match a Bash call, with their match score: 3.0 for a
 /// `commands:` regex, else the semantic score of a check that declares
 /// `description` and `vocabulary`.
-fn check_hits<'c>(
+fn check_hits<'c, 'e>(
     checks: &'c [WayCandidate],
     command: &ShellCommand,
     session_id: &str,
     scope: &str,
     project_dir: &str,
-    embed_matches: &EmbedScores,
+    embed_matches: &dyn Fn() -> &'e EmbedScores,
 ) -> Vec<(&'c WayCandidate, f64)> {
     let mut out = Vec::new();
     for check in checks {
@@ -171,7 +175,7 @@ fn check_hits<'c>(
             }
         }
         if match_score == 0.0 && !check.description.is_empty() && !check.vocabulary.is_empty() {
-            match_score = check_semantic_score(check, session_id, embed_matches);
+            match_score = check_semantic_score(check, session_id, embed_matches());
         }
         if match_score > 0.0 {
             out.push((check, match_score));
@@ -186,7 +190,9 @@ fn check_hits<'c>(
 /// meant for another. It also runs against the text from the program word,
 /// so `^gh` matches `GH_TOKEN=x gh …` and `timeout 60 gh …`. Heredoc
 /// bodies, navigation (`cd`, `echo`, assignments) and filters after a pipe
-/// are not matched. The judge reads every segment described.
+/// are not matched. The semantic match reads the operative verbs
+/// ([`ShellCommand::embed_surface`]), and the judge reads every segment
+/// described.
 ///
 /// References:
 /// - ADR-188 item 3a: `commands:` per operative segment.
@@ -212,6 +218,22 @@ impl ShellCommand {
         self.operative()
             .find_map(|s| re.find(&s.text).or_else(|| re.find(s.program_text())))
             .map(|m| capped_span(m.as_str()))
+    }
+
+    /// The text the semantic match embeds: each operative segment's verb
+    /// (program, subcommand and flags, with arguments and paths dropped), in
+    /// order, then the tool call's description. The agent's prose is not
+    /// part of it: the surface with prose, command and description was on
+    /// topic in 3.4% of its fires, and verbs plus the description fired 473
+    /// times on 200 calls where that surface fired 1,201, on topic in 7.6%.
+    ///
+    /// References:
+    /// - ADR-188 item 3b: the matcher's text is the verbs and the description.
+    /// - ADR-707 studies 1 and 2: today's surface, and surface C.
+    pub(super) fn embed_surface(&self, description: Option<&str>) -> String {
+        let verbs: Vec<String> = self.operative().map(Segment::verb).filter(|v| !v.is_empty()).collect();
+        let description = description.map(str::trim).filter(|d| !d.is_empty());
+        verbs.iter().map(String::as_str).chain(description).collect::<Vec<_>>().join(" ")
     }
 }
 
@@ -459,6 +481,26 @@ mod shell_command_tests {
         for cmd in silent {
             assert_eq!(span(pattern, cmd), None, "should not fire: {cmd}");
         }
+    }
+
+    /// The semantic match reads each operative segment's program,
+    /// subcommand and flags, then the description. Arguments, paths,
+    /// navigation and filters are dropped, and the agent's prose, which the
+    /// lane read before, has no way in.
+    ///
+    /// References:
+    /// - ADR-188 item 3b: the matcher's text.
+    #[test]
+    fn the_semantic_surface_is_the_operative_verbs_and_the_description() {
+        let surface = |cmd: &str, desc: Option<&str>| ShellCommand::parse(cmd).embed_surface(desc);
+        let s = surface("git branch -D foo", Some("Delete the merged branch"));
+        assert_eq!(s, "git branch -D Delete the merged branch");
+        assert!(!s.contains("foo"), "no argument: {s}");
+        assert_eq!(surface("cd repo && cargo test -p ways | tail -5", Some("Run the tests")), "cargo test -p Run the tests");
+        assert_eq!(surface("git show abc --stat", None), "git show --stat");
+        assert_eq!(surface("cd /tmp", Some("  Go to tmp ")), "Go to tmp");
+        assert_eq!(ShellCommand::default().embed_surface(Some("Probe text")), "Probe text");
+        assert_eq!(surface("", None), "");
     }
 
     #[test]
