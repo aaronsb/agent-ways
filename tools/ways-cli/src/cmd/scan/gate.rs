@@ -1293,11 +1293,11 @@ mod tests {
             );
         }
 
-        // Past the cap: the first 22 are judged in the one request, the rest
+        // Past the cap: the first 16 are judged in the one request, the rest
         // get no verdict.
-        let ids: Vec<String> = (0..24).map(|i| format!("w/{i}")).collect();
+        let ids: Vec<String> = (0..18).map(|i| format!("w/{i}")).collect();
         let mut over: Vec<Pending<'_>> = ids.iter().map(|id| Pending { id, description: "d", trigger: Trigger::Keyword }).collect();
-        over[22].trigger = Trigger::Semantic;
+        over[16].trigger = Trigger::Semantic;
         let events = Events::default();
         let sink = recorder(&events);
         let mut sizes = Vec::new();
@@ -1305,16 +1305,16 @@ mod tests {
             sizes.push(req.candidates.len());
             Ok(all_pass(&req))
         });
-        assert_eq!(sizes, [22], "one request, at the cap");
-        assert_eq!(g.blocked.ids(), HashSet::from(["w/22".to_string()]), "the semantic overflow is kept out");
-        assert_eq!(g.judgements.len(), 22);
+        assert_eq!(sizes, [16], "one request, at the cap");
+        assert_eq!(g.blocked.ids(), HashSet::from(["w/16".to_string()]), "the semantic overflow is kept out");
+        assert_eq!(g.judgements.len(), 16);
         let events = events.borrow();
         let unjudged: Vec<(&str, &str, &str)> = events
             .iter()
             .filter(|e| field(e, "event") == "way_unjudged")
             .map(|e| (field(e, "way"), field(e, "verdict"), field(e, "reason")))
             .collect();
-        assert_eq!(unjudged, [("w/22", "block", "overflow"), ("w/23", "pass", "overflow")]);
+        assert_eq!(unjudged, [("w/16", "block", "overflow"), ("w/17", "pass", "overflow")]);
 
         // Shadow mode and the prompt lane fail open as before.
         let sink = |_: &[(&str, &str)]| {};

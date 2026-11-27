@@ -236,14 +236,15 @@ pub struct Profile {
 }
 
 /// The shipped tool-lane deadline. A request takes about 515 ms plus 112 ms
-/// per candidate under the claude-code engine, so 3 s holds about 22
-/// candidates, enough for 97.8% of the command lane's scans in a week of
-/// records (#1372).
+/// per candidate under the claude-code engine, as a week of records measured
+/// it (#1372).
 pub const DEFAULT_TOOL_TIMEOUT_MS: u64 = 3000;
 
-/// The shipped cap on a tool lane's one request: what
-/// [`DEFAULT_TOOL_TIMEOUT_MS`] holds.
-pub const DEFAULT_TOOL_MAX_CANDIDATES: usize = 22;
+/// The shipped cap on a tool lane's one request. 16 candidates take about
+/// 2.3 s on average, which leaves about 0.7 s of [`DEFAULT_TOOL_TIMEOUT_MS`]
+/// for a slow call. 22 would take about 3.0 s, so a scan near that cap would
+/// time out about half the time and leave every semantic candidate out.
+pub const DEFAULT_TOOL_MAX_CANDIDATES: usize = 16;
 
 fn default_tool_timeout_ms() -> u64 {
     DEFAULT_TOOL_TIMEOUT_MS

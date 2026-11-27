@@ -16,7 +16,7 @@ agent-tui frame 100x30
 |│       concurrency             8                     ││                                           │|
 |│       max_candidates          8                     ││                                           │|
 |│       tool_timeout_ms         3000                  ││                                           │|
-|│       tool_candidates         22                    ││                                           │|
+|│       tool_candidates         16                    ││                                           │|
 |│       price_in_per_mtok                             ││                                           │|
 |│       price_out_per_mtok                            ││                                           │|
 |│   ▸ openrouter                                      ││                                           │|
