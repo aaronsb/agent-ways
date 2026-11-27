@@ -127,7 +127,7 @@ considered:
   - operator: aaronsb
     said: "let's get all 5 in fix and published asap"
     via: "operator, 2026-11-27, agent-ways session, on the #1372 investigation's five decisions"
-status: proposed
+status: accepted
 date: 2026-09-19
 deciders:
   - aaronsb
