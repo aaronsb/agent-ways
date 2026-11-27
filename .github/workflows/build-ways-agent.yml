@@ -49,6 +49,6 @@ jobs:
       test: |
         cargo test --manifest-path tools/Cargo.toml -p ways-agent -p ways-agent-core
       release-notes: |-
-        Pre-built ways-agent binaries for 4 platforms.
+        Pre-built ways-agent binaries for linux-x86_64, linux-aarch64 and darwin-x86_64; the darwin-arm64 binary attaches when its build completes.
 
         Build from source: `make ways-agent`

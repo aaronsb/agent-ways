@@ -40,7 +40,7 @@ jobs:
           {"os": "macos-latest", "platform": "darwin-arm64"}
         ]
       release-notes: |-
-        Pre-built way-embed (semantic matcher) binaries for 4 platforms.
+        Pre-built way-embed (semantic matcher) binaries for linux-x86_64, linux-aarch64 and darwin-x86_64; the darwin-arm64 binary attaches when its build completes.
 
         Downloaded automatically by `make setup` / the installer, so semantic
         matching works with no C++ toolchain. To build from source instead,
