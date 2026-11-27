@@ -135,6 +135,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-415](./attend/ADR-415-a-session-event-record-written-by-the-ways-hooks-to-a-per-session-spool-and-read-by-attend-ways-sensors-and-sensor-conditions.md) | A session event record, written by the ways hooks to a per-session spool and read by attend, ways sensors and sensor conditions | proposed |
 | [ADR-416](./attend/ADR-416-awareness-reaches-claude-code-only-through-the-attend-mod-whose-sensor-host-writes-system-signals-to-the-store.md) | Awareness reaches Claude Code only through the attend mod, whose sensor host writes system signals to the store | accepted |
 | [ADR-417](./attend/ADR-417-in-relay-mode-the-attend-mod-follows-a-wrap-with-a-compaction-on-its-handoff-and-a-turn-that-resumes-the-work-as-the-context-fill-trigger-of-one-continuity-policy-with-keepalive.md) | In relay mode the attend mod follows a wrap with a compaction on its handoff and a turn that resumes the work, as the context-fill trigger of one continuity policy with keepalive | accepted |
+| [ADR-418](./attend/ADR-418-at-a-work-boundary-a-session-wraps-and-a-clean-judge-chooses-to-stop-compact-or-continue-keepwarm-holds-the-cache-only-while-it-pays-from-75-the-session-drains.md) | At a work boundary a session wraps and a clean judge chooses to stop, compact or continue; keepwarm holds the cache only while it pays; from 75% the session drains | proposed |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_

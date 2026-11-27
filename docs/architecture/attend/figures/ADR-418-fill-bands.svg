@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1200" height="400" viewBox="0 0 1200 400" font-family="DejaVu Sans, Arial, sans-serif">
+<rect width="1200" height="400" fill="#ffffff"/>
+<text x="18" y="28" font-size="16" fill="#222">What the context fill decides</text>
+<text x="18" y="48" font-size="12" fill="#555">Context fill as a percent of the window. The bands are the operator's observation and this record's settings, not measurements.</text>
+<text x="158" y="129" font-size="13" fill="#222" text-anchor="end">Agent capability</text>
+<text x="158" y="209" font-size="13" fill="#222" text-anchor="end">At a work boundary</text>
+<text x="158" y="289" font-size="13" fill="#222" text-anchor="end">Mid-work</text>
+<rect x="170" y="96" width="800" height="56" fill="#2c5cad" fill-opacity="0.12" stroke="#2c5cad" stroke-width="1" rx="4"/>
+<text x="570.0" y="120" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">full capability</text>
+<text x="570.0" y="138" font-size="11.5" fill="#555" text-anchor="middle">the operator's observation: holds to about 80% in most cases</text>
+<rect x="970" y="96" width="50" height="56" fill="#2c5cad" fill-opacity="0.05" stroke="#2c5cad" stroke-width="1"/>
+<text x="995.0" y="128" font-size="10" fill="#555" text-anchor="middle">workable</text>
+<rect x="1020" y="96" width="150" height="56" fill="#7f8b97" fill-opacity="0.16" stroke="#7f8b97" stroke-width="1" stroke-dasharray="4 3" rx="4"/>
+<text x="1095.0" y="120" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">past the line</text>
+<text x="1095.0" y="138" font-size="11.5" fill="#555" text-anchor="middle">Claude Code compacts</text>
+<rect x="170" y="176" width="750" height="56" fill="#0d7a6b" fill-opacity="0.16" stroke="#0d7a6b" stroke-width="1" rx="4"/>
+<text x="545.0" y="200" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">wrap, then stop, compact or continue</text>
+<text x="545.0" y="218" font-size="11.5" fill="#555" text-anchor="middle">a clean judge chooses; what is pending and the prices decide how long to stay warm</text>
+<rect x="920" y="176" width="100" height="56" fill="#a8701a" fill-opacity="0.24" stroke="#a8701a" stroke-width="1"/>
+<text x="970.0" y="200" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">drain</text>
+<text x="970.0" y="218" font-size="11.5" fill="#555" text-anchor="middle">wrap here</text>
+<rect x="1020" y="176" width="150" height="56" fill="#7f8b97" fill-opacity="0.16" stroke="#7f8b97" stroke-width="1" stroke-dasharray="4 3" rx="4"/>
+<rect x="170" y="256" width="750" height="56" fill="#e6ecef" stroke="#c9d3da" stroke-width="1" rx="4"/>
+<text x="545.0" y="280" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">keep working</text>
+<text x="545.0" y="298" font-size="11.5" fill="#555" text-anchor="middle">agents carry the focal work; the main session supervises</text>
+<rect x="920" y="256" width="100" height="56" fill="#a8701a" fill-opacity="0.24" stroke="#a8701a" stroke-width="1"/>
+<text x="970.0" y="280" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">drain</text>
+<text x="970.0" y="298" font-size="11.5" fill="#555" text-anchor="middle">finish, collect</text>
+<rect x="1020" y="256" width="150" height="56" fill="#7f8b97" fill-opacity="0.16" stroke="#7f8b97" stroke-width="1" stroke-dasharray="4 3" rx="4"/>
+<text x="1098.0" y="289" font-size="12" fill="#222" text-anchor="middle">wrap mid-work</text>
+<line x1="1020" y1="168" x2="1020" y2="316" stroke="#a8701a" stroke-width="3"/>
+<text x="1026" y="168" font-size="11.5" fill="#a8701a" font-weight="bold">hard line 85%</text>
+<line x1="920" y1="84" x2="1020" y2="84" stroke="#222" stroke-width="1"/>
+<line x1="920" y1="84" x2="920" y2="90" stroke="#222" stroke-width="1"/>
+<line x1="1020" y1="84" x2="1020" y2="90" stroke="#222" stroke-width="1"/>
+<text x="970.0" y="78" font-size="12" fill="#222" text-anchor="middle">drain 75–85%</text>
+<line x1="170" y1="326" x2="1170" y2="326" stroke="#555" stroke-width="1"/>
+<line x1="170" y1="326" x2="170" y2="331" stroke="#555" stroke-width="1"/>
+<text x="170" y="346" font-size="12" fill="#555" text-anchor="middle">0</text>
+<line x1="370" y1="326" x2="370" y2="331" stroke="#555" stroke-width="1"/>
+<text x="370" y="346" font-size="12" fill="#555" text-anchor="middle">20</text>
+<line x1="570" y1="326" x2="570" y2="331" stroke="#555" stroke-width="1"/>
+<text x="570" y="346" font-size="12" fill="#555" text-anchor="middle">40</text>
+<line x1="770" y1="326" x2="770" y2="331" stroke="#555" stroke-width="1"/>
+<text x="770" y="346" font-size="12" fill="#555" text-anchor="middle">60</text>
+<line x1="920" y1="326" x2="920" y2="331" stroke="#555" stroke-width="1"/>
+<text x="920" y="346" font-size="12" fill="#555" text-anchor="middle">75</text>
+<line x1="970" y1="326" x2="970" y2="331" stroke="#555" stroke-width="1"/>
+<text x="970" y="346" font-size="12" fill="#555" text-anchor="middle">80</text>
+<line x1="1020" y1="326" x2="1020" y2="331" stroke="#555" stroke-width="1"/>
+<text x="1020" y="346" font-size="12" fill="#555" text-anchor="middle">85</text>
+<line x1="1170" y1="326" x2="1170" y2="331" stroke="#555" stroke-width="1"/>
+<text x="1170" y="346" font-size="12" fill="#555" text-anchor="middle">100%</text>
+<text x="670.0" y="368" font-size="12" fill="#555" text-anchor="middle">context fill, % of the window</text>
+</svg>
