@@ -60,6 +60,16 @@ Before the push, run each row below that the change reaches. Leave a row the cha
 
 Run `make test` once per tree: on the combined tree at integration, or leave it to CI. A fix round on a branch does not re-run it. A tree that passed it, locally or in CI, is not tested again until the tree changes (delivery/ci(softwaredev)).
 
+### macOS checks never gate
+
+The macOS runners are best-effort. A macOS check gates neither a merge nor a release, whether it is queued, running or failed. Green CI here is every other check at pass or skipping:
+
+```bash
+gh pr checks <n> --json name,bucket -q '[.[] | select(.name | test("macos|darwin"; "i") | not)] | all(.bucket=="pass" or .bucket=="skipping")'
+```
+
+Read a failed macOS check before the merge. Fix it on the branch when it points at the change, and file it otherwise. A release publishes on the Linux builds and tests; a macOS binary attaches when its build completes, and a release without one stands.
+
 A TUI change gets its scenario script: `tools/ways-cli/shots/verify.sh` or `tools/attend-chat/shots/shots.sh`. The tui-verification way has the procedure.
 
 `docs/development.md` covers the checkout, the sandbox and the build plumbing.
