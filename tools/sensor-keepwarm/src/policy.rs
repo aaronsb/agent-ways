@@ -1354,6 +1354,12 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
     let Some(m) = Marker::parse(&line) else {
         return Some(stop(state, cfg, site, "no marker", "the wrap's relay marker does not parse".into(), false, now));
     };
+    // A `/wrap`'s marker that repeats the last wrap's id wrote no new
+    // handoff: a resumed turn that ends with the previous wrap's marker.
+    if p.wrap_id.is_none() && p.last_wrap_id.as_deref() == Some(m.wrap.as_str()) {
+        let why = format!("the marker repeats wrap {}, which an earlier wrap already used", m.wrap);
+        return Some(stop(state, cfg, site, "stale handoff", why, false, now));
+    }
     if let Some(id) = p.wrap_id.as_deref().filter(|id| *id != m.wrap) {
         let why = format!("the marker names wrap {}, not this wrap's {id}", m.wrap);
         return Some(stop(state, cfg, site, "stale handoff", why, false, now));

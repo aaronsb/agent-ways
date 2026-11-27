@@ -390,3 +390,21 @@ fn the_card_names_the_mode_the_count_and_a_stop() {
         "relay       stopped: the wrap reported stop decision: the next step needs a decision only the operator can make; your next prompt starts it again"
     );
 }
+
+/// The end-to-end run's finding: a resumed turn that ends with a whole
+/// marker repeating the last wrap's id wrote no new handoff, so it is
+/// stale, not a wrap of its own.
+#[test]
+fn a_marker_that_repeats_the_last_wrap_s_id_is_stale() {
+    let mut s = Session::new(MONDAY, 300_000);
+    let id = "20261012T0010Z-sid1abcd";
+    s.answer(Some(&marker(None, "none", id)), MONDAY + 10 * MIN);
+    let d = s.check_at(&relay(), Gate::Off, &site_with(Some(id)), MONDAY + 10 * MIN);
+    assert_eq!(d.action, Action::Compact);
+    compacted(&mut s.state.policy, None, MONDAY + 11 * MIN);
+    resumed(&mut s.state.policy, MONDAY + 11 * MIN);
+    s.turn(MONDAY + 12 * MIN);
+    s.answer(Some(&marker(Some("empty"), "none", id)), MONDAY + 13 * MIN);
+    let d = s.check_at(&relay(), Gate::Off, &site_with(Some(id)), MONDAY + 13 * MIN);
+    assert_eq!((d.action, d.relay_stop.as_deref(), d.send_handoff), (Action::None, Some("stale handoff"), true), "{d:?}");
+}
