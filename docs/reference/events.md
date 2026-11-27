@@ -170,11 +170,11 @@ One provider call made by the judge. `ways agent cost` sums these.
 
 ### `gate_fallback`
 
-One judge request could not be judged. On the prompt and state lanes nothing is blocked and the gate fails open. On a tool lane each of its candidates also logs `way_unjudged`, and in enforce mode a semantic one is not shown.
+A scan's judge request could not be judged, or on the prompt and state lanes some of its candidates were past `max_candidates`. On the prompt and state lanes nothing is blocked and the gate fails open. On a tool lane each of its candidates also logs `way_unjudged`, and in enforce mode a semantic one is not shown.
 
 | Field | Meaning |
 |-------|---------|
-| `reason` | Why: a timeout, a transport or provider error, an agent error, or `config: …` when the gate settings do not parse. A `config:` line carries no latency or candidate count. |
+| `reason` | Why: a timeout, a transport or provider error, an agent error, `overflow` for the prompt and state lanes' candidates past `max_candidates`, or `config: …` when the gate settings do not parse. A `config:` line carries no latency or candidate count. |
 | `gate_ms`, `candidates` | Gate latency and ways that went unjudged |
 | `hook`, `scope`, `project`, `session` | Common fields |
 
@@ -191,7 +191,7 @@ Written once per session, the first time a lane would have started a detached ju
 
 ### `gate_capped`
 
-Written by older releases when more ways matched than the profile's `max_candidates` (default 8) and the rest went unjudged. The gate now judges every candidate in further requests, so a current log has none.
+Written by older releases when more ways matched than the profile's `max_candidates` (default 8) and the rest went unjudged. The gate now sends one request per scan and logs the candidates past its cap as `way_unjudged` or `gate_fallback` with reason `overflow`, so a current log has none.
 
 | Field | Meaning |
 |-------|---------|
