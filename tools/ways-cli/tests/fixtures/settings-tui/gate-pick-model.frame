@@ -16,7 +16,7 @@ agent-tui frame 100x30
 |│       concurrency      │   claude-haiku-4-5-20251001                    │                        │|
 |│       max_candidates   │   claude-opus-4-5                              │ku-4-5                  │|
 |│       tool_timeout_ms  │   claude-sonnet-5-5                            │ude-haiku-4-5 |         │|
-|│       tool_max_candidat└────────────────────────────────────────────────┘251001 | claude-opus-4-5│|
+|│       tool_candidates  └────────────────────────────────────────────────┘251001 | claude-opus-4-5│|
 |│       price_in_per_mtok                             ││| claude-sonnet-5-5 (Enter picks)          │|
 |│       price_out_per_mtok                            ││default  claude-haiku-4-5                  │|
 |│   ▸ openrouter                                      ││from     default                           │|

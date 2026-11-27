@@ -14,7 +14,7 @@
 # matcher's order, and keeps under the deadline.
 #
 # A tool lane (command, file, tool, task, post-tool) sends one request per
-# call, of at most tool_max_candidates, within tool_timeout_ms. Under the
+# call, of at most tool_candidates, within tool_timeout_ms. Under the
 # claude-code engine a request took about 515 ms plus 112 ms per candidate
 # over a week of records, so 3,000 ms holds about 22 candidates, which
 # covered 97.8% of the command lane's scans (#1372).
@@ -41,7 +41,7 @@ anthropic:
   concurrency: 8
   max_candidates: 8
   tool_timeout_ms: 3000
-  tool_max_candidates: 22
+  tool_candidates: 22
 
 openrouter:
   display_name: OpenRouter API key
@@ -54,7 +54,7 @@ openrouter:
   concurrency: 8
   max_candidates: 8
   tool_timeout_ms: 3000
-  tool_max_candidates: 22
+  tool_candidates: 22
 
 claude-code:
   display_name: Claude Code internal
@@ -67,4 +67,4 @@ claude-code:
   concurrency: 8
   max_candidates: 8
   tool_timeout_ms: 3000
-  tool_max_candidates: 22
+  tool_candidates: 22

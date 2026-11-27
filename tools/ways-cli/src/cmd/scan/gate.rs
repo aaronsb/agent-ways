@@ -13,7 +13,7 @@
 //! keyword, `pattern_strict` and declared: `commands:`, `files:`,
 //! `tool_name:`, state triggers, postchecks), or only the semantic and
 //! keyword ones the gate's first release judged. A tool lane sends one
-//! request per call, of up to the profile's `tool_max_candidates` within
+//! request per call, of up to the profile's `tool_candidates` within
 //! `tool_timeout_ms`; the prompt and state lanes send requests of up to
 //! `max_candidates`, in the matcher's order, within `timeout_ms`, each
 //! further one only while what is left of that deadline holds it
@@ -428,7 +428,7 @@ pub(super) struct Budget {
 impl Budget {
     /// The prompt and state lanes judge in requests of `max_candidates`
     /// within `timeout_ms`. The tool lanes (command, file, tool, task,
-    /// post-tool) send one request of up to `tool_max_candidates` within
+    /// post-tool) send one request of up to `tool_candidates` within
     /// `tool_timeout_ms`: nothing on them waits for a second, and a second
     /// started with what the first left of the deadline was aborted.
     ///
@@ -437,7 +437,7 @@ impl Budget {
     /// - ADR-712 §5: a scan's requests share one deadline.
     pub(super) fn for_lane(p: &Profile, lane: &str) -> Budget {
         if tool_lane(lane) {
-            Budget { timeout: Duration::from_millis(p.tool_timeout_ms), cap: p.tool_max_candidates.max(1), single: true }
+            Budget { timeout: Duration::from_millis(p.tool_timeout_ms), cap: p.tool_candidates.max(1), single: true }
         } else {
             Budget { timeout: Duration::from_millis(p.timeout_ms), cap: p.max_candidates.max(1), single: false }
         }
@@ -1336,7 +1336,7 @@ mod tests {
         let sink = recorder(&events);
         let lc = LogContext { command: Some("git branch -D foo"), ..command_log(&sink) };
         let mut s = settings(Mode::Enforce);
-        s.profile.tool_max_candidates = 1;
+        s.profile.tool_candidates = 1;
         run(&both, turns("q", None), &s, &lc, Judges::Every, |_, _| {
             let mut j = judged(Mode::Enforce, &[("a/way", 0.85)]);
             if let Reply::Judged(j) = &mut j {

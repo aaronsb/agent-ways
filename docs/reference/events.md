@@ -150,7 +150,7 @@ A tool lane's candidate the judge gave no verdict, in enforce mode. One line per
 | `way` | The way, or `check:<id>` for a check |
 | `trigger` | What picked it: `semantic`, `keyword`, `strict` or `declared` |
 | `verdict` | `block` for a candidate only the embedding matcher picked, which is not shown; `pass` for any other, shown as the matcher decided |
-| `reason` | `overflow` when it was past `tool_max_candidates`, else the request's fallback reason, such as `deadline`, `deadline: unclaimed` or `model_error: aborted` |
+| `reason` | `overflow` when it was past `tool_candidates`, else the request's fallback reason, such as `deadline`, `deadline: unclaimed` or `model_error: aborted` |
 | `mode`, `command` | `enforce`, and on the command lane the call as `way_judged` records it |
 | `hook`, `lane`, `scope`, `project`, `session`, `agent_id` | Common fields |
 

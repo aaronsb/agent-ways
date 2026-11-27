@@ -156,7 +156,7 @@ const KEYS: &[KeySpec] = &[
         kind: POSITIVE,
         default: DefaultValue::Fn(|b| shipped_field(b, "max_candidates")),
         doc: "Candidates judged per request on the prompt and state lanes; more candidates take more requests.",
-        long: "Taken in the matcher's order. Past this many the next ones go in a further request within the same deadline, sent only while what is left of it can hold that request; the rest pass unjudged. Judge latency grows with each candidate. The tool lanes use tool_max_candidates.",
+        long: "Taken in the matcher's order. Past this many the next ones go in a further request within the same deadline, sent only while what is left of it can hold that request; the rest pass unjudged. Judge latency grows with each candidate. The tool lanes use tool_candidates.",
         ..BASE
     },
     KeySpec {
@@ -169,10 +169,10 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
-        name: "gate.profiles.*.tool_max_candidates",
-        path: &["profiles", "*", "tool_max_candidates"],
+        name: "gate.profiles.*.tool_candidates",
+        path: &["profiles", "*", "tool_candidates"],
         kind: POSITIVE,
-        default: DefaultValue::Fn(|b| shipped_field(b, "tool_max_candidates")),
+        default: DefaultValue::Fn(|b| shipped_field(b, "tool_candidates")),
         doc: "The most candidates a tool lane's one request carries.",
         long: "Taken in the matcher's order. A candidate past it gets no verdict: a semantic one is not shown, and a commands:, files:, pattern: or check candidate is shown as the matcher decided. Raise it together with tool_timeout_ms.",
         ..BASE
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn the_claude_code_profile_lists_its_tuning_and_no_key_or_price() {
         let listed = |name: &str| KEYS.iter().find(|k| k.name == name).unwrap().instances.contains(&"claude-code");
-        for k in ["provider", "model", "threshold", "timeout_ms", "turns", "max_turn_chars", "max_candidates", "tool_timeout_ms", "tool_max_candidates"] {
+        for k in ["provider", "model", "threshold", "timeout_ms", "turns", "max_turn_chars", "max_candidates", "tool_timeout_ms", "tool_candidates"] {
             assert!(listed(&format!("gate.profiles.*.{k}")), "{k}");
         }
         for k in ["gate.profiles.*.concurrency", "gate.profiles.*.price_in_per_mtok", "gate.profiles.*.price_out_per_mtok", "gate.keys.*"] {

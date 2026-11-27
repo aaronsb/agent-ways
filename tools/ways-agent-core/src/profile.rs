@@ -222,8 +222,8 @@ pub struct Profile {
     /// The most candidates a tool lane's one request carries, in the
     /// matcher's order. A candidate past it gets no verdict: a semantic one
     /// is not shown, any other is shown as the matcher decided.
-    #[serde(default = "default_tool_max_candidates")]
-    pub tool_max_candidates: usize,
+    #[serde(default = "default_tool_candidates")]
+    pub tool_candidates: usize,
     /// USD per million input tokens, for pricing a call whose provider does
     /// not report its cost. Unset: the model's list price where agent-ways
     /// ships one ([`crate::cost::list_price`]), else the cost is unknown.
@@ -249,7 +249,7 @@ fn default_tool_timeout_ms() -> u64 {
     DEFAULT_TOOL_TIMEOUT_MS
 }
 
-fn default_tool_max_candidates() -> usize {
+fn default_tool_candidates() -> usize {
     DEFAULT_TOOL_MAX_CANDIDATES
 }
 
@@ -263,8 +263,8 @@ impl Profile {
                 bail!("profile '{name}': {key} {ms} is outside 1..{MAX_TIMEOUT_MS}");
             }
         }
-        if [self.turns, self.max_turn_chars, self.concurrency, self.max_candidates, self.tool_max_candidates].contains(&0) {
-            bail!("profile '{name}': turns, max_turn_chars, concurrency, max_candidates and tool_max_candidates must be at least 1");
+        if [self.turns, self.max_turn_chars, self.concurrency, self.max_candidates, self.tool_candidates].contains(&0) {
+            bail!("profile '{name}': turns, max_turn_chars, concurrency, max_candidates and tool_candidates must be at least 1");
         }
         if [self.price_in_per_mtok, self.price_out_per_mtok].into_iter().flatten().any(|p| !p.is_finite() || p < 0.0) {
             bail!("profile '{name}': prices must be zero or more");
@@ -309,7 +309,7 @@ pub struct ProfilePatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_timeout_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_max_candidates: Option<usize>,
+    pub tool_candidates: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_in_per_mtok: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -329,7 +329,7 @@ impl ProfilePatch {
             concurrency: self.concurrency.unwrap_or(base.concurrency),
             max_candidates: self.max_candidates.unwrap_or(base.max_candidates),
             tool_timeout_ms: self.tool_timeout_ms.unwrap_or(base.tool_timeout_ms),
-            tool_max_candidates: self.tool_max_candidates.unwrap_or(base.tool_max_candidates),
+            tool_candidates: self.tool_candidates.unwrap_or(base.tool_candidates),
             price_in_per_mtok: self.price_in_per_mtok.or(base.price_in_per_mtok),
             price_out_per_mtok: self.price_out_per_mtok.or(base.price_out_per_mtok),
         }
