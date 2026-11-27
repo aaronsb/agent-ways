@@ -118,8 +118,8 @@ const KEYS: &[KeySpec] = &[
         path: &["profiles", "*", "timeout_ms"],
         kind: Kind::Int { min: 1, max: crate::profile::MAX_TIMEOUT_MS as i64 },
         default: DefaultValue::Fn(|b| shipped_field(b, "timeout_ms")),
-        doc: "The judge call's deadline in milliseconds; past it the gate fails open.",
-        long: "A call takes about 0.6 s plus 0.1 s per candidate (ADR-195).",
+        doc: "The judge's deadline in milliseconds on the prompt and state lanes; past it the gate fails open.",
+        long: "A call takes about 0.6 s plus 0.1 s per candidate. Every request of a scan runs within it. The tool lanes use tool_timeout_ms.",
         ..BASE
     },
     KeySpec {
@@ -155,8 +155,26 @@ const KEYS: &[KeySpec] = &[
         path: &["profiles", "*", "max_candidates"],
         kind: POSITIVE,
         default: DefaultValue::Fn(|b| shipped_field(b, "max_candidates")),
-        doc: "Candidates judged per request; more candidates take more requests.",
-        long: "Taken in the matcher's order. Every candidate is judged: past this many the next ones go in a further request within the same deadline. Judge latency grows with each candidate.",
+        doc: "Candidates judged per request on the prompt and state lanes; more candidates take more requests.",
+        long: "Taken in the matcher's order. Past this many the next ones go in a further request within the same deadline, sent only while what is left of it can hold that request; the rest pass unjudged. Judge latency grows with each candidate. The tool lanes use tool_max_candidates.",
+        ..BASE
+    },
+    KeySpec {
+        name: "gate.profiles.*.tool_timeout_ms",
+        path: &["profiles", "*", "tool_timeout_ms"],
+        kind: Kind::Int { min: 1, max: crate::profile::MAX_TIMEOUT_MS as i64 },
+        default: DefaultValue::Fn(|b| shipped_field(b, "tool_timeout_ms")),
+        doc: "The judge's deadline in milliseconds on a tool lane, which sends one request per call.",
+        long: "The command, file, tool, task and post-tool lanes. The hook cuts it to what its own bound holds, 3,000 ms. A request takes about 0.5 s plus 0.11 s per candidate.",
+        ..BASE
+    },
+    KeySpec {
+        name: "gate.profiles.*.tool_max_candidates",
+        path: &["profiles", "*", "tool_max_candidates"],
+        kind: POSITIVE,
+        default: DefaultValue::Fn(|b| shipped_field(b, "tool_max_candidates")),
+        doc: "The most candidates a tool lane's one request carries.",
+        long: "Taken in the matcher's order. A candidate past it gets no verdict: a semantic one is not shown, and a commands:, files:, pattern: or check candidate is shown as the matcher decided. Raise it together with tool_timeout_ms.",
         ..BASE
     },
     KeySpec {
@@ -370,7 +388,7 @@ mod tests {
     #[test]
     fn the_claude_code_profile_lists_its_tuning_and_no_key_or_price() {
         let listed = |name: &str| KEYS.iter().find(|k| k.name == name).unwrap().instances.contains(&"claude-code");
-        for k in ["provider", "model", "threshold", "timeout_ms", "turns", "max_turn_chars", "max_candidates"] {
+        for k in ["provider", "model", "threshold", "timeout_ms", "turns", "max_turn_chars", "max_candidates", "tool_timeout_ms", "tool_max_candidates"] {
             assert!(listed(&format!("gate.profiles.*.{k}")), "{k}");
         }
         for k in ["gate.profiles.*.concurrency", "gate.profiles.*.price_in_per_mtok", "gate.profiles.*.price_out_per_mtok", "gate.keys.*"] {

@@ -12,24 +12,32 @@
 //! reach the judge is one switch, [`JUDGED`]: every kind (semantic,
 //! keyword, `pattern_strict` and declared: `commands:`, `files:`,
 //! `tool_name:`, state triggers, postchecks), or only the semantic and
-//! keyword ones the gate's first release judged. Every candidate sent is
-//! judged: a request carries at most the profile's `max_candidates`, in the
-//! matcher's order, and the rest go in further requests within the same
-//! deadline. A way under a blocked ancestor that the judge did not see is
-//! blocked with it and logged as a `block` with `reason: ancestor`, the
-//! ancestor's id and its verdict's fields. Every verdict and fallback is
-//! logged to `events.jsonl` with its lane and agent, and any failure fails
-//! open: the matcher's decision stands. The wait is bounded by the calling
-//! hook's budget ([`TOOL_WAIT`], [`PROMPT_WAIT`]), so a hook is never
-//! killed while it waits. Each provider call is logged once more as
-//! `judge_call`, with its tokens and cost, so spend is counted per call,
-//! not per way (#741). The gate also hands every verdict and its own status
-//! back to the scan, which writes them to the scan's decision record.
+//! keyword ones the gate's first release judged. A tool lane sends one
+//! request per call, of up to the profile's `tool_max_candidates` within
+//! `tool_timeout_ms`; the prompt and state lanes send requests of up to
+//! `max_candidates`, in the matcher's order, within `timeout_ms`, each
+//! further one only while what is left of that deadline holds it
+//! ([`Budget`]). Each request is held to what is left of its lane's
+//! deadline, the same figure the loop counts. A way under a blocked
+//! ancestor that the judge did not see is blocked with it and logged as a
+//! `block` with `reason: ancestor`, the ancestor's id and its verdict's
+//! fields. Every verdict and fallback is logged to `events.jsonl` with its
+//! lane and agent. A failure fails open on the prompt and state lanes: the
+//! matcher's decision stands. On a tool lane in enforce mode a candidate
+//! left with no verdict is kept out when only the embedding matcher picked
+//! it, and logged as `way_unjudged` either way ([`settle_unjudged`]). The
+//! wait is bounded by the calling hook's budget ([`TOOL_WAIT`],
+//! [`PROMPT_WAIT`]), so a hook is never killed while it waits. Each
+//! provider call is logged once more as `judge_call`, with its tokens and
+//! cost, so spend is counted per call, not per way (#741). The gate also
+//! hands every verdict and its own status back to the scan, which writes
+//! them to the scan's decision record.
 //!
 //! References:
 //! - ADR-196: the yes/no relevance gate, judged by a hosted model.
 //! - ADR-712: every candidate in every lane and agent thread is judged.
 //! - ADR-701 §2: every lane writes a decision record.
+//! - ADR-188 item 3c: the Bash lane delivers no semantic candidate unjudged.
 
 use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
@@ -61,8 +69,9 @@ const MIN_JOB: Duration = Duration::from_millis(50);
 /// fails open now instead of waiting out the whole budget.
 const CLAIM_WINDOW: Duration = Duration::from_millis(500);
 
-/// Test seam: when these are set, a handoff waits as they say and not as the
-/// constants above say. A test that runs the hook as a process sets both well
+/// Test seam: when these are set, a handoff's claim window and the lane's
+/// judge budget are what they say, not what the constants above and the
+/// profile say. A test that runs the hook as a process sets both well
 /// past any pause a loaded runner can inflict on its judge host, so the
 /// scenario does not race the claim window or the answer deadline. The
 /// scenarios that test those timings do not set them. A real session sets
@@ -103,6 +112,18 @@ pub(super) enum Trigger {
     /// A declared trigger: `commands:`, `files:`, `tool_name:`, a state
     /// trigger or a postcheck.
     Declared,
+}
+
+impl Trigger {
+    /// The name its serialized form and the `way_unjudged` line use.
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Trigger::Semantic => "semantic",
+            Trigger::Keyword => "keyword",
+            Trigger::Strict => "strict",
+            Trigger::Declared => "declared",
+        }
+    }
 }
 
 /// Which trigger kinds the gate judges.
@@ -167,6 +188,9 @@ pub(super) struct LogContext<'a> {
     pub scope: &'a str,
     pub hook_event: &'a str,
     pub sink: EventSink<'a>,
+    /// The command lane's call, as [`super::judged::audit_command`] cuts it:
+    /// each `way_judged` and `way_unjudged` line carries it.
+    pub command: Option<&'a str>,
 }
 
 /// One verdict of the judge, as its `way_judged` line logs it.
@@ -175,6 +199,8 @@ pub(super) struct Judgement {
     pub p_yes: f64,
     /// `pass`, `block` or `would_block`.
     pub verdict: &'static str,
+    /// The judge's reason, when it gave one.
+    pub critique: Option<String>,
 }
 
 /// How the gate ran on one scan.
@@ -206,6 +232,9 @@ pub(super) struct Gate {
     pub blocked: Blocked,
     pub judgements: HashMap<String, Judgement>,
     pub status: Status,
+    /// A tool lane's candidates the judge gave no verdict, each with why:
+    /// `overflow`, or the fallback reason of its request.
+    pub unjudged: HashMap<String, String>,
 }
 
 impl Gate {
@@ -255,7 +284,7 @@ impl Blocked {
             .max_by_key(|(b, _)| b.len())
             .map(|(b, f)| {
                 let mut f: Vec<(String, String)> =
-                    f.iter().filter(|(k, _)| !matches!(k.as_str(), "judge_ms" | "gate_ms" | "candidates")).cloned().collect();
+                    f.iter().filter(|(k, _)| !matches!(k.as_str(), "judge_ms" | "gate_ms" | "candidates" | "critique")).cloned().collect();
                 if !f.iter().any(|(k, _)| k == "reason") {
                     f.push(("reason".into(), "ancestor".into()));
                     f.push(("ancestor".into(), b.clone()));
@@ -326,6 +355,16 @@ fn apply_from(
     if to_judge == 0 {
         return Gate { status: Status::Idle, ..Gate::default() };
     }
+    // A fallback before any request is sent: on a tool lane in enforce mode
+    // each candidate is settled as one with no verdict.
+    let before_call = |reason: &str| {
+        let mut gate = fallback(reason, to_judge, log, "0");
+        if tool_lane(log.lane) && layer.mode == Mode::Enforce {
+            let unjudged: Vec<(&Pending<'_>, String)> = pending.iter().filter(|p| p.judged(JUDGED)).map(|p| (p, reason.to_string())).collect();
+            settle_unjudged(&mut gate, &unjudged, log);
+        }
+        gate
+    };
     let profiles = profile::profiles(&user);
     if log.hook_event == UNHOSTED_HOOK && unhosted_at_session_start(&user, &profiles, store) {
         return Gate::default();
@@ -349,29 +388,73 @@ fn apply_from(
         if session.resolution.reason == engine::NO_KEY {
             return Gate::default();
         }
-        return fallback(&session.resolution.reason, to_judge, log, "0");
+        return before_call(&session.resolution.reason);
     };
     // The session's engine is a profile that agent.yaml no longer has.
     let Some(profile) = profiles.get(&name).cloned() else {
-        return fallback(&format!("{}: {}", engine::CONFIG, profile::names_no_profile(&name)), to_judge, log, "0");
+        return before_call(&format!("{}: {}", engine::CONFIG, profile::names_no_profile(&name)));
     };
-    let mut settings = Settings { engine: name, engine_set: layer.engine_set, profile, mode: layer.mode };
+    let settings = Settings { engine: name, engine_set: layer.engine_set, profile, mode: layer.mode };
     // The hook's own bound comes first: a judge still waiting when Claude
     // Code kills the hook takes the lane's whole output with it.
-    settings.profile.timeout_ms = settings.profile.timeout_ms.min(budget_within(wait).as_millis() as u64);
-    let settings = settings;
+    let mut budget = Budget::for_lane(&settings.profile, log.lane);
+    budget.timeout = test_ms(TEST_BUDGET_MS).unwrap_or_else(|| budget.timeout.min(budget_within(wait)));
     match (settings.profile.provider, store) {
         (Provider::ClaudeCode, Some(store)) => {
-            run(pending, turns, &settings, log, JUDGED, |req, _| handoff(store, &settings, req, begun))
+            run_on(&SystemClock, begun, budget, pending, turns, &settings, log, JUDGED, |req, b| handoff(store, &settings, req, b))
         }
         // `resolve(false)` never names claude-code, so this is a bug; it
         // fails open like any other failure.
-        (Provider::ClaudeCode, None) => fallback("internal: a claude-code session with no judge store", to_judge, log, "0"),
-        _ => run(pending, turns, &settings, log, JUDGED, |mut req, timeout| {
+        (Provider::ClaudeCode, None) => before_call("internal: a claude-code session with no judge store"),
+        _ => run_on(&SystemClock, begun, budget, pending, turns, &settings, log, JUDGED, |mut req, b| {
             req.engine = Some(settings.engine.clone());
-            call(req, timeout)
+            call(req, b + READ_GRACE)
         }),
     }
+}
+
+/// How a lane's candidates go to the judge: the deadline all of a scan's
+/// requests share, counted from the gate's start, the most candidates one
+/// request carries, and whether the lane sends one request or several.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Budget {
+    pub timeout: Duration,
+    pub cap: usize,
+    /// One request per scan: the tool lanes. A candidate past `cap` gets no
+    /// verdict ([`settle_unjudged`]).
+    pub single: bool,
+}
+
+impl Budget {
+    /// The prompt and state lanes judge in requests of `max_candidates`
+    /// within `timeout_ms`. The tool lanes (command, file, tool, task,
+    /// post-tool) send one request of up to `tool_max_candidates` within
+    /// `tool_timeout_ms`: nothing on them waits for a second, and a second
+    /// started with what the first left of the deadline was aborted.
+    ///
+    /// References:
+    /// - ADR-197: the per-request cap.
+    /// - ADR-712 §5: a scan's requests share one deadline.
+    pub(super) fn for_lane(p: &Profile, lane: &str) -> Budget {
+        if tool_lane(lane) {
+            Budget { timeout: Duration::from_millis(p.tool_timeout_ms), cap: p.tool_max_candidates.max(1), single: true }
+        } else {
+            Budget { timeout: Duration::from_millis(p.timeout_ms), cap: p.max_candidates.max(1), single: false }
+        }
+    }
+}
+
+/// Whether `lane` is a tool lane, which sends one judge request per call
+/// and keeps a semantic candidate with no verdict out.
+pub(super) fn tool_lane(lane: &str) -> bool {
+    !matches!(lane, "prompt" | "state")
+}
+
+/// What a judge request over `n` candidates takes, as a week of the claude-code
+/// engine's calls measured it: about 515 ms plus 112 ms per candidate. A
+/// further request is sent only when what is left of the deadline holds it.
+fn expected_latency(n: usize) -> Duration {
+    Duration::from_millis(515 + 112 * n as u64)
 }
 
 /// The hook event whose judge jobs no Claude Code host can claim: its
@@ -454,27 +537,24 @@ fn settings(
 }
 
 /// Judges `req` through the session's Claude Code host (ADR-708 §5): writes
-/// the JSON-only request as a job, waits for the host's answer until the
-/// gate's budget (`timeout_ms` from `begun`) plus [`READ_GRACE`] runs out,
-/// and parses it with [`judge::parse_reply`]. The job's own `timeout_ms` is
-/// what remains of the budget when it is written. Every failure comes back
-/// as a fallback reply, carrying a call when the host took the job and so
-/// may have spent one: `deadline: unclaimed` when no host claims the job
-/// within the claim window ([`CLAIM_WINDOW`]), `deadline` on silence after a claim,
+/// the JSON-only request as a job whose `timeout_ms` is `budget`, what the
+/// gate's loop left of the lane's deadline for this request, waits for the
+/// host's answer until that budget plus [`READ_GRACE`] runs out, and parses
+/// it with [`judge::parse_reply`]. Every failure comes back as a fallback
+/// reply, carrying a call when the host took the job and so may have spent
+/// one: `deadline: unclaimed` when no host claims the job within the claim
+/// window ([`CLAIM_WINDOW`]), `deadline` on silence after a claim,
 /// `invalid_reply: …` on a reply that does not parse, `model_error: …` when
 /// the model call failed.
-fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant) -> Result<Reply, String> {
+fn handoff(store: &Store, settings: &Settings, req: JudgeRequest, budget: Duration) -> Result<Reply, String> {
     let claim_window = test_ms(TEST_CLAIM_WINDOW_MS).unwrap_or(CLAIM_WINDOW);
-    let budget = test_ms(TEST_BUDGET_MS).unwrap_or(Duration::from_millis(settings.profile.timeout_ms));
-    handoff_on(&SystemClock, claim_window, budget, store, settings, req, begun)
+    handoff_on(&SystemClock, claim_window, store, settings, req, budget)
 }
 
-/// [`handoff`] with its clock, claim window and answer budget given; `begun`
-/// is an instant of `clock`.
-fn handoff_on(clock: &dyn Clock, claim_window: Duration, budget: Duration, store: &Store, settings: &Settings, req: JudgeRequest, begun: Instant) -> Result<Reply, String> {
+/// [`handoff`] with its clock and claim window given.
+fn handoff_on(clock: &dyn Clock, claim_window: Duration, store: &Store, settings: &Settings, req: JudgeRequest, budget: Duration) -> Result<Reply, String> {
     let p = &settings.profile;
-    let remaining = budget.saturating_sub(clock.now().saturating_duration_since(begun));
-    if remaining < MIN_JOB {
+    if budget < MIN_JOB {
         return Ok(Reply::Fallback { reason: "deadline: before call".into(), latency_ms: 0, call: None });
     }
     let n = req.candidates.len();
@@ -484,11 +564,11 @@ fn handoff_on(clock: &dyn Clock, claim_window: Duration, budget: Duration, store
         system: judge::SYSTEM.to_string(),
         prompt: judge::render_json_prompt(&judge::render_prompt(&turns, &req.candidates)),
         max_tokens: judge::max_tokens(n),
-        timeout_ms: remaining.as_millis() as u64,
+        timeout_ms: budget.as_millis() as u64,
     };
     let id = store.write_job(&job).map_err(|e| format!("job: {e}"))?;
     let written = clock.now();
-    let waited = store.wait_answer_on(clock, &id, written + claim_window, begun + budget + READ_GRACE);
+    let waited = store.wait_answer_on(clock, &id, written + claim_window, written + budget + READ_GRACE);
     store.finish(&id);
     let latency_ms = clock.now().saturating_duration_since(written).as_millis() as u64;
     // The spend is the account's usage, with no price. A call that reported
@@ -529,7 +609,7 @@ fn handoff_on(clock: &dyn Clock, claim_window: Duration, budget: Duration, store
             model: p.model.clone(),
             mode: settings.mode,
             threshold: p.threshold,
-            verdicts: req.candidates.iter().zip(p_yes).map(|(c, p_yes)| Verdict { id: c.id.clone(), p_yes }).collect(),
+            verdicts: req.candidates.iter().zip(p_yes).map(|(c, p_yes)| Verdict { id: c.id.clone(), p_yes, critique: None }).collect(),
             latency_ms,
             call: Some(call(usage)),
         })),
@@ -555,18 +635,45 @@ pub(super) fn test_gate(verdicts: &[(&str, f64)], mode: Mode, log: &LogContext<'
         model: "claude-haiku-4-5".into(),
         mode,
         threshold: 0.3,
-        verdicts: verdicts.iter().map(|(id, p)| Verdict { id: id.to_string(), p_yes: *p }).collect(),
+        verdicts: verdicts.iter().map(|(id, p)| Verdict { id: id.to_string(), p_yes: *p, critique: None }).collect(),
         latency_ms: 800,
         call: None,
     };
     decide(&j, log, "5")
 }
 
-/// The gate with the agent call injected, so tests can stand in an engine.
-/// Every candidate `judges` sends ([`JUDGED`] on the hook path) is judged, `max_candidates` to a request,
-/// in the matcher's order; the requests share one deadline, and a request
-/// that cannot start before it fails open for its candidates alone.
+/// [`run_on`] on the real clock from now, with the lane's [`Budget`] as the
+/// profile gives it, uncut by any hook bound: the gate for tests that stand
+/// in an engine.
+#[cfg(test)]
 fn run(
+    pending: &[Pending<'_>],
+    turns: Vec<Turn>,
+    settings: &Settings,
+    log: &LogContext<'_>,
+    judges: Judges,
+    call: impl FnMut(JudgeRequest, Duration) -> Result<Reply, String>,
+) -> Gate {
+    let budget = Budget::for_lane(&settings.profile, log.lane);
+    run_on(&SystemClock, Instant::now(), budget, pending, turns, settings, log, judges, call)
+}
+
+/// The gate with the engine call injected. Every candidate `judges` sends
+/// ([`JUDGED`] on the hook path) goes to the judge in the matcher's order,
+/// `budget.cap` to a request, and every request shares `budget.timeout`
+/// from `begun`. `call` is handed what is left of that deadline, which is
+/// the request's own deadline: the job or the agent's provider call is held
+/// to it, and the caller adds the read grace. A tool lane sends one request
+/// and the candidates past its cap get no verdict. On the other lanes a
+/// further request is sent only when what is left holds it
+/// ([`expected_latency`]); one that is not sent fails open for its own
+/// candidates. A candidate left without a verdict is settled by
+/// [`settle_unjudged`].
+#[allow(clippy::too_many_arguments)]
+fn run_on(
+    clock: &dyn Clock,
+    begun: Instant,
+    budget: Budget,
     pending: &[Pending<'_>],
     turns: Vec<Turn>,
     settings: &Settings,
@@ -578,17 +685,29 @@ fn run(
     if judged.is_empty() {
         return Gate { status: Status::Idle, ..Gate::default() };
     }
-    let begun = Instant::now();
-    let deadline = Duration::from_millis(settings.profile.timeout_ms) + READ_GRACE;
+    let elapsed = || clock.now().saturating_duration_since(begun);
     let mut gate = Gate { status: Status::Idle, ..Gate::default() };
-    for batch in judged.chunks(settings.profile.max_candidates.max(1)) {
-        let remaining = deadline.saturating_sub(begun.elapsed());
-        let next = if remaining < MIN_JOB {
-            fallback("deadline: before call", batch.len(), log, &begun.elapsed().as_millis().to_string())
+    let mut unjudged: Vec<(&Pending<'_>, String)> = Vec::new();
+    for (i, batch) in judged.chunks(budget.cap).enumerate() {
+        if budget.single && i > 0 {
+            unjudged.extend(batch.iter().map(|p| (*p, OVERFLOW.to_string())));
+            continue;
+        }
+        let remaining = budget.timeout.saturating_sub(elapsed());
+        let next = if remaining < MIN_JOB || (i > 0 && remaining < expected_latency(batch.len())) {
+            fallback("deadline: before call", batch.len(), log, &elapsed().as_millis().to_string())
         } else {
             judge_batch(batch, &turns, settings, log, remaining, &mut call)
         };
+        let reason = match &next.status {
+            Status::Fallback { reason } => reason.clone(),
+            _ => "no_verdict".to_string(),
+        };
+        unjudged.extend(batch.iter().filter(|p| !next.judgements.contains_key(p.id)).map(|p| (*p, reason.clone())));
         gate.merge(next);
+    }
+    if budget.single && settings.mode == Mode::Enforce {
+        settle_unjudged(&mut gate, &unjudged, log);
     }
     // A way's guidance presumes its parent's: a candidate the judge did not
     // see under a blocked ancestor goes with it.
@@ -598,6 +717,53 @@ fn run(
     gate
 }
 
+/// The reason a tool lane's candidate past the request's cap has no verdict.
+const OVERFLOW: &str = "overflow";
+
+/// What becomes of a tool-lane candidate the judge gave no verdict, in
+/// enforce mode: one only the embedding matcher picked is kept out, and one
+/// a `commands:`, `files:`, `tool_name:` or `pattern:` regex, a state
+/// trigger, a postcheck or a check picked is shown as the matcher decided.
+/// Each is logged as `way_unjudged` with its verdict and why it has none
+/// (`overflow`, or the request's fallback reason), and the gate keeps the
+/// reason for the scan's record.
+///
+/// References:
+/// - ADR-188 item 3c: no semantic candidate on the Bash lane is delivered
+///   unjudged; a judge error delivers nothing from the semantic branch.
+fn settle_unjudged(gate: &mut Gate, unjudged: &[(&Pending<'_>, String)], log: &LogContext<'_>) {
+    for (p, reason) in unjudged {
+        let block = p.trigger == Trigger::Semantic && super::judged::check_of(p.id).is_none();
+        let verdict = if block { "block" } else { "pass" };
+        let agent = crate::session::current_agent();
+        let mut fields: Vec<(String, String)> = [
+            ("event", "way_unjudged"),
+            ("way", p.id),
+            ("trigger", p.trigger.as_str()),
+            ("verdict", verdict),
+            ("reason", reason.as_str()),
+            ("mode", Mode::Enforce.as_str()),
+            ("hook", log.hook_event),
+            ("lane", log.lane),
+            ("scope", log.scope),
+            ("project", log.project_dir),
+            ("session", log.session_id),
+            ("agent_id", &agent),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        if let Some(c) = log.command {
+            fields.push(("command".into(), c.to_string()));
+        }
+        (log.sink)(&fields.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+        gate.unjudged.insert(p.id.to_string(), reason.clone());
+        if block {
+            gate.blocked.0.insert(p.id.to_string(), fields);
+        }
+    }
+}
+
 impl Gate {
     /// Folds one request's outcome into the scan's. Judged requests add
     /// their latencies; a fallback after a judged request leaves the status
@@ -605,6 +771,7 @@ impl Gate {
     fn merge(&mut self, next: Gate) {
         self.blocked.0.extend(next.blocked.0);
         self.judgements.extend(next.judgements);
+        self.unjudged.extend(next.unjudged);
         self.status = match (std::mem::take(&mut self.status), next.status) {
             (Status::Idle, s) => s,
             (Status::Judged { engine, model, judge_ms: a }, Status::Judged { judge_ms: b, .. }) => {
@@ -617,7 +784,7 @@ impl Gate {
     }
 }
 
-/// One judge request over `batch`, within `timeout`.
+/// One judge request over `batch`, held to `timeout`.
 fn judge_batch(
     batch: &[&Pending<'_>],
     turns: &[Turn],
@@ -638,6 +805,7 @@ fn judge_batch(
         // References:
         // - ADR-712 §4: a tool lane's judge input is the request and the call.
         min_turns: (log.lane != "prompt").then_some(turns.len()),
+        deadline_ms: Some(timeout.as_millis() as u64),
     };
     let begun = Instant::now();
     let reply = call(request, timeout);
@@ -705,7 +873,7 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Gate {
             (false, _) => "would_block",
         };
         let agent = crate::session::current_agent();
-        let fields: Vec<(String, String)> = [
+        let mut fields: Vec<(String, String)> = [
             ("event", "way_judged"),
             ("way", &v.id),
             ("p_yes", &format!("{:.3}", v.p_yes)),
@@ -729,8 +897,14 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Gate {
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
+        if let Some(c) = log.command {
+            fields.push(("command".into(), c.to_string()));
+        }
+        if let Some(c) = &v.critique {
+            fields.push(("critique".into(), c.clone()));
+        }
         (log.sink)(&fields.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
-        gate.judgements.insert(v.id.clone(), Judgement { p_yes: v.p_yes, verdict });
+        gate.judgements.insert(v.id.clone(), Judgement { p_yes: v.p_yes, verdict, critique: v.critique.clone() });
         if verdict == "block" {
             gate.blocked.0.insert(v.id.clone(), fields);
         }
@@ -853,7 +1027,7 @@ mod tests {
     }
 
     fn log(sink: EventSink<'_>) -> LogContext<'_> {
-        LogContext { lane: "prompt", session_id: "test-gate", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink }
+        LogContext { lane: "prompt", session_id: "test-gate", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink, command: None }
     }
 
     fn field<'e>(event: &'e [(String, String)], key: &str) -> &'e str {
@@ -867,7 +1041,7 @@ mod tests {
             model: "claude-haiku-4-5".into(),
             mode,
             threshold: 0.3,
-            verdicts: verdicts.iter().map(|(id, p)| Verdict { id: id.to_string(), p_yes: *p }).collect(),
+            verdicts: verdicts.iter().map(|(id, p)| Verdict { id: id.to_string(), p_yes: *p, critique: None }).collect(),
             latency_ms: 800,
             call: None,
         })
@@ -891,7 +1065,9 @@ mod tests {
             assert_eq!(req.turns.len(), 2);
             assert_eq!(req.turns[1].role, Role::User);
             assert!(req.candidates[0].text.starts_with("softwaredev › code › security › secrets\n"));
-            assert!(timeout > Duration::from_millis(2000));
+            // The judge's own deadline; the reader adds the read grace.
+            assert!(timeout <= Duration::from_millis(2000) && timeout > Duration::from_millis(1900), "{timeout:?}");
+            assert_eq!(req.deadline_ms, Some(timeout.as_millis() as u64), "the agent is told the same deadline");
             Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.92), ("data/migrations", 0.05)]))
         });
         assert_eq!(seen, vec!["softwaredev/code/security/secrets", "data/migrations"]);
@@ -1039,6 +1215,163 @@ mod tests {
         assert_eq!(calls_in(&events).len(), 2);
     }
 
+    // ── #1372: a tool lane's one request, and what gets no verdict ──
+
+    fn command_log(sink: EventSink<'_>) -> LogContext<'_> {
+        LogContext { lane: "command", session_id: "test-gate", project_dir: "/tmp", scope: "agent", hook_event: "PreToolUse", sink, command: None }
+    }
+
+    fn all_pass(req: &JudgeRequest) -> Reply {
+        let v: Vec<(&str, f64)> = req.candidates.iter().map(|c| (c.id.as_str(), 0.9)).collect();
+        judged(Mode::Enforce, &v)
+    }
+
+    /// A tool lane sends every candidate the refire check left open in one
+    /// request, past the prompt lane's cap of 8, and each gets a verdict.
+    #[test]
+    fn a_tool_lane_scan_of_twelve_candidates_sends_one_request_and_judges_all_twelve() {
+        let ids: Vec<String> = (0..12).map(|i| format!("w/{i}")).collect();
+        let many: Vec<Pending<'_>> = ids.iter().map(|id| Pending { id, description: "d", trigger: Trigger::Semantic }).collect();
+        let events = Events::default();
+        let sink = recorder(&events);
+        let mut requests: Vec<Vec<String>> = Vec::new();
+        let g = run(&many, turns("q", None), &settings(Mode::Enforce), &command_log(&sink), Judges::Every, |req, _| {
+            requests.push(req.candidates.iter().map(|c| c.id.clone()).collect());
+            Ok(all_pass(&req))
+        });
+        assert_eq!(requests, std::slice::from_ref(&ids), "one request holds all twelve");
+        assert_eq!(g.judgements.len(), 12, "every candidate has a verdict");
+        assert!(g.blocked.ids().is_empty());
+        assert_eq!(calls(&events).len(), 1);
+    }
+
+    /// On a tool lane a candidate the judge gave no verdict, because its one
+    /// request failed or the candidate was past the cap, is blocked when
+    /// only the embedding matcher picked it, and shown as the matcher
+    /// decided when a `commands:`, `files:` or `pattern:` regex or a check
+    /// did. Each such candidate's outcome is logged with its reason. Shadow
+    /// mode and the prompt lane block nothing on a fallback.
+    #[test]
+    fn a_tool_lane_candidate_with_no_verdict_is_blocked_only_when_semantic() {
+        let mixed = vec![
+            Pending { id: "sem/way", description: "d", trigger: Trigger::Semantic },
+            Pending { id: "cmd/way", description: "d", trigger: Trigger::Declared },
+            Pending { id: "kw/way", description: "d", trigger: Trigger::Keyword },
+            Pending { id: "strict/way", description: "d", trigger: Trigger::Strict },
+            Pending { id: "check:chk/way", description: "d", trigger: Trigger::Semantic },
+        ];
+        let failures: Vec<Result<Reply, String>> = vec![
+            Err("deadline".into()),
+            Ok(Reply::Fallback { reason: "deadline: unclaimed".into(), latency_ms: 0, call: None }),
+            Ok(Reply::Fallback { reason: "model_error: aborted".into(), latency_ms: 0, call: None }),
+        ];
+        for reply in failures {
+            let reason = match &reply {
+                Err(r) | Ok(Reply::Fallback { reason: r, .. }) => r.clone(),
+                _ => unreachable!(),
+            };
+            let events = Events::default();
+            let sink = recorder(&events);
+            let g = run(&mixed, turns("q", None), &settings(Mode::Enforce), &command_log(&sink), Judges::Every, |_, _| reply.clone());
+            assert_eq!(g.blocked.ids(), HashSet::from(["sem/way".to_string()]), "{reason}");
+            let events = events.borrow();
+            let unjudged: Vec<(&str, &str, &str)> = events
+                .iter()
+                .filter(|e| field(e, "event") == "way_unjudged")
+                .map(|e| (field(e, "way"), field(e, "verdict"), field(e, "reason")))
+                .collect();
+            assert_eq!(
+                unjudged,
+                [
+                    ("sem/way", "block", reason.as_str()),
+                    ("cmd/way", "pass", reason.as_str()),
+                    ("kw/way", "pass", reason.as_str()),
+                    ("strict/way", "pass", reason.as_str()),
+                    ("check:chk/way", "pass", reason.as_str()),
+                ],
+                "{reason}"
+            );
+        }
+
+        // Past the cap: the first 22 are judged in the one request, the rest
+        // get no verdict.
+        let ids: Vec<String> = (0..24).map(|i| format!("w/{i}")).collect();
+        let mut over: Vec<Pending<'_>> = ids.iter().map(|id| Pending { id, description: "d", trigger: Trigger::Keyword }).collect();
+        over[22].trigger = Trigger::Semantic;
+        let events = Events::default();
+        let sink = recorder(&events);
+        let mut sizes = Vec::new();
+        let g = run(&over, turns("q", None), &settings(Mode::Enforce), &command_log(&sink), Judges::Every, |req, _| {
+            sizes.push(req.candidates.len());
+            Ok(all_pass(&req))
+        });
+        assert_eq!(sizes, [22], "one request, at the cap");
+        assert_eq!(g.blocked.ids(), HashSet::from(["w/22".to_string()]), "the semantic overflow is kept out");
+        assert_eq!(g.judgements.len(), 22);
+        let events = events.borrow();
+        let unjudged: Vec<(&str, &str, &str)> = events
+            .iter()
+            .filter(|e| field(e, "event") == "way_unjudged")
+            .map(|e| (field(e, "way"), field(e, "verdict"), field(e, "reason")))
+            .collect();
+        assert_eq!(unjudged, [("w/22", "block", "overflow"), ("w/23", "pass", "overflow")]);
+
+        // Shadow mode and the prompt lane fail open as before.
+        let sink = |_: &[(&str, &str)]| {};
+        let shadow = run(&mixed, turns("q", None), &settings(Mode::Shadow), &command_log(&sink), Judges::Every, |_, _| Err("deadline".into()));
+        assert!(shadow.blocked.ids().is_empty(), "shadow blocks nothing");
+        let prompt = run(&mixed, turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Every, |_, _| Err("deadline".into()));
+        assert!(prompt.blocked.ids().is_empty(), "the prompt lane fails open");
+    }
+
+    /// #1372: a command-lane judge line names the call it was decided on,
+    /// and a verdict's line carries the judge's critique when it gave one.
+    #[test]
+    fn a_command_lane_outcome_line_carries_the_command_and_the_critique() {
+        let both = vec![
+            Pending { id: "a/way", description: "d", trigger: Trigger::Semantic },
+            Pending { id: "b/way", description: "d", trigger: Trigger::Declared },
+        ];
+        let events = Events::default();
+        let sink = recorder(&events);
+        let lc = LogContext { command: Some("git branch -D foo"), ..command_log(&sink) };
+        let mut s = settings(Mode::Enforce);
+        s.profile.tool_max_candidates = 1;
+        run(&both, turns("q", None), &s, &lc, Judges::Every, |_, _| {
+            let mut j = judged(Mode::Enforce, &[("a/way", 0.85)]);
+            if let Reply::Judged(j) = &mut j {
+                j.verdicts[0].critique = Some("deleting a branch is not a history rewrite".into());
+            }
+            Ok(j)
+        });
+        let events = events.borrow();
+        let judged_line = events.iter().find(|e| field(e, "event") == "way_judged").unwrap();
+        assert_eq!(field(judged_line, "command"), "git branch -D foo");
+        assert_eq!(field(judged_line, "critique"), "deleting a branch is not a history rewrite");
+        let unjudged = events.iter().find(|e| field(e, "event") == "way_unjudged").unwrap();
+        assert_eq!((field(unjudged, "way"), field(unjudged, "command"), field(unjudged, "reason")), ("b/way", "git branch -D foo", "overflow"));
+        assert!(unjudged.iter().all(|(k, _)| k != "critique"));
+    }
+
+    /// The budget a request is handed is the judge's own deadline, counted
+    /// from the gate's start: the job is written with it and the loop
+    /// decides on it. It carries no read grace, which is the hook's to add
+    /// when it reads.
+    #[test]
+    fn each_request_is_handed_the_budget_its_job_is_written_with() {
+        let s = settings(Mode::Enforce);
+        let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
+        let sink = |_: &[(&str, &str)]| {};
+        let mut handed: Vec<Duration> = Vec::new();
+        run(&pending_ids(&ids, 0), turns("q", None), &s, &log(&sink), Judges::Matched, |req, budget| {
+            handed.push(budget);
+            Ok(all_pass(&req))
+        });
+        let deadline = Duration::from_millis(s.profile.timeout_ms);
+        assert_eq!(handed.len(), 2);
+        assert!(handed.iter().all(|b| *b <= deadline && *b > deadline - Duration::from_millis(200)), "{handed:?} against {deadline:?}");
+    }
+
     /// The switch on its hook-path setting sends every trigger kind, strict
     /// and declared included (#1287); on `Matched` they pass unjudged.
     #[test]
@@ -1086,8 +1419,8 @@ mod tests {
         let g = run(&pending(), turns("q", None), &settings(Mode::Enforce), &log(&sink), Judges::Matched, |_, _| {
             Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.92), ("data/migrations", 0.05)]))
         });
-        assert_eq!(g.judgements["softwaredev/code/security/secrets"], Judgement { p_yes: 0.92, verdict: "pass" });
-        assert_eq!(g.judgements["data/migrations"], Judgement { p_yes: 0.05, verdict: "block" });
+        assert_eq!(g.judgements["softwaredev/code/security/secrets"], Judgement { p_yes: 0.92, verdict: "pass", critique: None });
+        assert_eq!(g.judgements["data/migrations"], Judgement { p_yes: 0.05, verdict: "block", critique: None });
         assert!(!g.judgements.contains_key("meta/strict"), "a strict way is never judged");
         assert_eq!(g.status, Status::Judged { engine: "anthropic".into(), model: "claude-haiku-4-5".into(), judge_ms: 800 });
 
@@ -1362,15 +1695,49 @@ mod tests {
         let h = host(&s.store, |_| Some(answer_text("{\"judgements\":[]}")));
         // The gate's clock started 500 ms before the job was written.
         let settings = Settings { engine: "claude-code".into(), engine_set: true, profile: profile::shipped()["claude-code"].clone(), mode: Mode::Enforce };
+        let budget = Budget::for_lane(&settings.profile, "prompt");
         let begun = Instant::now() - Duration::from_millis(500);
-        run(&pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, _| handoff(&s.store, &settings, req, begun));
+        let mut handed = Duration::ZERO;
+        run_on(&SystemClock, begun, budget, &pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, b| {
+            handed = b;
+            handoff(&s.store, &settings, req, b)
+        });
         let taken = h.join().unwrap().unwrap();
         assert!(taken.job.timeout_ms <= 1500 && taken.job.timeout_ms > 1000, "{}", taken.job.timeout_ms);
+        assert_eq!(taken.job.timeout_ms, handed.as_millis() as u64, "the job carries the budget the loop handed it");
         // Under the least budget a call can use, no job is written.
         let late = Instant::now() - Duration::from_millis(1970);
-        let g = run(&pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, _| handoff(&s.store, &settings, req, late));
+        let g = run_on(&SystemClock, late, budget, &pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, b| handoff(&s.store, &settings, req, b));
         assert_eq!(g.status, Status::Fallback { reason: "deadline: before call".into() });
         assert_eq!(s.store.take().unwrap(), None);
+    }
+
+    /// The loop counts the same deadline the job is written with, so a
+    /// further request on the prompt lane starts only when what the first
+    /// left of it holds the request: here the first takes 1.5 s of 2 s, and
+    /// the 500 ms left cannot hold two candidates, so none is sent and
+    /// nothing is spent on a call bound to be aborted.
+    #[test]
+    fn a_further_request_starts_only_when_what_is_left_holds_it() {
+        use crate::clock::ManualClock;
+        let s = settings(Mode::Enforce);
+        let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
+        let events = Events::default();
+        let sink = recorder(&events);
+        let clock = ManualClock::new();
+        let mut handed: Vec<Duration> = Vec::new();
+        let g = run_on(&clock, clock.now(), Budget::for_lane(&s.profile, "prompt"), &pending_ids(&ids, 0), turns("q", None), &s, &log(&sink), Judges::Matched, |req, b| {
+            handed.push(b);
+            clock.sleep(Duration::from_millis(1500));
+            Ok(all_pass(&req))
+        });
+        assert_eq!(handed, [Duration::from_millis(2000)], "one request, handed the whole deadline");
+        assert_eq!(g.judgements.len(), 8);
+        let events = events.borrow();
+        let fallback = events.iter().find(|e| field(e, "event") == "gate_fallback").expect("the second request fell back");
+        assert_eq!((field(fallback, "reason"), field(fallback, "candidates")), ("deadline: before call", "2"));
+        assert_eq!(calls_in(&events).len(), 1, "no call was made for the second");
+        assert!(g.blocked.ids().is_empty(), "the prompt lane fails open");
     }
 
     /// The gate over the claim-window handoff on a clock the test advances,
@@ -1383,8 +1750,10 @@ mod tests {
         let mut settings = Settings { engine: "claude-code".into(), engine_set: true, profile: profile::shipped()["claude-code"].clone(), mode: Mode::Enforce };
         settings.profile.timeout_ms = timeout_ms;
         let clock = ManualClock::new().at_first_sleep(at_first_sleep);
-        let begun = clock.now();
-        let g = run(&pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, _| handoff_on(&clock, CLAIM_WINDOW, Duration::from_millis(timeout_ms), &s.store, &settings, req, begun));
+        let budget = Budget::for_lane(&settings.profile, "prompt");
+        let g = run_on(&clock, clock.now(), budget, &pending(), turns("q", None), &settings, &log(&sink), Judges::Matched, |req, b| {
+            handoff_on(&clock, CLAIM_WINDOW, &s.store, &settings, req, b)
+        });
         (g, clock.elapsed())
     }
 
@@ -1655,6 +2024,24 @@ mod tests {
         let events = events.borrow();
         let fb = events.iter().find(|e| field(e, "event") == "gate_fallback").expect("logged");
         assert_eq!((field(fb, "reason"), field(fb, "candidates")), (reason.as_str(), "3"), "every trigger kind counts");
+    }
+
+    /// The same session on the command lane: with no host and no key, no
+    /// semantic candidate is shown, and the regex ones are.
+    #[test]
+    fn a_tool_lane_with_no_host_keeps_its_semantic_candidates_out() {
+        let s = Session::new("unavailable-cmd", CLAUDE_CODE);
+        let events = Events::default();
+        let sink = recorder(&events);
+        let mixed = vec![
+            Pending { id: "sem/way", description: "d", trigger: Trigger::Semantic },
+            Pending { id: "cmd/way", description: "d", trigger: Trigger::Declared },
+        ];
+        let g = apply_from(&s.yaml, |_| false, Some(&s.store), &mixed, turns("q", None), TOOL_WAIT, &command_log(&sink), |_, _| panic!("no agent call"));
+        let Status::Fallback { reason } = &g.status else { panic!("{:?}", g.status) };
+        assert!(reason.starts_with("engine_unavailable"), "{reason}");
+        assert_eq!(g.blocked.ids(), HashSet::from(["sem/way".to_string()]));
+        assert_eq!(g.unjudged.get("cmd/way"), Some(reason));
     }
 
     #[test]

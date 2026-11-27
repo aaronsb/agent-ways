@@ -215,12 +215,17 @@ impl Record {
     /// became of it. A judge block carries the verdict that kept it out. An
     /// ancestor block names the ancestor and carries the ancestor's verdict as
     /// `ancestor_p_yes` and `ancestor_threshold`: the judge never saw this way.
-    /// Any other judged way carries its `p_yes` and `verdict`.
+    /// Any other judged way carries its `p_yes` and `verdict`, and the
+    /// judge's `critique` when it gave one. A tool-lane way the judge gave no
+    /// verdict carries why as `unjudged`: an `unjudged_block`, or a fire.
     pub(super) fn hit(&mut self, way: &str, rank: usize, channel: &str, p: Option<f64>, result: &str, judge: Option<&gate::Gate>) {
         let mut o = outcome(way, result);
         o.insert("rank".into(), rank.into());
         o.insert("channel".into(), channel.into());
         put_prob(&mut o, "p", p);
+        if let Some(reason) = judge.and_then(|g| g.unjudged.get(way)) {
+            o.insert("unjudged".into(), reason.as_str().into());
+        }
         if let Some(g) = judge {
             match g.blocked.fields(way).filter(|_| matches!(result, "judge_block" | "ancestor_block")) {
                 Some(fields) => {
@@ -237,16 +242,31 @@ impl Record {
                     if let Some(a) = get("ancestor") {
                         o.insert("ancestor".into(), a.into());
                     }
+                    if let Some(c) = get("critique") {
+                        o.insert("critique".into(), c.into());
+                    }
                 }
                 None => {
                     if let Some(j) = g.judgements.get(way) {
                         o.insert("p_yes".into(), round(j.p_yes).into());
                         o.insert("verdict".into(), j.verdict.into());
+                        if let Some(c) = &j.critique {
+                            o.insert("critique".into(), c.as_str().into());
+                        }
                     }
                 }
             }
         }
         self.outcomes.push(o);
+    }
+
+    /// Marks every outcome so far with the command lane's call, as
+    /// [`super::judged::audit_command`] cut it, so each row can be traced
+    /// to the command it was decided on.
+    pub(super) fn command(&mut self, text: &str) {
+        for o in &mut self.outcomes {
+            o.insert("command".into(), text.into());
+        }
     }
 
     /// How the relevance gate ran on this scan.
@@ -319,11 +339,20 @@ impl Record {
     }
 }
 
-/// The result a matched way takes when the gate kept it out, or `None`.
+/// The result a matched way takes when the gate kept it out, or `None`:
+/// `judge_block` on the judge's verdict, `ancestor_block` with a blocked
+/// ancestor, `unjudged_block` for a tool lane's semantic candidate the judge
+/// gave no verdict.
 pub(super) fn block_result(blocked: &gate::Blocked, way: &str) -> Option<&'static str> {
     let fields = blocked.fields(way)?;
-    let by_ancestor = fields.iter().any(|(k, v)| k == "reason" && v == "ancestor");
-    Some(if by_ancestor { "ancestor_block" } else { "judge_block" })
+    let has = |key: &str, value: &str| fields.iter().any(|(k, v)| k == key && v == value);
+    Some(if has("reason", "ancestor") {
+        "ancestor_block"
+    } else if has("event", "way_unjudged") {
+        "unjudged_block"
+    } else {
+        "judge_block"
+    })
 }
 
 fn outcome(way: &str, result: &str) -> Map<String, Value> {
@@ -370,7 +399,7 @@ mod tests {
     fn gate_of(verdicts: &[(&str, f64)], mode: ways_agent_core::profile::Mode) -> gate::Gate {
         let events = Events::default();
         let sink = |f: &[(&str, &str)]| events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
-        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink, command: None };
         gate::test_gate(verdicts, mode, &lc)
     }
 
@@ -460,7 +489,7 @@ mod tests {
         use ways_agent_core::profile::Mode;
         let events = Events::default();
         let sink = |f: &[(&str, &str)]| events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
-        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let lc = gate::LogContext { lane: "prompt", session_id: "s", project_dir: "/p", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink, command: None };
         let mut g = gate::test_gate(&[("p", 0.05)], Mode::Enforce, &lc);
         assert!(g.blocked.with_ancestor("p/c", &lc));
         assert_eq!(block_result(&g.blocked, "p/c"), Some("ancestor_block"));

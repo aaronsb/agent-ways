@@ -91,6 +91,7 @@ pub fn tool(
         scope: scope.clone(),
         project_dir: project_dir.clone(),
         session_id: session_id.to_string(),
+        command: None,
     };
     let call = if hook_event == "PreToolUse" { format!("About to use the {tool} tool.") } else { format!("Used the {tool} tool.") };
     judged::run(&lane, &scan, &judge_candidates, || judged::tool_turns(session_id, &call), gate::TOOL_WAIT, |c| {

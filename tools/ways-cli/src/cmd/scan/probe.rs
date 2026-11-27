@@ -146,13 +146,14 @@ pub(crate) fn prompt(query: &str, project_dir: &str, admission: Admission, body_
 pub(crate) fn bash(text: &str, project_dir: &str) -> ProbeScan {
     let scope = "agent";
     let candidates = collect_candidates(project_dir);
-    // The lane embeds the lookbehind, the command and the description. A probe
-    // has no transcript, so only the description is left.
-    let reduced = reduce::reduce_for_embed(&format!("  {text}"), BUDGET_COMMAND);
+    // The lane embeds the command's operative verbs and the description. A
+    // probe has no command, so only the description is left.
+    let command = ShellCommand::default();
+    let reduced = reduce::reduce_for_embed(&command.embed_surface(Some(text)), BUDGET_COMMAND);
     let embed_matches = batch_embed_score(&reduced);
     let hits = command_hits(
         &CommandSurface {
-            command: &ShellCommand::default(),
+            command: &command,
             description: Some(text),
             session_id: PROBE_SESSION,
             scope,
