@@ -18,6 +18,10 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "let's get all 5 in fix and published asap"
+    via: "operator, 2026-11-27, agent-ways session, on the #1372 investigation's five decisions"
 status: accepted
 date: 2026-10-01
 deciders:
@@ -47,6 +51,8 @@ The operator ruled out spending more latency or cost per prompt for a better gat
 2. **Which candidates.** The gate takes the first `max_candidates` of the ways it would judge, in the matcher's admission order: hits from an explicit trigger (`files:`, `commands:`, a keyword `pattern:`) before scored hits, each tree whole before the next, parents before children, siblings by their best score. Ways with `pattern_strict` are still not judged and do not count against the cap.
 3. **The rest.** Candidates past the cap get no verdict and pass, as they did before the gate existed, except a way whose ancestor the judge blocked: a way's guidance presumes its parent's, so it is blocked with the parent. This amends ADR-196 §1 and §2: one request per prompt carries up to the cap rather than every candidate.
 4. **Logging.** A request that hits the cap logs one `gate_capped` event with the number judged, the number left unjudged and their ids. `ways introspect dump` counts unjudged ways in its gate summary beside the verdicts and fallbacks.
+
+> Edited 2026-11-27: the operator decided, on the #1372 investigation, to drop the per-request cap and to settle the overflow question below. In one session on the command lane, 43% of fires carried no verdict: 576 `gate_fallback` rows said `deadline: before call`, 189 said `model_error: aborted`, and 4,694 fires came from the overflow past the 8 judged candidates. 2,127 second-batch requests aborted at the deadline, and 328 of the 340 scans with unjudged fires had exactly 8 judged candidates. The judged and unjudged groups passed at 15% and 43%, so the overflow let through far more noise than the judged candidates did. Item 1's cap of 8 per request no longer applies: a scan sends one judge request holding all its candidates, with a 3000 ms tool-lane budget, and the profile's `timeout_ms` now matches the hook's tool-lane wait, which had differed from it. Item 3 changes for candidates nothing judged, because the request timed out or failed: semantic candidates are blocked and regex ones (`commands:`, `files:`, keyword `pattern:`) pass. The outcome rows carry the command's first 80 characters and the judge's critique. ADR-712 §5 records the same decision. It read: "A judge request carries at most a profile-set number of candidates, 8 by default, taken in the matcher's order. Candidates past the cap are not judged and pass as the matcher decided."
 
 ## Consequences
 

@@ -3,7 +3,7 @@ description: creating and applying patch files, git diff generation, patch serie
 vocabulary: patch diff apply hunk unified series format-patch downstream cumulative regenerate hand-write
 pattern: \.patch\b|git.?(apply|am)|patch.?(set|series)
 files: \.(patch|diff)$
-commands: git\ apply|git\ diff.*\>
+commands: git\ (apply|am|format-patch)\b|git\ diff\b[^|;&]*>\s*\S+\.(patch|diff)\b
 scope: agent, subagent
 refire: 0.15
 ---

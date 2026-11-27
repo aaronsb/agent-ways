@@ -124,6 +124,9 @@ considered:
   - operator: aaronsb
     said: "1131 reads as we discussed I am ok with it"
     via: "chat in the agent-ways session, 2026-10-22, after reading PR #1131 (the PR body listed the three agent-made calls: Bash lane judges every candidate in batches of 8; tool_event default [PreToolUse, UserPromptExpansion]; no-judge setup writes gate.mode off)"
+  - operator: aaronsb
+    said: "let's get all 5 in fix and published asap"
+    via: "operator, 2026-11-27, agent-ways session, on the #1372 investigation's five decisions"
 status: proposed
 date: 2026-09-19
 deciders:
@@ -375,3 +378,7 @@ The judge itself came late to this project because it needed a separate API key 
 - **Reject `PostToolUseFailure`, `PermissionRequest` and `PermissionDenied` in lint.** This record's earlier text. Replaced by ADR-704's rule, on main, which accepts all five events and leaves the failure event out of the default.
 - **Match `UserPromptExpansion` through an alias rule (`PreToolUse` covering both skill routes).** Rejected: ADR-704 compares event names exactly, and an alias would make `tool_event:` mean something other than the events it lists.
 - **A separate hook command for the lane on PostToolUse beside `check-post.sh`.** Rejected: a second process per call where one already reads the same payload and prints the envelope.
+
+## Amendments
+
+> Note, 2026-11-27: the operator decided to build items 3b and 3c under issue #1372, so the semantic match and the judge see the command's operative verbs plus its description and not the agent's prose. The same issue sets one judge request per scan with a 3000 ms tool-lane budget (ADR-197, ADR-712 §5), blocks semantic candidates that nothing judged and passes regex ones, and logs the command's first 80 characters and the judge's critique on each outcome row. The record stays Proposed until that implementation merges.
