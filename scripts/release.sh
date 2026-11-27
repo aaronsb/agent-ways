@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # From agent-ways: https://github.com/aaronsb/agent-ways
 
-# ADR-150 release helper for the Cargo-versioned components. Two steps, because
+# Release helper for the Cargo-versioned components. Two steps, because
 # `main` is branch-protected and the repo is PR-first:
 #
 #   bump  — create one release branch with the version bump of every listed
@@ -35,6 +35,10 @@
 # `tag` without --push creates the annotated tags locally and prints the push
 # commands (keeps the publish deliberate); `--push` pushes them. way-embed is out
 # of scope — it versions via tools/way-embed/Makefile.
+#
+# References:
+# - ADR-150: main takes changes only through a PR, so the version bump merges
+#   first and the tag lands on main after it.
 set -euo pipefail
 
 die() { echo "release: $*" >&2; exit 1; }
@@ -302,7 +306,7 @@ case "$MODE" in
     git commit -q -m "$SUBJECT"
     git push -q -u origin "$BRANCH"
     gh pr create --title "$TITLE" \
-      --body "Version bump for ${SUMMARY} (ADR-150). After merge, tag it: \`make publish-release COMPONENT=${PUBLISH}\` — that pushes \`${TAGS}\` and CI builds all platforms + creates the GitHub Release."
+      --body "Version bump for ${SUMMARY}. main takes changes only through a PR, so the tags come after this merges. After merge, tag it: \`make publish-release COMPONENT=${PUBLISH}\` — that pushes \`${TAGS}\` and CI builds all platforms + creates the GitHub Release."
     cat <<EOF
 
 Bump PR opened on branch ${BRANCH}. Next:

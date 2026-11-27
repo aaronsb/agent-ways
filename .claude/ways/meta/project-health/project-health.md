@@ -44,7 +44,7 @@ The default window is feathered: anchored at our last release tag, expanded to i
 
 A release ships a batch of merged changes that has been evaluated on this host with `make dev-install` (the cadence is in `.claude/CLAUDE.md`). Do not cut one to try a fix. A regression in the current release, such as a missing platform asset or a broken binary, ships as a patch at once.
 
-A release takes two steps, because `main` is branch-protected (ADR-150). One bump PR carries every component the release ships, so CI runs once for the whole release:
+A release takes two steps, because `main` is branch-protected and takes changes only through a PR. One bump PR carries every component the release ships, so CI runs once for the whole release:
 
 ```bash
 make cut-release COMPONENT="ways attend attend-chat" LEVEL=minor   # opens one version-bump PR
@@ -82,3 +82,7 @@ Filter upstream changes through what this project cares about:
 Things we typically ignore: UI polish, voice mode, IDE integrations, API proxy fixes.
 
 This is not a checklist. Use judgment. A "tiny" upstream change (200K to 1M context) can reshape entire subsystems.
+
+## References
+
+- ADR-150: `main` takes changes only through a PR, so a release bumps versions in a PR and tags `main` after the merge.

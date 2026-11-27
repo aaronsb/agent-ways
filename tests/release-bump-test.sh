@@ -4,10 +4,13 @@
 # From agent-ways: https://github.com/aaronsb/agent-ways
 
 # scripts/release.sh bump and tag, for one component and for a batch on one
-# branch (ADR-150). Runs against a scratch repository whose origin is a local
-# bare repository, with gh stubbed, so nothing reaches GitHub. Asserts the
+# branch. Runs against a scratch repository whose origin is a local bare
+# repository, with gh stubbed, so nothing reaches GitHub. Asserts the
 # manifest, lock and plugin versions, one commit per bump, the branch, the PR
 # title, and the tags.
+#
+# References:
+# - ADR-150: the bump goes through a PR, and the tag lands on main after it.
 
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

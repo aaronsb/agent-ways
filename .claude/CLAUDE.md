@@ -44,6 +44,7 @@ Run these before the push. The cargo workspace is `tools/Cargo.toml`.
 | `CLAUDE_CODE_TYPES=<path>/claude-code.d.ts make test-plugins` | the mods; the type check needs the `claude-code.d.ts` that Claude Code bundles, and skips without it |
 | `ways author lint <way-dir>`, `scripts/check-register.sh` | a changed way |
 | `reuse lint` | every file carries copyright and license information (REUSE 3.3); add a header to a new source file with `scripts/spdx-header FILE`, or `--license MIT` for the ADR and doc tooling |
+| `docs/scripts/adr cite --check --since origin/main` | ADR citations resolve and sit in a References block on the lines you changed, as CI's citation-placement job runs it |
 | `scripts/check-portability.sh` | line endings, shebangs and hardcoded home paths in shell scripts and fixtures, as CI's portability job runs it |
 | `make test` | lint, smoke, unit, simulation, ADR tool, statusline and hook suites |
 
