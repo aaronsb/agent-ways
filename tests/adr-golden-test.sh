@@ -842,8 +842,9 @@ capture record-consider-advisor-no-operator consider 115 --said "fits the goal" 
 capture record-consider-advisor       consider 115 --said "fits the goal" --via "skeptic subagent (fixture-model), /goal run" --operator advisor --covers band-hint
 keep record-consider-advisor-file.md "$S/ADR-115-named-probes.md"
 
-# The refusal matches an advisor, a subagent, /goal or a model id, not the bare
-# word "model", which an operator's own channel often holds (#1402). With no
+# The refusal matches an advisor, a subagent, /goal, a model id or family, or
+# another model, as whole words, and not the bare word "model", which an
+# operator's own channel often holds (#1402). With no
 # --operator the tool falls back to the git user, so these run through
 # adr-nogh with a repo-local user.name.
 fresh v1
@@ -853,6 +854,10 @@ ADR_TOOL="$WORK/adr-nogh" capture record-consider-via-model-word consider 115 --
 keep record-consider-via-model-word-file.md "$S/ADR-115-named-probes.md"
 ADR_TOOL="$WORK/adr-nogh" capture record-consider-via-advisor  consider 115 --said "fits the goal" --via "the advisor's answer in the review session"
 ADR_TOOL="$WORK/adr-nogh" capture record-consider-via-model-id consider 115 --said "fits the goal" --via "claude-opus-4-7, asked for a second opinion"
+ADR_TOOL="$WORK/adr-nogh" capture record-consider-via-model-name consider 115 --said "fits the goal" --via "Opus 4.7 second opinion"
+ADR_TOOL="$WORK/adr-nogh" capture record-consider-via-another-model consider 115 --said "fits the goal" --via "asked another model"
+ADR_TOOL="$WORK/adr-nogh" capture record-consider-via-claude-crate consider 115 --said "keep it" --via "claude-sessions crate review, session 2026-11-27"
+ADR_TOOL="$WORK/adr-nogh" capture record-consider-via-skeptical consider 115 --said "not yet" --via "session 2026-11-27, the operator was skeptical"
 
 fresh v1
 capture record-set              set 106 "capability=[search, ingest]" "related=[ADR-100, ADR-101]" extends-=ADR-100 date=2025-05-17
