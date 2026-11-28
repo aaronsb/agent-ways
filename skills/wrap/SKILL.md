@@ -1,6 +1,6 @@
 ---
 name: wrap
-description: Wrap up a session at a natural seam — land in-flight work, square the TaskList honestly, write a copy-paste continuation prompt, then hand off to a directed /compact, or in relay mode end with the marker the attend mod compacts and resumes on. In boundary mode the agent runs it when a piece of work lands and ends by calling the attend mod's boundary tool. Use when the user says "wrap up", "wrap this up", "let's wrap", "end of session", "checkpoint and compact", "hand off", or invokes /wrap.
+description: Wrap up a session at a natural seam — land in-flight work, square the TaskList honestly, write a copy-paste continuation prompt, then hand off to a directed /compact, or in relay mode end with the marker the attend mod compacts and resumes on. In boundary mode the agent runs it when a piece of work lands and ends by calling the attend mod's boundary tool, or, where the tool is not listed, goes back to work with the handoff as a checkpoint. Use when the user says "wrap up", "wrap this up", "let's wrap", "end of session", "checkpoint and compact", "hand off", or invokes /wrap.
 allowed-tools: Bash, Read, Grep, Glob, TaskList, TaskCreate, TaskUpdate, TaskGet, AskUserQuestion, Agent, mcp__attend__attend_boundary
 ---
 
@@ -17,7 +17,7 @@ The deliverable is two things that survive a reset: a **TaskList that honestly m
 - `/wrap` — full flow: land work (offer; relay mode lands nothing), square the TaskList, write the handoff, then end with a `/compact` line in handoff mode or the relay marker in relay mode (Step 4).
 - `/wrap stay` — wrapping mid-work on purpose: **skip** the land/merge step. Don't land anything; just capture state accurately and produce the handoff. Use when the seam is "I'm pausing", not "I'm done".
 - `/wrap handoff` — forces handoff mode for this run, whatever the relay setting says. The wrap ends with a `/compact` line and no relay marker, so the operator can stop a relay-mode session by hand.
-- `/wrap boundary` — the agent runs this itself when a piece of work lands: a merge, a release, or a closed task with nothing in flight behind it. It runs with `stay` semantics: it lands nothing and asks nothing, so it does not call AskUserQuestion. It writes the handoff, records the wrap id with attend, and ends by calling `attend_boundary` with the wrap id and the agent's own call (Step 4). A `/wrap` without `boundary` never calls the tool, so a wrap the operator types is not judged.
+- `/wrap boundary` — the agent runs this itself when a piece of work lands: a merge, a release, or a closed task with nothing in flight behind it. It runs with `stay` semantics: it lands nothing and asks nothing, so it does not call AskUserQuestion. It writes the handoff, records the wrap id with attend, and ends by calling `attend_boundary` with the wrap id and the agent's own call (Step 4). Where the tool is not listed, the handoff stands as a checkpoint and the agent goes back to DO NEXT. A `/wrap` without `boundary` never calls the tool, so a wrap the operator types is not judged.
 
 ## Step 0 — Read the context gauge and the mode first
 
@@ -177,7 +177,7 @@ Walk four categories. Each item lands in an issue, a design note, or a way edit,
 
 ## Step 4 — Hand off
 
-Step 0's mode picks the ending. Handoff mode ends with a `/compact` line for the user, and relay mode ends with the relay marker. A `/wrap boundary` ends with a call to the boundary tool instead, and ends as its mode ends where the tool is not listed (Boundary mode, below).
+Step 0's mode picks the ending. Handoff mode ends with a `/compact` line for the user, and relay mode ends with the relay marker. A `/wrap boundary` ends with a call to the boundary tool instead, and goes back to work where the tool is not listed (Boundary mode, below).
 
 ### Handoff mode (compaction is gauge-dependent)
 
@@ -229,7 +229,7 @@ After a `continue`, the attend mod compacts the conversation with the handoff as
 
 ### Boundary mode
 
-A `/wrap boundary` ends with a call to the attend mod's boundary tool, `attend_boundary`, in place of the `/compact` line or the relay marker. The session lists the tool as `mcp__attend__attend_boundary`. Where it appears only as a deferred tool's name, load it the way this session loads deferred tools. Where the tool is not listed at all, because the attend mod is absent, is older than the tool, or does not register it in this session, do not call it: end as Step 0's mode ends, with the handoff-mode `/compact` line or the relay marker.
+A `/wrap boundary` ends with a call to the attend mod's boundary tool, `attend_boundary`, in place of the `/compact` line or the relay marker. The session lists the tool as `mcp__attend__attend_boundary`. Where it appears only as a deferred tool's name, load it the way this session loads deferred tools. Where the tool is not listed at all, because the attend mod is absent, is older than the tool, or does not register it in this session, do not call it. The handoff stands as a checkpoint, and the wrap ends as the `continue` outcome does: print no relay marker and no `/compact` line, and go back to work at DO NEXT.
 
 Write the handoff before the call, because the mod refuses to arm an exit until the file with the wrap's id exists. Call the tool with two inputs:
 
