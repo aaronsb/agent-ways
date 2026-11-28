@@ -118,6 +118,33 @@ import {
   shortId,
 } from './lib.ts'
 import type { Decision, Exit, Fill, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
+import {
+  BOUNDARY_TOOL,
+  BRIEF_ARGV,
+  HANDOFF_FILE,
+  ROOT_ARGV,
+  TYPED_WRAP_REFUSAL,
+  agentLines,
+  answerOf,
+  boundaryInput,
+  boundaryResult,
+  briefInput,
+  doubtOf,
+  handoffCarries,
+  inFlightOf,
+  isBoundaryWrap,
+  judgeArgv,
+  judgedArgv,
+  parseArgv,
+  parseBrief,
+  parseJudgeOut,
+  refusalOf,
+  refusedResult,
+  requestOf,
+  settle,
+  taskLines,
+} from './boundary.ts'
+import type { Judged } from './boundary.ts'
 import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit, HOST_EXIT_WAIT_MS, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
 import type { HostChild, HostEnd, HostSpec } from './host.ts'
 
@@ -180,6 +207,12 @@ const WRAP_LAPSE_MS = 60 * 60_000
 // A relay wrap's answer, a fill past relay's threshold, or a stop line is
 // judged this long after the turn's end, between turns.
 const RELAY_CHECK_MS = 1_000
+// The boundary tool's calls: the brief's probes take about 2 s and 250 ms
+// of grace for each that hangs; ways waits out the judgement's deadline on
+// a key engine; the parse reads one answer.
+const BRIEF_TIMEOUT_MS = 8_000
+const JUDGE_TIMEOUT_MS = 60_000
+const PARSE_TIMEOUT_MS = 15_000
 
 // agent-ways theme (tools/agent-theme/themes/agent-ways.theme).
 const SUBTLE = '#3a3a3c'
@@ -1363,6 +1396,116 @@ async function reportUnrouted($: $, ka: Keepalive, why: string) {
   await serialize(ka, () => run($, wrappedArgv('unfinished', why)))
 }
 
+// ── the boundary tool (ADR-418) ─────────────────────────────────────────
+//
+// The agent's `/wrap boundary` ends with attend_boundary. The handler checks
+// the handoff, gathers the brief, applies the mod's refusals, and only then
+// asks the judge; it settles the judge's verdict with the agent's call and
+// records the move with attend, which arms the exit on stop. boundary.ts
+// holds the rules.
+
+/** One boundary call: a refusal, or the verdict and the move.
+ *
+ *  References:
+ *  - ADR-418 §10: the refusals come first and none reaches the judge.
+ *  - ADR-418 §12: the stop and continue rows.
+ *  - ADR-418 §13: the mod refuses to arm the exit until the handoff with
+ *    the wrap's id exists. */
+async function boundary($: $, mod: Mod, e: unknown) {
+  const input = boundaryInput(e)
+  if ('error' in input) return { result: input.error, isError: true as const }
+  if (mod.turnStart.isTypedWrap) return TYPED_WRAP_REFUSAL
+  // The relay setting as it stands now, as a wrap reads it; ways that
+  // cannot answer reads relay off, the side that never compacts.
+  //
+  // References:
+  // - ADR-417 item 1: the relay setting is read when a wrap starts.
+  const relay = (await readConfig($, mod.cwd)).relay
+  const handoff = await readHandoff($, input.wrapId)
+  if ('refusal' in handoff) return { result: handoff.refusal, isError: true as const }
+  const agents = await inFlightAgents($)
+  const r = await run($, BRIEF_ARGV, BRIEF_TIMEOUT_MS, briefInput({
+    agents,
+    tasks: await taskList($),
+    window: mod.contextWindow,
+    operatorPromptAtMs: mod.ka.operatorPromptAtMs,
+  }))
+  const brief = r.exitCode === 0 ? parseBrief(r.stdout) : undefined
+  const facts = { inFlight: inFlightOf(brief, agents), draining: relay && mod.ka.isDraining, operatorTurn: mod.turnStart.isOperator }
+  const refused = refusalOf(input.own, facts)
+  if (refused) return refusedResult(refused, relay)
+  const judged = brief ? await judgeBoundary($, handoff.path, r.stdout) : doubtOf(`the brief could not be gathered (attend keepwarm brief exited ${r.exitCode})`)
+  const plan = settle(input.own, judged.verdict, facts, relay)
+  const recorded = await serialize(mod.ka, () => run($, judgedArgv(input.wrapId, plan, judged, input.own)))
+  // attend armed the exit: the policy check carries it out, in a session
+  // whose settings run none too, as for a stop recorded by hand.
+  if (recorded.exitCode === 0 && plan.move === 'stop' && mod.ka.exit === undefined) {
+    setExit(mod, 'judged')
+    if (mod.running.size === 0) await armKeepalive($, mod, (await $.clock.now()) + firstCheckMs(mod.config))
+  }
+  return boundaryResult({ judged, plan, relay, recorded })
+}
+
+/** The handoff at the repository root, when its first line carries the
+ *  wrap's id; otherwise the refusal. */
+async function readHandoff($: $, wrapId: string): Promise<{ path: string } | { refusal: string }> {
+  const again = `Write the handoff with wrap=${wrapId} on its first line (the wrap skill's Step 3), then call attend_boundary again. Nothing was judged and nothing is armed.`
+  const root = await run($, ROOT_ARGV, 5_000)
+  if (root.exitCode !== 0 || root.stdout.trim() === '') return { refusal: `Refused: this session is not in a git repository, so it has no ${HANDOFF_FILE}. ${again}` }
+  const path = `${root.stdout.trim()}/${HANDOFF_FILE}`
+  let text: string
+  try {
+    text = await $.fs.read(path)
+  } catch {
+    return { refusal: `Refused: ${path} is missing. ${again}` }
+  }
+  return handoffCarries(text, wrapId) ? { path } : { refusal: `Refused: the first line of ${path} does not carry wrap=${wrapId}. ${again}` }
+}
+
+/** The agent loops in flight, one line each; undefined where the list
+ *  cannot be read, so the brief's Stop record answers. */
+async function inFlightAgents($: $): Promise<string[] | undefined> {
+  try {
+    return agentLines(await $.agent.list())
+  } catch {
+    return undefined
+  }
+}
+
+/** The session's task list through the TaskList tool; undefined where it
+ *  cannot be read, and the brief reports it unknown. */
+async function taskList($: $) {
+  try {
+    const r = await $.tool.call({ tool: 'TaskList' } as never)
+    return taskLines((r as { result?: unknown }).result)
+  } catch {
+    return undefined
+  }
+}
+
+/** The judge's verdict: ways answers on a key engine; on claude-code it
+ *  prints the job, which goes through `$.model.complete` with no tools and
+ *  no history, and ways parses the answer. Anything else is doubt.
+ *
+ *  References:
+ *  - ADR-418 §10: the judge decides and never works; the mod keeps only
+ *    the verdict line. */
+async function judgeBoundary($: $, handoff: string, conditions: string): Promise<Judged> {
+  const session = await $.session.id()
+  const out = parseJudgeOut(await run($, judgeArgv(session, handoff), JUDGE_TIMEOUT_MS, conditions))
+  if (out.kind === 'verdict') return out.judged
+  if (out.kind === 'fallback') return doubtOf(out.reason)
+  let answer: string
+  try {
+    answer = answerOf(await $.model.complete(requestOf(out.job)))
+  } catch {
+    // The engine refused to send the call (a blocked model, a bad cap).
+    answer = JSON.stringify({ reason: 'error' })
+  }
+  const parsed = parseJudgeOut(await run($, parseArgv(session), PARSE_TIMEOUT_MS, answer))
+  return parsed.kind === 'verdict' ? parsed.judged : doubtOf(parsed.kind === 'fallback' ? parsed.reason : 'the parse printed a job')
+}
+
 export const register: Register = on => {
   const mod: Mod = {
     config: { ...DEFAULT_CONFIG },
@@ -1425,6 +1568,9 @@ export const register: Register = on => {
       relay: false,
       exit: undefined,
     },
+    contextWindow: undefined,
+    nextTurn: { isOperator: false, isTypedWrap: false },
+    turnStart: { isOperator: false, isTypedWrap: false },
   }
 
   on('session.start', async ($, e, next) => {
@@ -1449,6 +1595,13 @@ export const register: Register = on => {
     // may be warm) and records the gate for the status card.
     if (mod.ka.applies) await armKeepalive($, mod, (await $.clock.now()) + POLICY_START_MS)
     await registerListen($)
+    // The boundary tool, whatever the relay setting: with relay off it
+    // offers stop and continue only. A -p run or an SDK session runs no
+    // policy check, so no exit could be carried out there.
+    //
+    // References:
+    // - ADR-418 §12: the tool the agent calls.
+    if (e.isInteractive) await $.tool.register(BOUNDARY_TOOL)
     mod.isStarted = true
     // The move's watch runs on this hook's `$`: session.end's bound aborts
     // the waits of its own.
@@ -1531,6 +1684,7 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     const before = mod.contextTokens
     mod.contextTokens = e.context.tokens
+    mod.contextWindow = e.context.window > 0 ? e.context.window : mod.contextWindow
     if (isContextReset(before, e.context.tokens)) await markCompacted($)
     // Relay's fill path: a turn's end past the drain point asks attend,
     // once no turn runs, which judges the drain and the hard line. The
@@ -1571,6 +1725,20 @@ export const register: Register = on => {
     return done
   })
 
+  // A `/wrap` the operator types stays the operator's own: the boundary
+  // tool refuses in its turn, unless it asked for the boundary mode.
+  //
+  // References:
+  // - ADR-418 §14 item 2(b): a `/wrap` the operator types is not judged.
+  on('command.run', { command: 'wrap' }, async ($, e, next) => {
+    if (OPERATOR_ORIGINS.has(e.origin?.kind ?? '') && !isBoundaryWrap(e.args ?? '')) {
+      mod.nextTurn = { isOperator: true, isTypedWrap: true }
+    }
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'mcp__attend__attend_boundary' }, async ($, e) => boundary($, mod, e))
+
   // A stop verdict recorded by hand (`attend keepwarm judged --verdict
   // stop`) may arm an exit, which attend carries out at its ticks. The
   // policy check runs from here, in a session whose settings run none too,
@@ -1601,6 +1769,7 @@ export const register: Register = on => {
     // starts the count again.
     mod.ka.epoch += 1
     if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    mod.nextTurn.isOperator = true
     mod.ka.operatorPromptAtMs = await $.clock.now()
     await keepaliveOperator($, mod)
     const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold
@@ -1616,6 +1785,8 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
     mod.running.add(e.turnId)
+    mod.turnStart = mod.nextTurn
+    mod.nextTurn = { isOperator: false, isTypedWrap: false }
     // Nothing is due while a main-loop turn runs, and a check in flight
     // submits nothing. The turn the wrap's own text started is the wrap's.
     mod.ka.epoch += 1
