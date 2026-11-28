@@ -833,13 +833,9 @@ export function compactFocus(reply: string): string {
 }
 
 
-/** The keepalive row with whether the drain has started; a row from
- *  before the drain has no `isDraining`. */
-export type DrainRow = KeepaliveRow & { isDraining?: boolean }
-
 /** The row's segment after a decision; null where the policy does not run.
  *  A dormant session shows it from the first turn the policy submits. */
-export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): DrainRow | null {
+export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): KeepaliveRow | null {
   if (!d.policy || d.state === 'off') return null
   return {
     state: d.state,
@@ -881,7 +877,7 @@ function nextIn(nextAt: number, nowMs: number): string {
  *  References:
  *  - ADR-417 item 4: the row's words for a relay and for its stop.
  *  - ADR-418 item 14: the row shows the drain. */
-export function keepaliveSegment(k: DrainRow, nowMs: number): string {
+export function keepaliveSegment(k: KeepaliveRow, nowMs: number): string {
   if (k.relayStop) return `⟳ relay stopped: ${k.relayStop}`
   const isWorking = k.state === 'running' || k.state === 'resumed'
   if (k.isDraining && isWorking) return k.relayCount > 0 ? `⟳ relay ${k.relayCount}/${k.maxRelays} · draining` : '⟳ draining'
@@ -1042,7 +1038,7 @@ export function rowAfterPrompt(k: KeepaliveRow | null): KeepaliveRow | null {
 
 /** After a relay's resume went in: the count shows the relay, and the new
  *  generation has not drained. */
-export function rowAfterResume(k: DrainRow | null, relayCount: number, maxRelays: number): DrainRow | null {
+export function rowAfterResume(k: KeepaliveRow | null, relayCount: number, maxRelays: number): KeepaliveRow | null {
   return k && { ...k, state: 'resumed', count: 0, afterCount: 0, wrappedAt: null, compactedAt: null, relayCount, maxRelays, relayStop: null, isShown: true, isDraining: false }
 }
 
