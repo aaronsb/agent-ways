@@ -12,9 +12,14 @@
 //! While it is not listening the drain delivers nothing and marks nothing
 //! read; the messages wait in the store.
 //!
+//! `attend listen finish` marks the session finished: peers see it so, and
+//! attend refuses new messages to it, while its Claude Code process runs
+//! on. `attend listen on` clears the mark.
+//!
 //! References:
 //! - ADR-406 item 10: listening is set without joining a channel.
 //! - ADR-416, turn-end settlement: who the Stop hook delivers to.
+//! - ADR-418 item 12: a stopped session is marked finished.
 
 use crate::util::{adopt_previous_enrollment, current_session, enroll_as, Session};
 use attend_presence::enrollment::{self, Host, Source};
@@ -34,6 +39,9 @@ pub struct Listening {
     /// mod turned listening on. The drain speaks that host's
     /// tools and format.
     pub host: Option<&'static str>,
+    /// When the session was marked finished, in seconds since the epoch;
+    /// `None` while it is not.
+    pub finished: Option<u64>,
 }
 
 /// Why `on` or `off` changed nothing.
@@ -85,6 +93,19 @@ pub fn on(host: Option<Host>) -> Result<Listening, ListenError> {
     Ok(state(&me, true))
 }
 
+/// Mark this session finished ([`enrollment::finish`]). It keeps its ways
+/// and its queued messages; peers see it finished and attend refuses new
+/// messages to it, until `attend listen on` clears the mark.
+pub fn finish() -> Result<Listening, ListenError> {
+    let me = current_session();
+    if !me.resolved() {
+        return Err(ListenError::Unresolved);
+    }
+    let listening = adopt_previous_enrollment(&me);
+    enrollment::finish(&me.session_id).map_err(|e| ListenError::Unwritable { error: e.to_string() })?;
+    Ok(state(&me, listening))
+}
+
 /// Stop listening. Channel memberships stay; the drain delivers nothing
 /// until the session listens again.
 pub fn off() -> Result<Listening, ListenError> {
@@ -105,7 +126,9 @@ pub fn off() -> Result<Listening, ListenError> {
 /// goes on under. The attend mod calls it on its own timer, since its poll
 /// and the Stop-hook drain, which also touch the heartbeat, run only between
 /// turns (ADR-129, addendum of 2026-10-13). A session that does not listen
-/// is written nothing, as the drain writes it nothing. `mod_version` is the
+/// is written nothing, as the drain writes it nothing. A beat leaves a
+/// finished mark in place, since the mod beats whether or not anyone uses
+/// the session. `mod_version` is the
 /// attend mod's own version, recorded for the session so the drain can tell
 /// a session that loaded an older mod than the installed one.
 pub fn beat(mod_version: Option<&str>) -> Result<Listening, ListenError> {
@@ -131,5 +154,8 @@ fn state(me: &Session, listening: bool) -> Listening {
         listening,
         via: if listening { enrollment::sources(&me.session_id).into_iter().map(Source::as_str).collect() } else { Vec::new() },
         host: if listening { enrollment::host(&me.session_id).map(Host::as_str) } else { None },
+        finished: enrollment::finished_since(&me.session_id)
+            .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs()),
     }
 }
