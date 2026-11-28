@@ -31,19 +31,6 @@ pub const LEAD: &str = "Summarize this session as the handoff below; keep its TA
 /// what the relay's instructions are held to as well.
 pub const CAP: usize = 10_000;
 
-/// The wrap skill's handoff outline (its Step 3 sections), for a compaction
-/// with no fresh handoff: the summary is structured even when no wrap ran.
-pub const OUTLINE: &str = "Summarize this session as a continuation prompt a stranger could resume from, in these sections:
-- The project, its path and purpose, and how to build and test it.
-- LANDED: what shipped this session, with PR numbers or commit refs.
-- STATE, IN FLIGHT: anything parked, such as a branch, uncommitted files, and why.
-- INVARIANTS / GOTCHAS: what git does not show, such as ordering rules and environment quirks.
-- TASKS: every task with its number, status, subject and full description.
-- DO NEXT: the immediate next step, then one to three alternatives, each specific enough to start.
-- DECISIONS: each choice left to the operator, numbered, one line each.
-- KEY FILES / BRANCHES: the handful that matter, with paths.
-If a /goal is active, restate its condition at the top.";
-
 /// The handoff file of the repository at `root`.
 pub fn path(root: &Path) -> PathBuf {
     root.join(FILE)
