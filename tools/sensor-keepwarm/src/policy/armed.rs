@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! The armed exit. At a work boundary the judge's `stop` verdict arms it
-//! (`attend keepwarm judged`). From then on each idle due point re-reads
+//! The armed exit. At a work boundary the move the mod carries out arms it
+//! when that move is `stop` or `doubt` (`attend keepwarm judged`). The move
+//! can differ from the judge's verdict, and the ledger keeps both. From then on each idle due point re-reads
 //! the handoff's first line. When the line still carries the wrap id, the
 //! ski-rental rule decides the tick. With something pending, or with a
 //! handoff that holds detail, the tick pings while the rent paid plus the
@@ -91,15 +92,20 @@ impl Sufficiency {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Judgement {
     pub wrap_id: String,
+    /// The judge's verdict.
     pub verdict: Verdict,
     pub handoff: Sufficiency,
     /// The working agent's own call, kept apart from the judge's.
     pub own: Verdict,
+    /// The move the mod carries out, which arms the exit when it is `stop`
+    /// or `doubt`.
+    pub moved: Verdict,
     pub reason: Option<String>,
 }
 
-/// The judgment of the last boundary wrap, in the ledger. A `stop` arms the
-/// exit; `finished_at` marks the tick that let the cache lapse.
+/// The judgment of the last boundary wrap, in the ledger. A move of `stop`
+/// or `doubt` arms the exit; `finished_at` marks the tick that let the
+/// cache lapse.
 ///
 /// References:
 /// - ADR-418 item 14, item 4: the ledger records the judge's verdict, its
@@ -110,6 +116,10 @@ pub struct Exit {
     pub verdict: Verdict,
     pub handoff: Sufficiency,
     pub own: Verdict,
+    /// The move the mod carried out. A ledger written before the move was
+    /// recorded has none, and its move is the verdict.
+    #[serde(rename = "move", default, skip_serializing_if = "Option::is_none")]
+    pub moved: Option<Verdict>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub judged_at: u64,
@@ -125,15 +135,28 @@ pub struct Exit {
 }
 
 impl Exit {
-    /// Armed: the judge said stop, and no tick has finished the session yet.
+    /// The move the mod carried out: the recorded move, else the verdict.
+    pub fn carried(&self) -> Verdict {
+        self.moved.unwrap_or(self.verdict)
+    }
+
+    /// Whether the move arms the exit: `stop` or `doubt`.
+    pub fn arms(&self) -> bool {
+        matches!(self.carried(), Verdict::Stop | Verdict::Doubt)
+    }
+
+    /// Armed: the move arms the exit, and no tick has finished the session
+    /// yet.
     pub fn armed(&self) -> bool {
-        self.verdict == Verdict::Stop && self.finished_at.is_none()
+        self.arms() && self.finished_at.is_none()
     }
 }
 
-/// `attend keepwarm judged`: records the boundary's judgment, and with
-/// `stop` arms the exit. Refused, changing nothing, when the handoff is
-/// missing or its first line does not carry the wrap id.
+/// `attend keepwarm judged`: records the boundary's judgment, and with a
+/// move of `stop` or `doubt` arms the exit. The record replaces the last
+/// boundary's, so recording the same wrap again with another move leaves
+/// one record. Refused, changing nothing, when the handoff is missing or
+/// its first line does not carry the wrap id.
 ///
 /// References:
 /// - ADR-418 item 13: the mod refuses to arm the exit until the handoff
@@ -155,6 +178,7 @@ pub fn judged(p: &mut Policy, j: Judgement, handoff: Option<&Handoff>, now: u64)
         verdict: j.verdict,
         handoff: j.handoff,
         own: j.own,
+        moved: Some(j.moved),
         reason,
         judged_at: now,
         path: h.path.clone(),
@@ -283,12 +307,15 @@ pub fn bound(handoff: Sufficiency, ctx: u64, price: Price) -> Bound {
 /// it: its state, the rent paid, the purchase price and the pings left.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ExitView {
-    /// `armed`, `finished`, or the verdict of a judgment that armed nothing.
+    /// `armed`, `finished`, or the move of a judgment that armed nothing.
     pub state: &'static str,
     pub wrap_id: String,
     pub verdict: &'static str,
     pub handoff: &'static str,
     pub own: &'static str,
+    /// The move the mod carried out.
+    #[serde(rename = "move")]
+    pub moved: &'static str,
     pub pings: u32,
     /// `None` where the model has no price.
     pub rent_usd: Option<f64>,
@@ -308,12 +335,13 @@ pub fn view(state: &State) -> Option<ExitView> {
         } else if e.armed() {
             "armed"
         } else {
-            e.verdict.as_str()
+            e.carried().as_str()
         },
         wrap_id: e.wrap_id.clone(),
         verdict: e.verdict.as_str(),
         handoff: e.handoff.as_str(),
         own: e.own.as_str(),
+        moved: e.carried().as_str(),
         pings: e.pings,
         rent_usd: b.map(|b| b.rent * e.pings as f64),
         purchase_usd: b.map(|b| b.purchase),
@@ -322,7 +350,39 @@ pub fn view(state: &State) -> Option<ExitView> {
     })
 }
 
-/// The status card's exit line, or `None` with no judgment on record.
+/// The last boundary as `attend keepwarm status --json` shows it: the
+/// judge's verdict, its answer on the handoff, the working agent's own
+/// call, the move the mod carried out, and the judge's reason.
+///
+/// References:
+/// - ADR-418 item 14, item 4: the ledger records the judge's verdict, its
+///   sufficiency answer and the working agent's own call for each boundary.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Boundary {
+    pub wrap: String,
+    pub verdict: &'static str,
+    pub handoff: &'static str,
+    pub own: &'static str,
+    #[serde(rename = "move")]
+    pub moved: &'static str,
+    pub reason: Option<String>,
+}
+
+/// The last boundary on record, or `None` with none.
+pub fn boundary(p: &Policy) -> Option<Boundary> {
+    let e = p.exit.as_ref()?;
+    Some(Boundary {
+        wrap: e.wrap_id.clone(),
+        verdict: e.verdict.as_str(),
+        handoff: e.handoff.as_str(),
+        own: e.own.as_str(),
+        moved: e.carried().as_str(),
+        reason: e.reason.clone(),
+    })
+}
+
+/// The status card's line for the last boundary, or `None` with no
+/// judgment on record.
 pub fn card_line(state: &State, now: u64) -> Option<String> {
     let v = view(state)?;
     let money = match (v.rent_usd, v.purchase_usd) {
@@ -333,24 +393,32 @@ pub fn card_line(state: &State, now: u64) -> Option<String> {
         _ => format!("{} · no price for {}", pings(v.pings), if state.model.is_empty() { "the model" } else { &state.model }),
     };
     let left = v.pings_left.map_or_else(|| " · pings left unknown".to_string(), |n| format!(" · {} left", pings(n)));
-    let wrap = format!("wrap {}, the judge said {}, the handoff is {}, own call {}", v.wrap_id, v.verdict, v.handoff.replace('-', " "), v.own);
+    let reason = state.policy.exit.as_ref().and_then(|e| e.reason.as_deref()).map(|r| format!(" · the judge's reason: {r}")).unwrap_or_default();
+    let wrap = format!(
+        "wrap {}, the judge said {}, the handoff is {}, own call {}, carried out {}",
+        v.wrap_id,
+        v.verdict,
+        v.handoff.replace('-', " "),
+        v.own,
+        v.moved
+    );
     Some(match v.state {
         "finished" => format!(
-            "exit        finished {} ago · {wrap} · {money} · your next prompt clears it",
+            "exit        finished {} ago · {wrap} · {money} · your next prompt clears it{reason}",
             fmt_duration(now.saturating_sub(v.finished_at.unwrap_or(now)))
         ),
-        "armed" if v.handoff == "sufficient" => format!("exit        armed · {wrap} · {money}{left} while something is pending, else it finishes at the next tick"),
-        "armed" => format!("exit        armed · {wrap} · {money}{left}"),
-        _ => format!("exit        not armed · {wrap}"),
+        "armed" if v.handoff == "sufficient" => format!("exit        armed · {wrap} · {money}{left} while something is pending, else it finishes at the next tick{reason}"),
+        "armed" => format!("exit        armed · {wrap} · {money}{left}{reason}"),
+        _ => format!("exit        not armed · {wrap}{reason}"),
     })
 }
 
-/// Whether a stop exit is in force: the judge said stop and the session
-/// finished, or the handoff still carries the wrap id. A stale or missing
-/// handoff leaves the session to the checks of today.
+/// Whether a stop exit is in force: the move armed the exit and the
+/// session finished, or the handoff still carries the wrap id. A stale or
+/// missing handoff leaves the session to the checks of today.
 pub(super) fn in_force(state: &State, site: &Site) -> bool {
     state.policy.exit.as_ref().is_some_and(|e| {
-        e.verdict == Verdict::Stop && (e.finished_at.is_some() || site.handoff.as_ref().and_then(|h| h.wrap_id.as_deref()) == Some(e.wrap_id.as_str()))
+        e.arms() && (e.finished_at.is_some() || site.handoff.as_ref().and_then(|h| h.wrap_id.as_deref()) == Some(e.wrap_id.as_str()))
     })
 }
 
