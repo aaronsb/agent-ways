@@ -221,9 +221,11 @@ Fill in the fields:
 Pick the first reason that holds:
 
 - `stop empty` when no open work remains (`tasks=0`).
-- `stop decision` when every open task waits on a decision whose lean is one-way (`reversible: no` in the handoff's DECISIONS section). A decision that blocks only some tasks is no reason to stop: work goes on with the rest, and the question goes to the operator over attend. A decision whose lean is reversible is no reason to stop either: work goes ahead on the lean, and the handoff logs the call for the operator to overrule.
+- `stop decision` when every open task waits on a decision whose lean is one-way (`reversible: no` in the handoff's DECISIONS section). A decision that blocks only some tasks is no reason to stop: work goes on with the rest, and the agent sends the question to the operator (below). A decision whose lean is reversible is no reason to stop either: work goes ahead on the lean, and the handoff logs the call for the operator to overrule.
 - `stop doubt` when your doubt about the direction is high, as core.md defines doubt.
 - `continue` otherwise: open tasks remain and DO NEXT can start without the operator.
+
+The agent sends a question that blocks only some tasks itself, with the `attend_send` tool addressed to the operator's member id, or with `attend message send --to <member id> "<question>"`. `attend message awaiting` then counts it as pending, in its `operator` count. In a session without the attend mod, the question stays in the handoff's DECISIONS section.
 
 After a `continue`, the attend mod compacts the conversation with the handoff as the compaction's instructions and submits a turn that tells the agent to read `.claude/handoff.wrap.md` and start its DO NEXT, up to `max_relays` times (5 by default) since the operator's last prompt. After a `stop`, the mod compacts with the handoff, submits no resume, and sends the wrap's reply to the operator over attend. Do not claim the session is compacted or resumed: the mod does both after the reply ends. In a session without the attend mod, nothing acts on the marker, and the handoff waits in the file.
 
