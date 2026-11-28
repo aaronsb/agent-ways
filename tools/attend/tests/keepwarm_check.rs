@@ -1301,6 +1301,9 @@ fn a_compact_with_room_gives_the_instructions_and_the_resume() {
     assert!(instructions.chars().count() <= 10_000, "within the cap: {}", instructions.chars().count());
     assert!(instructions.contains("#1 [OPEN] port the grammar"), "TASKS kept");
     assert!(instructions.contains("DO NEXT — start #1 from the grammar file."), "DO NEXT kept: {instructions}");
+    // attend names the handoff under the repository root git resolves, which
+    // on macOS is the temp dir's real path (/private/var/... for /var/...).
+    let path = std::fs::canonicalize(&path).unwrap();
     assert!(instructions.ends_with(&format!("(The handoff continues in {}; read it there.)", path.display())), "{instructions}");
     assert!(resume.starts_with("relay: the conversation was compacted at a work boundary; this is relay 1 of 5 since the operator's last prompt."), "{resume}");
     assert!(resume.contains("relay: stop decision or relay: stop doubt"), "{resume}");
