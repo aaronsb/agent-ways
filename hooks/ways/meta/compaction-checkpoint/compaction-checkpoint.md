@@ -47,7 +47,7 @@ After the user responds, combine your summary with their steering into a synthes
 
 After writing the synthesis, hand the user a ready-to-run `/compact <focus>` line, with the focus naming their priorities. No way or skill can run a slash command, so the user runs it (see wrap(meta)). The synthesis is the newest and most informative text in context, so compaction gives it the most weight in the summary. Without a focus line, the PreCompact hook gives the compaction the latest fresh wrap handoff, or the wrap skill's outline when there is none, and neither carries the user's steering from Step 2.
 
-In relay mode (`mods.attend.continuity.relay: on`), the attend mod asks for a wrap when the context reaches `relay_at_pct`, 75% by default, so the relay's wrap normally comes before this checkpoint. After that wrap the attend mod compacts the conversation with the wrap's handoff and starts a turn that resumes the work, and no `/compact` line is needed.
+In relay mode (`mods.attend.continuity.relay: on`), the attend mod starts the drain when the context reaches `relay_at_pct`, 75% by default, and the agent wraps at the next boundary. The mod asks for a mid-work wrap at `hard_at_pct`, 85% by default, or five points under Claude Code's own compaction threshold when that is lower. So the relay's wrap normally comes before this checkpoint. After that wrap the attend mod compacts the conversation with the wrap's handoff and starts a turn that resumes the work, and no `/compact` line is needed.
 
 ## If a Goal Is Active
 

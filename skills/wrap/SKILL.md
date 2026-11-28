@@ -1,22 +1,23 @@
 ---
 name: wrap
-description: Wrap up a session at a natural seam — land in-flight work, square the TaskList honestly, write a copy-paste continuation prompt, then hand off to a directed /compact, or in relay mode end with the marker the attend mod compacts and resumes on. Use when the user says "wrap up", "wrap this up", "let's wrap", "end of session", "checkpoint and compact", "hand off", or invokes /wrap.
-allowed-tools: Bash, Read, Grep, Glob, TaskList, TaskCreate, TaskUpdate, TaskGet, AskUserQuestion, Agent
+description: Wrap up a session at a natural seam — land in-flight work, square the TaskList honestly, write a copy-paste continuation prompt, then hand off to a directed /compact, or in relay mode end with the marker the attend mod compacts and resumes on. In boundary mode the agent runs it when a piece of work lands and ends by calling the attend mod's boundary tool, or, where the tool is not listed, goes back to work with the handoff as a checkpoint. Use when the user says "wrap up", "wrap this up", "let's wrap", "end of session", "checkpoint and compact", "hand off", or invokes /wrap.
+allowed-tools: Bash, Read, Grep, Glob, TaskList, TaskCreate, TaskUpdate, TaskGet, AskUserQuestion, Agent, mcp__attend__attend_boundary
 ---
 
 # Wrap
 
 Close out a session at its end. This is the on-demand sibling of the `meta/compaction-checkpoint` way — the way fires automatically near the context limit; `/wrap` runs the same muscle whenever you decide the session is done.
 
-**Wrap is not merge.** Landing is *iterative* — many merges happen across a session as each piece of work lands. Wrap is *terminal* — it runs once, at the end. By the time you wrap, the session's work should already be merged. So `/wrap` does **not** land work; it confirms nothing got stranded, then produces the artifacts that outlive the session.
+**Wrap is not merge.** Landing is *iterative* — many merges happen across a session as each piece of work lands. Wrap is *terminal* — it runs once, at the end of the session, or in boundary mode at the end of a piece of work. By the time you wrap, the session's work should already be merged. So `/wrap` does **not** land work; it confirms nothing got stranded, then produces the artifacts that outlive the session.
 
-The deliverable is two things that survive a reset: a **TaskList that honestly mirrors reality**, and a **copy-paste continuation prompt**. A skill cannot run `/compact`, so in handoff mode the skill ends by handing you a ready-to-run `/compact` line. In relay mode it ends with a relay marker line instead, and the attend mod compacts the conversation with the handoff and starts a turn that resumes the work (Step 4).
+The deliverable is two things that survive a reset: a **TaskList that honestly mirrors reality**, and a **copy-paste continuation prompt**. A skill cannot run `/compact`, so in handoff mode the skill ends by handing you a ready-to-run `/compact` line. In relay mode it ends with a relay marker line instead, and the attend mod compacts the conversation with the handoff and starts a turn that resumes the work (Step 4). In boundary mode it ends by calling the attend mod's `attend_boundary` tool, and a judge decides whether the session stops, compacts or continues (Step 4).
 
 ## Arguments
 
 - `/wrap` — full flow: land work (offer; relay mode lands nothing), square the TaskList, write the handoff, then end with a `/compact` line in handoff mode or the relay marker in relay mode (Step 4).
 - `/wrap stay` — wrapping mid-work on purpose: **skip** the land/merge step. Don't land anything; just capture state accurately and produce the handoff. Use when the seam is "I'm pausing", not "I'm done".
 - `/wrap handoff` — forces handoff mode for this run, whatever the relay setting says. The wrap ends with a `/compact` line and no relay marker, so the operator can stop a relay-mode session by hand.
+- `/wrap boundary` — the agent runs this itself when a piece of work lands: a merge, a release, or a closed task with nothing in flight behind it. It runs with `stay` semantics: it lands nothing and asks nothing, so it does not call AskUserQuestion. It writes the handoff, records the wrap id with attend, and ends by calling `attend_boundary` with the wrap id and the agent's own call (Step 4). Where the tool is not listed, the handoff stands as a checkpoint and the agent goes back to DO NEXT. A `/wrap` without `boundary` never calls the tool, so a wrap the operator types is not judged.
 
 ## Step 0 — Read the context gauge and the mode first
 
@@ -33,7 +34,7 @@ The wrap runs in one of two modes. **Handoff mode** ends the wrap with a `/compa
 2. A wrap turn from the attend mod that names relay mode and a wrap id is in relay mode. Use that wrap id (Step 3).
 3. Otherwise the setting decides. `on` is relay mode. Any other output, `off` or an error, is handoff mode. A wrap turn from the attend mod that names no relay mode is decided here too.
 
-**In relay mode the skill runs with `stay` semantics, whoever invoked it.** It lands nothing: Step 1 records stranded work in the handoff and offers no merge. It asks nothing: do not call AskUserQuestion, because the operator may be away. It starts no new work. A choice that only the operator can make goes into the handoff's DECISIONS section, and the wrap ends with the `stop decision` marker (Step 4).
+**In relay mode the skill runs with `stay` semantics, whoever invoked it.** It lands nothing: Step 1 records stranded work in the handoff and offers no merge. It asks nothing: do not call AskUserQuestion, because the operator may be away. It starts no new work. A choice that only the operator can make goes into the handoff's DECISIONS section, and Step 4 says when it ends the relay with the `stop decision` marker.
 
 The fill level calibrates the entire wrap, and is worth saying out loud — the user may be wrapping early *on purpose*, and that's valid. Locate it against the ways trigger curves (the `todos` way fires ~75%, `compaction-checkpoint` ~85%):
 
@@ -53,8 +54,8 @@ git log --oneline main..HEAD    # unmerged commits?
 ```
 
 - **Clean / already merged** → the expected state. Move on.
-- **Something stranded** (uncommitted changes, or commits never PR'd) → this is a guard, not wrap's job. Surface it and let the user decide: invoke `merge` to land it, or leave it parked. In relay mode, treat it as parked.
-- **Parked on purpose** (`/wrap stay`, relay mode, or user chooses to leave it) → do **not** merge. Record *exactly* what's uncommitted, on which branch, and why it's parked — verbatim into Step 3 so post-reset-you can resume the partial work cold.
+- **Something stranded** (uncommitted changes, or commits never PR'd) → this is a guard, not wrap's job. Surface it and let the user decide: invoke `merge` to land it, or leave it parked. In relay mode and boundary mode, treat it as parked.
+- **Parked on purpose** (`/wrap stay`, relay mode, boundary mode, or user chooses to leave it) → do **not** merge. Record *exactly* what's uncommitted, on which branch, and why it's parked — verbatim into Step 3 so post-reset-you can resume the partial work cold.
 
 The rule: wrap never silently drops stranded work, and never lands it behind your back. Either the user lands it (via `merge`), or it's described in the handoff.
 
@@ -107,13 +108,15 @@ attend keepwarm wrap-id --record "$WRAP_ID" >/dev/null 2>&1 || true   # no atten
 echo "$(date +%F) $(git rev-parse --short HEAD) wrap=$WRAP_ID"        # the handoff's first line
 ```
 
-Shell variables do not survive between Bash calls, so keep the printed id: the relay marker in Step 4 repeats it.
+Shell variables do not survive between Bash calls, so keep the printed id: the relay marker and the boundary call in Step 4 repeat it.
 
 Tailor sections to the work, but cover:
 
 ```
 Continue work on <project> (<path>) — <one-line what it is and its purpose>.
 <build/test status: how to build, what's green>.
+
+RESUME — claude --resume <session id>. Only the transcript holds: <what a cold reload would recover that this handoff leaves out, or "nothing this handoff lacks">.
 
 LANDED — <what shipped this session, with PR #s / commit refs; "merged to main, green">.
 
@@ -130,14 +133,18 @@ work to subagents, one worktree per branch. See "Working mode" below. Skip for s
 
 DO NEXT — <the immediate next step, then 1-3 alternatives, each specific enough to start>.
 
-DECISIONS: <each choice left to the operator, numbered, one line each, so the answer
-can be "1 and 3">. Skip if none.
+DECISIONS — <each choice left to the operator, one numbered line each, in this form>. Skip if none.
+N. <question> — blocks: <task ids | none> — lean: <the lean> — reversible: <yes | no>
 
 CONVENTIONS — <project-specific workflow worth repeating: branch→PR→review→merge, lint
 quirks, verification patterns>.
 
 KEY FILES / BRANCHES — <the handful that matter, with paths>.
 ```
+
+The `RESUME` line names this session so the operator can reload it cold, and it says what only the transcript holds, so the operator can tell whether the reload is worth its price. The session id is the `session` field of Step 0's `ways context --json`, the same value as `$CLAUDE_CODE_SESSION_ID`. What only the transcript holds is detail this handoff leaves out and a later session would want, such as long tool output, a review's full text, or the reasoning behind a call. Write "nothing this handoff lacks" when the handoff carries everything that matters.
+
+Each `DECISIONS` line states three things after the question. `blocks:` lists the numbers of the tasks in `TASKS` that cannot start until the operator answers, or `none`. `lean:` is the answer you would act on. `reversible:` is `yes` when acting on the lean can be undone later and `no` when it is a one-way step, such as a release, a publish, a force push or a deleted branch.
 
 If a `/goal` is active, **restate the goal condition** at the top, under the first line — it's the anchor the post-compaction turns steer by, and it survives compaction. Never write that the goal is met: only the goal's evaluator judges that.
 
@@ -170,7 +177,7 @@ Walk four categories. Each item lands in an issue, a design note, or a way edit,
 
 ## Step 4 — Hand off
 
-Step 0's mode picks the ending. Handoff mode ends with a `/compact` line for the user, and relay mode ends with the relay marker.
+Step 0's mode picks the ending. Handoff mode ends with a `/compact` line for the user, and relay mode ends with the relay marker. A `/wrap boundary` ends with a call to the boundary tool instead, and goes back to work where the tool is not listed (Boundary mode, below).
 
 ### Handoff mode (compaction is gauge-dependent)
 
@@ -214,11 +221,32 @@ Fill in the fields:
 Pick the first reason that holds:
 
 - `stop empty` when no open work remains (`tasks=0`).
-- `stop decision` when the next step needs a decision that only the operator can make. The decision is in the handoff's DECISIONS section.
+- `stop decision` when every open task waits on a decision whose lean is one-way (`reversible: no` in the handoff's DECISIONS section). A decision that blocks only some tasks is no reason to stop: work goes on with the rest, and the agent sends the question to the operator (below). A decision whose lean is reversible is no reason to stop either: work goes ahead on the lean, and the handoff logs the call for the operator to overrule.
 - `stop doubt` when your doubt about the direction is high, as core.md defines doubt.
 - `continue` otherwise: open tasks remain and DO NEXT can start without the operator.
 
+The agent sends a question that blocks only some tasks itself, with the `attend_send` tool addressed to the operator's member id, or with `attend message send --to <member id> "<question>"`. `attend message awaiting` then counts it as pending, in its `operator` count. In a session without the attend mod, the question stays in the handoff's DECISIONS section.
+
 After a `continue`, the attend mod compacts the conversation with the handoff as the compaction's instructions and submits a turn that tells the agent to read `.claude/handoff.wrap.md` and start its DO NEXT, up to `max_relays` times (5 by default) since the operator's last prompt. After a `stop`, the mod compacts with the handoff, submits no resume, and sends the wrap's reply to the operator over attend. Do not claim the session is compacted or resumed: the mod does both after the reply ends. In a session without the attend mod, nothing acts on the marker, and the handoff waits in the file.
+
+### Boundary mode
+
+A `/wrap boundary` ends with a call to the attend mod's boundary tool, `attend_boundary`, in place of the `/compact` line or the relay marker. The session lists the tool as `mcp__attend__attend_boundary`. Where it appears only as a deferred tool's name, load it the way this session loads deferred tools. Where the tool is not listed at all, because the attend mod is absent, is older than the tool, or does not register it in this session, do not call it. The handoff stands as a checkpoint, and the wrap ends as the `continue` outcome does: print no relay marker and no `/compact` line, and go back to work at DO NEXT.
+
+Write the handoff before the call, because the mod refuses to arm an exit until the file with the wrap's id exists. Call the tool with two inputs:
+
+- `wrap_id` is the wrap id on the handoff's first line (Step 3).
+- `own_call` is your own call. `stop` means no open work remains, or every open task waits on a decision whose lean is one-way. `compact` means open work remains and the next step needs little of what the context window holds. `continue` means open work remains and the next step draws on what the window holds.
+
+The mod records your call. A judge, a separate model call that reads only the handoff and the conditions the mod measures, makes the decision. The reply names the outcome. Act on the outcome, not on your own call:
+
+- `continue`: go back to work at DO NEXT. The handoff stands as the checkpoint for an exit that cannot run a wrap. When the reply says the handoff lacks what you see, add what is missing to the handoff, then go back to work.
+- `stop`: the mod arms the exit. End the turn and start nothing new. An operator prompt disarms the exit.
+- `compact`: end the turn. After the reply ends, the mod compacts with the handoff and then resumes the work or stops.
+- `doubt`: end the turn. The mod stops and sends the handoff to the operator over attend.
+- A refusal: the reply names the call the mod refused and why, such as a stop while agents are in flight, a `continue` while the session drains, or the `max_relays` cap. Do what the reply says.
+
+Do not claim the session is stopped, compacted or resumed: the mod does each after the reply ends.
 
 ## Key Principles
 
@@ -226,7 +254,8 @@ After a `continue`, the attend mod compacts the conversation with the handoff as
 - **Print the list you squared** — an unenumerated honesty pass is unreviewable; the user should see every task and description without asking.
 - **Prepare, don't pretend** — a skill cannot run `/compact`. In handoff mode it hands off a ready `/compact` line; in relay mode the attend mod compacts after the wrap's reply. Never report compaction as done.
 - **Directed > generic** — a synthesis-anchored `/compact` keeps what matters; an unanchored one keeps what the system guesses.
-- **On-demand** — that's the whole reason this exists alongside the `compaction-checkpoint` way. You choose the seam with `/wrap`, or the attend mod asks for a wrap at its idle bound or, in relay mode, at its context fill threshold.
+- **On-demand** — that's the whole reason this exists alongside the `compaction-checkpoint` way. You choose the seam with `/wrap`, the agent runs `/wrap boundary` when a piece of work lands, or the attend mod asks for a wrap at its idle bound or, in relay mode, at its context fill threshold.
+- **The agent's call is recorded, and the judge makes the call** — in boundary mode the agent passes its own call to `attend_boundary`, the mod records it, and the judge decides from the handoff and the measured conditions. The agent acts on the reply.
 - **Two survival layers** — TaskList + continuation prompt survive even a hard reset; `/compact` is the lighter same-session path on top. The prompt carries the tasks *and* the instruction to rehydrate them, because a fresh window starts with an empty list.
 
 ## Not for
@@ -234,6 +263,7 @@ After a `continue`, the attend mod compacts the conversation with the handoff as
 - Authoring the code being wrapped — `/wrap` closes out work, it doesn't write it.
 - Replacing the `compaction-checkpoint` way — that fires passively near the limit; this is the on-demand version. They share DNA on purpose.
 - Running `/compact` itself — a skill cannot run a slash command. In handoff mode it prepares everything and hands you `/compact`; in relay mode the attend mod compacts after the wrap and starts the resume turn.
+- Deciding whether the session stops, compacts or continues after a boundary wrap — the judge decides; the wrap records the agent's own call.
 
 ## See Also
 

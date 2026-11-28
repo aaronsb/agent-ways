@@ -234,6 +234,53 @@ pub struct Profile {
     /// ignored, never an error, since a price must not turn the gate off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_out_per_mtok: Option<f64>,
+    /// The judgements the profile makes beside disclosure, each with its own
+    /// model. The fields above set disclosure, the relevance judge.
+    pub judgements: Judgements,
+}
+
+/// The judgements a profile makes beside disclosure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Judgements {
+    /// The call at a work boundary that chooses whether a session stops,
+    /// compacts or continues.
+    pub continuance: Judgement,
+}
+
+/// One judgement's model and limits, set apart from the profile's disclosure
+/// settings. Its model id is in the profile provider's form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Judgement {
+    pub model: String,
+    /// The call's deadline in milliseconds.
+    pub timeout_ms: u64,
+    /// The most tokens the reply may hold, thinking included.
+    pub max_tokens: u64,
+}
+
+/// The longest deadline a judgement beside disclosure may set. No hook waits
+/// on such a call, so it is bounded by the session's patience, not a hook's.
+pub const MAX_JUDGEMENT_TIMEOUT_MS: u64 = 120_000;
+
+/// The largest output budget a judgement beside disclosure may set.
+pub const MAX_JUDGEMENT_TOKENS: u64 = 64_000;
+
+impl Judgement {
+    fn validate(&self, profile: &str, purpose: &str) -> Result<()> {
+        let at = format!("profile '{profile}': judgements.{purpose}");
+        if self.timeout_ms == 0 || self.timeout_ms > MAX_JUDGEMENT_TIMEOUT_MS {
+            bail!("{at}.timeout_ms {} is outside 1..{MAX_JUDGEMENT_TIMEOUT_MS}", self.timeout_ms);
+        }
+        if self.max_tokens == 0 || self.max_tokens > MAX_JUDGEMENT_TOKENS {
+            bail!("{at}.max_tokens {} is outside 1..{MAX_JUDGEMENT_TOKENS}", self.max_tokens);
+        }
+        if !valid_model_id(&self.model) {
+            bail!("{at}.model '{}' is not a model id (letters, digits and . _ : / - only)", self.model);
+        }
+        Ok(())
+    }
 }
 
 /// The shipped tool-lane deadline. A request takes about 515 ms plus 112 ms
@@ -274,7 +321,7 @@ impl Profile {
         if !valid_model_id(&self.model) {
             bail!("profile '{name}': model '{}' is not a model id (letters, digits and . _ : / - only)", self.model);
         }
-        Ok(())
+        self.judgements.continuance.validate(name, "continuance")
     }
 }
 
@@ -316,9 +363,41 @@ pub struct ProfilePatch {
     pub price_in_per_mtok: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price_out_per_mtok: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub judgements: Option<JudgementsPatch>,
+}
+
+/// A user's change to a profile's judgements beside disclosure.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct JudgementsPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continuance: Option<JudgementPatch>,
+}
+
+/// A user's change to one judgement. Every field is optional.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct JudgementPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
+}
+
+impl JudgementPatch {
+    fn apply(&self, base: &Judgement) -> Judgement {
+        Judgement {
+            model: self.model.clone().unwrap_or_else(|| base.model.clone()),
+            timeout_ms: self.timeout_ms.unwrap_or(base.timeout_ms),
+            max_tokens: self.max_tokens.unwrap_or(base.max_tokens),
+        }
+    }
 }
 
 impl ProfilePatch {
+    /// The profile's disclosure settings after this patch, over `base`. The
+    /// judgements stay `base`'s; [`patched`] applies them on their own.
     fn apply(&self, base: &Profile) -> Profile {
         Profile {
             display_name: base.display_name.clone(),
@@ -334,6 +413,7 @@ impl ProfilePatch {
             tool_candidates: self.tool_candidates.unwrap_or(base.tool_candidates),
             price_in_per_mtok: self.price_in_per_mtok.or(base.price_in_per_mtok),
             price_out_per_mtok: self.price_out_per_mtok.or(base.price_out_per_mtok),
+            judgements: base.judgements.clone(),
         }
     }
 }
@@ -470,6 +550,9 @@ pub fn gate_layer(path: &Path) -> Result<UserLayer> {
             (false, true) => {}
         }
     }
+    for (name, e) in dropped_judgements(&user) {
+        eprintln!("ways: agent.yaml: {e:#}; the continuance change is dropped, and profile '{name}' judges disclosure as configured");
+    }
     Ok(user)
 }
 
@@ -514,14 +597,32 @@ pub fn dropped_profiles(user: &UserLayer) -> Vec<(String, anyhow::Error)> {
         .collect()
 }
 
+/// The continuance patches [`profiles`] drops, each with why, for profiles
+/// that build. Each such profile judges continuance as it would with no
+/// patch to it, and its disclosure settings load as patched.
+pub fn dropped_judgements(user: &UserLayer) -> Vec<(String, anyhow::Error)> {
+    let shipped = shipped();
+    user.profiles
+        .iter()
+        .filter_map(|(name, patch)| patched_parts(name, patch, &shipped).ok()?.1.map(|e| (name.clone(), e)))
+        .collect()
+}
+
 /// One profile after the user's patch `patch`, as [`profiles`] builds it.
 pub fn patched(name: &str, patch: &ProfilePatch, shipped: &BTreeMap<String, Profile>) -> Result<Profile> {
+    patched_parts(name, patch, shipped).map(|(p, _)| p)
+}
+
+/// [`patched`], with why the patch's continuance was dropped, if it was. The
+/// continuance falls back on its own: a bad one leaves the profile's
+/// unpatched continuance in place and the disclosure settings as patched.
+fn patched_parts(name: &str, patch: &ProfilePatch, shipped: &BTreeMap<String, Profile>) -> Result<(Profile, Option<anyhow::Error>)> {
     // A changed provider needs its own model id: the base's id belongs to
     // the base's provider.
     if patch.provider.is_some() && patch.model.is_none() {
         bail!("profile '{name}' sets provider, so it must set model too");
     }
-    let profile = match shipped.get(name) {
+    let mut profile = match shipped.get(name) {
         Some(base) => patch.apply(base),
         None => {
             let (Some(provider), Some(_)) = (patch.provider, patch.model.as_ref()) else {
@@ -537,8 +638,30 @@ pub fn patched(name: &str, patch: &ProfilePatch, shipped: &BTreeMap<String, Prof
             Profile { display_name: None, ..patch.apply(&base) }
         }
     };
+    // A judgement's model id belongs to the provider as well, so a shipped
+    // profile moved to another provider judges as that provider's does.
+    if shipped.get(name).is_some_and(|base| base.provider != profile.provider) {
+        profile.judgements = shipped
+            .get(profile.provider.as_str())
+            .context("every provider has a shipped profile")?
+            .judgements
+            .clone();
+    }
     profile.validate(name)?;
-    Ok(profile)
+    let dropped = match patch.judgements.as_ref().and_then(|j| j.continuance.as_ref()) {
+        None => None,
+        Some(c) => {
+            let continuance = c.apply(&profile.judgements.continuance);
+            match continuance.validate(name, "continuance") {
+                Ok(()) => {
+                    profile.judgements.continuance = continuance;
+                    None
+                }
+                Err(e) => Some(e),
+            }
+        }
+    };
+    Ok((profile, dropped))
 }
 
 /// The settings the agent runs with.
@@ -877,6 +1000,89 @@ mod tests {
             assert_eq!((s.engine.as_str(), &s.profile), ("anthropic", &shipped()["anthropic"]), "{text:?}");
             assert_eq!(dropped_profiles(&user).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["anthropic"]);
         }
+    }
+
+    #[test]
+    fn the_continuance_model_and_the_disclosure_model_are_set_independently() {
+        let shipped_cc = shipped()["claude-code"].clone();
+        let cont = |p: &Profile| p.judgements.continuance.model.clone();
+        let user: UserLayer =
+            serde_yaml::from_str("profiles:\n  claude-code:\n    judgements:\n      continuance:\n        model: claude-haiku-4-5\n")
+                .unwrap();
+        let p = &profiles(&user)["claude-code"];
+        assert_eq!(cont(p), "claude-haiku-4-5");
+        assert_eq!(p.model, shipped_cc.model, "the disclosure model is unchanged");
+        let user: UserLayer = serde_yaml::from_str("profiles:\n  claude-code:\n    model: claude-sonnet-5-5\n").unwrap();
+        let p = &profiles(&user)["claude-code"];
+        assert_eq!(p.model, "claude-sonnet-5-5");
+        assert_eq!(cont(p), cont(&shipped_cc), "the continuance model is unchanged");
+    }
+
+    #[test]
+    fn each_shipped_engine_judges_continuance_on_haiku_5_5_in_its_providers_form() {
+        let all = shipped();
+        let cont = |n: &str| all[n].judgements.continuance.clone();
+        assert_eq!(cont("anthropic").model, "claude-haiku-5-5");
+        assert_eq!(cont("openrouter").model, "anthropic/claude-haiku-5.5");
+        assert_eq!(cont("claude-code").model, "claude-haiku-5-5");
+        for n in ["anthropic", "openrouter", "claude-code"] {
+            assert_eq!((cont(n).timeout_ms, cont(n).max_tokens), (30_000, 4096), "{n}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_continuance_patch_is_a_finding_and_disclosure_loads_as_written() {
+        let cc = "profiles:\n  claude-code:\n    threshold: 0.4\n    judgements:\n      continuance:\n";
+        for (bad, key) in [
+            ("        max_tokens: lots\n", "profiles.claude-code.judgements.continuance.max_tokens"),
+            ("        modle: claude-haiku-4-5\n", "profiles.claude-code.judgements.continuance.modle"),
+            ("        timeout_ms: 0\n", "profiles.claude-code.judgements.continuance.timeout_ms"),
+        ] {
+            let (user, findings) = UserLayer::parse(&format!("{cc}{bad}"), None).unwrap();
+            assert_eq!(findings.len(), 1, "{bad:?}: {findings:?}");
+            let f = &findings[0];
+            assert_eq!((f.key.as_deref(), f.unit.as_deref(), f.line), (Some(key), Some("gate.profiles.claude-code.judgements"), Some(6)), "{bad:?}");
+            let p = &profiles(&user)["claude-code"];
+            assert_eq!(p.threshold, 0.4, "{bad:?}: disclosure runs as configured");
+            assert_eq!(p.judgements, shipped()["claude-code"].judgements, "{bad:?}: continuance falls back alone");
+        }
+        // The other way round: a bad disclosure patch leaves a good continuance patch in place.
+        let (user, findings) = UserLayer::parse(
+            "profiles:\n  claude-code:\n    treshold: 0.4\n    judgements:\n      continuance:\n        model: claude-haiku-4-5\n",
+            None,
+        )
+        .unwrap();
+        assert_eq!(findings.iter().map(|f| f.unit.as_deref()).collect::<Vec<_>>(), [Some("gate.profiles.claude-code")]);
+        let p = &profiles(&user)["claude-code"];
+        assert_eq!((p.threshold, p.judgements.continuance.model.as_str()), (0.3, "claude-haiku-4-5"));
+    }
+
+    #[test]
+    fn a_continuance_patch_that_does_not_build_is_dropped_alone() {
+        // Past the schema, as a layer read without it: the profile builds,
+        // its disclosure patch applies, and its continuance stays shipped.
+        let user: UserLayer = serde_yaml::from_str(
+            "profiles:\n  anthropic:\n    threshold: 0.4\n    judgements:\n      continuance:\n        model: bad id!\n",
+        )
+        .unwrap();
+        let p = &profiles(&user)["anthropic"];
+        assert_eq!((p.threshold, p.judgements.continuance.model.as_str()), (0.4, "claude-haiku-5-5"));
+        assert!(dropped_profiles(&user).is_empty());
+        let dropped = dropped_judgements(&user);
+        assert_eq!(dropped.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["anthropic"]);
+        assert!(format!("{:#}", dropped[0].1).contains("judgements.continuance.model 'bad id!'"), "{:#}", dropped[0].1);
+    }
+
+    #[test]
+    fn a_profile_moved_to_another_provider_judges_continuance_as_that_provider_does() {
+        let user: UserLayer =
+            serde_yaml::from_str("profiles:\n  anthropic:\n    provider: openrouter\n    model: x/y\n").unwrap();
+        assert_eq!(profiles(&user)["anthropic"].judgements.continuance.model, "anthropic/claude-haiku-5.5");
+        let user: UserLayer = serde_yaml::from_str(
+            "profiles:\n  mine:\n    provider: openrouter\n    model: x/y\n    judgements:\n      continuance:\n        model: x/z\n",
+        )
+        .unwrap();
+        assert_eq!(profiles(&user)["mine"].judgements.continuance.model, "x/z");
     }
 
     fn gate_with(text: &str) -> Result<Option<Settings>> {

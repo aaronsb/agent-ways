@@ -10,11 +10,13 @@ This document contains the help content for the `attend` command-line program.
 * [`attend listen off`↴](#attend-listen-off)
 * [`attend listen status`↴](#attend-listen-status)
 * [`attend listen beat`↴](#attend-listen-beat)
+* [`attend listen finish`↴](#attend-listen-finish)
 * [`attend message`↴](#attend-message)
 * [`attend message send`↴](#attend-message-send)
 * [`attend message reply`↴](#attend-message-reply)
 * [`attend message inbox`↴](#attend-message-inbox)
 * [`attend message unread`↴](#attend-message-unread)
+* [`attend message awaiting`↴](#attend-message-awaiting)
 * [`attend message lapse`↴](#attend-message-lapse)
 * [`attend message cleanup`↴](#attend-message-cleanup)
 * [`attend message delete`↴](#attend-message-delete)
@@ -44,6 +46,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend keepwarm wrapped`↴](#attend-keepwarm-wrapped)
 * [`attend keepwarm compacted`↴](#attend-keepwarm-compacted)
 * [`attend keepwarm resumed`↴](#attend-keepwarm-resumed)
+* [`attend keepwarm drained`↴](#attend-keepwarm-drained)
 * [`attend keepwarm goal`↴](#attend-keepwarm-goal)
 * [`attend keepwarm stopped`↴](#attend-keepwarm-stopped)
 * [`attend keepwarm wrap-id`↴](#attend-keepwarm-wrap-id)
@@ -72,7 +75,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 ###### **Subcommands:**
 
-* `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
+* `listen` — Turn listening on or off for this session without joining a channel, mark it finished, or show it (default: status)
 * `message` — Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 * `channel` — Join, leave, list and manage channels and scenes (default: list)
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
@@ -85,7 +88,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 ## `attend listen`
 
-Turn listening on or off for this session without joining a channel, or show it (default: status)
+Turn listening on or off for this session without joining a channel, mark it finished, or show it (default: status)
 
 **Usage:** `attend listen [OPTIONS] [COMMAND]`
 
@@ -95,6 +98,7 @@ Turn listening on or off for this session without joining a channel, or show it 
 * `off` — Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join or `listen on` listens again
 * `status` — Print `listening` or `not listening` (default)
 * `beat` — Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
+* `finish` — Mark this session finished: peers see it finished, and attend refuses new messages to it. Its queued messages stay queued, and its Claude Code process runs on. `listen on` clears the mark; a beat leaves it
 
 ###### **Options:**
 
@@ -147,6 +151,14 @@ Mark a listening session alive: touch its heartbeat, deliver nothing. After a /c
 
 
 
+## `attend listen finish`
+
+Mark this session finished: peers see it finished, and attend refuses new messages to it. Its queued messages stay queued, and its Claude Code process runs on. `listen on` clears the mark; a beat leaves it
+
+**Usage:** `attend listen finish`
+
+
+
 ## `attend message`
 
 Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
@@ -160,6 +172,7 @@ Send, reply to, read, count and delete messages, and tombstone a session (defaul
 * `reply` — Reply to the most recent peer message: a direct message to its sender, or in its named channel
 * `inbox` — Read pending messages from peers
 * `unread` — Count this session's unread messages by room, marking none of them read
+* `awaiting` — List the direct messages this session sent that no recipient has answered yet, marking nothing read
 * `lapse` — Mark this session's pending event-lane notices read at a session boundary, delivering none of them
 * `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
 * `delete` — Mark for deletion the messages no live session still has to read
@@ -253,6 +266,20 @@ Read pending messages from peers
 Count this session's unread messages by room, marking none of them read
 
 **Usage:** `attend message unread [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend message awaiting`
+
+List the direct messages this session sent that no recipient has answered yet, marking nothing read
+
+A message waits when it went to a peer session or to a person's member id and no later message from a recipient threads under it or is addressed to this session. Posts to #open and to named channels never wait, and nor does a message to a session that has exited or finished. Each line gives the handle, the recipient, the age and the first words, and marks a message to a person as the operator's. --json prints {count, operator, items}.
+
+**Usage:** `attend message awaiting [OPTIONS]`
 
 ###### **Options:**
 
@@ -577,6 +604,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
 * `compacted` — Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends
 * `resumed` — Record that a relay's resume turn went in: the relay count goes up by one and the keepalive count starts again. The attend mod runs it once the compaction after a relay wrap has run
+* `drained` — Record that relay's drain turn went in, which starts this generation's drain: no further drain turn is offered until a compaction, a resume or a fill under the drain point ends it. The attend mod runs it once the drain turn has entered
 * `goal` — Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended
 * `stopped` — Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt
 * `wrap-id` — Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh
@@ -630,9 +658,9 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 * `--skills <SKILLS>` — The skills the session lists, comma-separated, as the host read them. The wrap and the compaction after it run only when mods.attend.continuity.wrap_skill names one of them. Absent, as from a host that predates the flag, the wrap is not held to a listing
 * `--skills-unread` — The host could not read the session's skills: no wrap or compaction
 * `--skills-partial` — The --skills listing was cut short by the host's budget: a skill missing from it is not held against the wrap
-* `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window sends a wrap
+* `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window starts the drain with one drain turn, a fill past mods.attend.continuity.hard_at_pct sends a wrap, and a fill under the drain point ends the drain
 * `--window <WINDOW>` — The model's whole context window, in tokens
-* `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the fill path wraps five points of the window under it where that is lower
+* `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the hard line sits five points of the window under it where that is lower
 
 
 
@@ -691,6 +719,14 @@ Record that a relay's resume turn went in: the relay count goes up by one and th
 ###### **Options:**
 
 * `--failed <FAILED>` — Why the resume did not go in, which stops the relay
+
+
+
+## `attend keepwarm drained`
+
+Record that relay's drain turn went in, which starts this generation's drain: no further drain turn is offered until a compaction, a resume or a fill under the drain point ends it. The attend mod runs it once the drain turn has entered
+
+**Usage:** `attend keepwarm drained`
 
 
 

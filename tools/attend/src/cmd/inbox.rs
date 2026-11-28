@@ -401,6 +401,29 @@ pub(crate) fn cmd_lapse_events() {
     println!("{n} notices lapsed");
 }
 
+/// `attend message awaiting`: the direct messages this session sent that
+/// no recipient has answered, one per line, oldest first, or the
+/// `verbs::awaiting` result as JSON. Marks nothing read.
+pub(crate) fn cmd_awaiting(json: bool) {
+    let awaiting = crate::verbs::awaiting::awaiting();
+    if json {
+        crate::cmd::print_json(&awaiting);
+        return;
+    }
+    if awaiting.count == 0 {
+        println!("nothing awaits a reply");
+        return;
+    }
+    match awaiting.operator {
+        0 => println!("{} awaiting a reply", awaiting.count),
+        n => println!("{} awaiting a reply, {n} from the operator", awaiting.count),
+    }
+    for item in &awaiting.items {
+        let who = if item.operator { format!("{} (operator)", item.recipient) } else { item.recipient.clone() };
+        println!("  ~{}  {who}  {}  {}", item.handle, agent_fmt::when::ago(item.age), item.preview);
+    }
+}
+
 /// Drain pending authored messages for this session: deliver the unseen,
 /// record their consumption in the shared seen-set, and (in `hook`
 /// format) emit the Stop-hook JSON that continues the ending turn with

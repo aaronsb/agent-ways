@@ -19,9 +19,9 @@ agent-tui frame 80x25
 |│       tool_candidates   16               ││value    claude-haiku-4-5         │|
 |│       price_in_per_mtok                  ││type     one of claude-haiku-4-5 |│|
 |│       price_out_per_mtok                 ││claude-haiku-4-5-20251001 |       │|
-|│   ▸ openrouter                           ││claude-opus-4-5 |                 │|
-|│   ▸ claude-code                          ││claude-sonnet-5-5 (Enter picks)   │|
-|│ ▸ keys · provider       key              ││default  claude-haiku-4-5         │|
+|│     ▸ judgements                         ││claude-opus-4-5 |                 │|
+|│   ▸ openrouter                           ││claude-sonnet-5-5 (Enter picks)   │|
+|│   ▸ claude-code                          ││default  claude-haiku-4-5         │|
 |└──────────────────────────────────────────┘└──────────────────────────────────┘|
 | pick   ↑↓ choose · Enter or click sets · Esc closes                            |
 styles
@@ -109,17 +109,15 @@ styles
  19  43-44  - - DIM
  19  79-79  - - DIM
  20   0-0   - - DIM
- 20   2-15  - - BOLD
+ 20   2-17  - - BOLD
  20  43-44  - - DIM
  20  79-79  - - DIM
  21   0-0   - - DIM
- 21   2-16  - - BOLD
+ 21   2-15  - - BOLD
  21  43-44  - - DIM
  21  79-79  - - DIM
  22   0-0   - - DIM
- 22   2-7   - - BOLD
- 22   8-18  - - DIM
- 22  26-28  - - DIM
+ 22   2-16  - - BOLD
  22  43-53  - - DIM
  22  79-79  - - DIM
  23   0-79  - - DIM

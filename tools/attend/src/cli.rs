@@ -121,6 +121,17 @@ pub(crate) enum MessageCmd {
     #[command(about = describe::UNREAD)]
     Unread(JsonArgs),
 
+    /// List the direct messages this session sent that no recipient has answered yet, marking nothing read
+    ///
+    /// A message waits when it went to a peer session or to a person's member id
+    /// and no later message from a recipient threads under it or is addressed to
+    /// this session. Posts to #open and to named channels never wait, and nor
+    /// does a message to a session that has exited or finished. Each line
+    /// gives the handle, the recipient, the age and the first words, and marks a
+    /// message to a person as the operator's. --json prints {count, operator,
+    /// items}.
+    Awaiting(JsonArgs),
+
     #[command(about = describe::LAPSE)]
     Lapse(LapseArgs),
 
@@ -760,6 +771,11 @@ pub enum KeepwarmCmd {
         #[arg(long)]
         failed: Option<String>,
     },
+    /// Record that relay's drain turn went in, which starts this
+    /// generation's drain: no further drain turn is offered until a
+    /// compaction, a resume or a fill under the drain point ends it. The
+    /// attend mod runs it once the drain turn has entered
+    Drained,
     /// Record a `/goal` the attend mod saw typed: active, or none for
     /// `/goal clear`. The relay stops once a goal that was active has ended
     Goal {
@@ -818,14 +834,16 @@ pub struct KeepwarmCheckArgs {
     pub skills_partial: bool,
     /// The context's tokens at a main-loop turn's end, for relay's fill
     /// path: with relay on, a fill past
-    /// mods.attend.continuity.relay_at_pct of --window sends a wrap
+    /// mods.attend.continuity.relay_at_pct of --window starts the drain
+    /// with one drain turn, a fill past mods.attend.continuity.hard_at_pct
+    /// sends a wrap, and a fill under the drain point ends the drain
     #[arg(long, requires_all = ["policy", "window"])]
     pub fill: Option<u64>,
     /// The model's whole context window, in tokens
     #[arg(long, requires = "fill")]
     pub window: Option<u64>,
     /// Claude Code's own autocompact threshold, in tokens; with autocompact
-    /// on, the fill path wraps five points of the window under it where
+    /// on, the hard line sits five points of the window under it where
     /// that is lower
     #[arg(long, requires = "fill")]
     pub native_at: Option<u64>,
@@ -866,6 +884,11 @@ pub enum ListenCmd {
         #[arg(long = "mod", value_name = "VERSION")]
         mod_version: Option<String>,
     },
+    /// Mark this session finished: peers see it finished, and attend
+    /// refuses new messages to it. Its queued messages stay queued, and its
+    /// Claude Code process runs on. `listen on` clears the mark; a beat
+    /// leaves it
+    Finish,
 }
 
 /// A host `attend listen on --host` records.
@@ -964,7 +987,7 @@ mod tests {
         let names = |c: &clap::Command| c.get_subcommands().map(|s| s.get_name().to_string()).collect::<Vec<_>>();
         let (declared, written) = (Cli::command(), crate::cli_command());
         assert_eq!(names(&written), names(&declared));
-        assert_eq!(names(&at(&written, "message")), ["send", "reply", "inbox", "unread", "lapse", "cleanup", "delete", "tombstone"]);
+        assert_eq!(names(&at(&written, "message")), ["send", "reply", "inbox", "unread", "awaiting", "lapse", "cleanup", "delete", "tombstone"]);
     }
 
     #[test]

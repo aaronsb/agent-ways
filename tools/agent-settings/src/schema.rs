@@ -569,6 +569,12 @@ pub struct SectionSpec {
     /// collection of switches, where losing all of them would turn back on
     /// everything the operator turned off.
     pub per_entry: bool,
+    /// Paths below an entry of a per-entry section that fall back as units
+    /// of their own. A bad value under one drops that unit alone, and the
+    /// rest of the entry loads; a bad value elsewhere in the entry drops the
+    /// rest, and a good unit still loads. Its findings name the unit
+    /// `<section>.<entry>.<path>`.
+    pub units: &'static [&'static [&'static str]],
     /// The grammar of an entry's name in a per-entry section: a name it
     /// refuses makes that entry fall back, as a bad value in it would.
     pub entry: Option<EntryCheck>,

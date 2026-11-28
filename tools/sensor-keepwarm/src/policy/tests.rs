@@ -1029,4 +1029,5 @@ fn the_card_follows_the_stretch_after_the_wrap_to_the_compaction() {
     assert!(lines[0].ends_with(" · the compaction at 05:00 failed: a turn was running"), "{}", lines[0]);
 }
 
+mod drain;
 mod relay;

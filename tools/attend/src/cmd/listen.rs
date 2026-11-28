@@ -10,14 +10,16 @@ use attend_presence::enrollment::Host;
 use crate::verbs::listen::{self, Listening};
 use crate::verbs::unread;
 
-/// `attend listen on|off|status|beat`. Prints the state that results, `listening`
-/// or `not listening`; `--json` prints [`Listening`].
+/// `attend listen on|off|status|beat|finish`. Prints the state that results,
+/// `listening` or `not listening`, with `, finished` while the session is
+/// marked finished; `--json` prints [`Listening`].
 pub(crate) fn cmd_listen(sub: ListenCmd, json: bool) {
     let result = match sub {
         ListenCmd::On { host } => listen::on(host.map(|ListenHost::Mod| Host::Mod)),
         ListenCmd::Off => listen::off(),
         ListenCmd::Status => Ok(listen::status()),
         ListenCmd::Beat { ref mod_version } => listen::beat(mod_version.as_deref()),
+        ListenCmd::Finish => listen::finish(),
     };
     let state = match result {
         Ok(state) => state,
@@ -35,15 +37,16 @@ pub(crate) fn cmd_listen(sub: ListenCmd, json: bool) {
     if json {
         crate::cmd::print_json(&state);
     } else {
-        println!("{}", word(&state));
+        println!("{}", words(&state));
     }
 }
 
-fn word(state: &Listening) -> &'static str {
-    if state.listening {
-        "listening"
-    } else {
-        "not listening"
+fn words(state: &Listening) -> &'static str {
+    match (state.listening, state.finished.is_some()) {
+        (true, false) => "listening",
+        (true, true) => "listening, finished",
+        (false, false) => "not listening",
+        (false, true) => "not listening, finished",
     }
 }
 

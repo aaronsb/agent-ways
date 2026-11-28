@@ -27,7 +27,13 @@ pub struct Agent {
     /// registry row, which both show as the bare nickname.
     pub instance: Option<String>,
     /// What the peers sensor reads it doing; `working` for this session.
+    /// A peer marked finished reads `finished`, with its age
+    /// (`finished 12m ago`).
     pub status: String,
+    /// When a peer was marked finished (`attend listen finish`), in seconds
+    /// since the epoch. `None` for this session and for a peer that has not
+    /// finished.
+    pub finished: Option<u64>,
     /// Context window used, in percent. `None` for this session.
     pub context_pct: Option<f64>,
     /// Works in the same directory as this session.
@@ -84,11 +90,18 @@ pub fn peers() -> Peers {
         me.chain(others).filter(|(_, c)| attend_presence::session::same_dir(c, dir)).map(|(sid, _)| sid.to_string()).collect()
     };
     let me = agent(self_sid.clone(), &cwd, self_instance.clone(), "working".to_string(), None, true, &rowless(&cwd));
+    let now = std::time::SystemTime::now();
     let peers: Vec<Agent> = listed
         .iter()
         .map(|(sid, peer_cwd, instance, status, ctx)| {
             let here = attend_presence::session::same_dir(peer_cwd, &cwd);
-            agent(Some(sid.clone()), peer_cwd, instance.clone(), status.clone(), Some(*ctx), here, &rowless(peer_cwd))
+            let mut peer = agent(Some(sid.clone()), peer_cwd, instance.clone(), status.clone(), Some(*ctx), here, &rowless(peer_cwd));
+            if let Some(at) = attend_presence::enrollment::finished_since(sid) {
+                let age = now.duration_since(at).map_or(0, |d| d.as_secs());
+                peer.status = format!("finished {}", agent_fmt::when::ago(age));
+                peer.finished = at.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
+            }
+            peer
         })
         .collect();
 
@@ -196,7 +209,7 @@ fn agent(
         }
     };
     let instance = instance.filter(|i| i != attend_instances::BARE);
-    Agent { session_id, cwd: cwd.to_string(), name, nickname, instance, status, context_pct, here }
+    Agent { session_id, cwd: cwd.to_string(), name, nickname, instance, status, finished: None, context_pct, here }
 }
 
 /// Session `session_id`'s `(nickname, name)` at `cwd`: the persona, and the
@@ -234,6 +247,7 @@ mod tests {
             nickname: name.to_string(),
             instance: None,
             status: "waiting".to_string(),
+            finished: None,
             context_pct: None,
             here: false,
         }

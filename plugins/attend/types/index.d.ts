@@ -29,6 +29,9 @@ export type KeepaliveRow = {
   maxRelays: number
   /** Why the relay stopped, in a few words; null while it runs. */
   relayStop: string | null
+  /** This generation's drain has started; absent in a row a module from
+   *  before the drain kept. */
+  isDraining?: boolean
 }
 
 /** The sensor host a session wants: its id, and the id a /clear ended,

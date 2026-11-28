@@ -19,14 +19,14 @@ agent-tui frame 100x30
 |│       tool_candidates  └────────────────────────────────────────────────┘251001 | claude-opus-4-5│|
 |│       price_in_per_mtok                             ││| claude-sonnet-5-5 (Enter picks)          │|
 |│       price_out_per_mtok                            ││default  claude-haiku-4-5                  │|
-|│   ▸ openrouter                                      ││from     default                           │|
-|│   ▸ claude-code                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
-|│ ▸ keys · provider             key                   ││[gate.profiles.anthropic.model]            │|
+|│     ▸ judgements                                    ││from     default                           │|
+|│   ▸ openrouter                                      ││writes   ~/.config/agent-ways/agent.yaml   │|
+|│   ▸ claude-code                                     ││[gate.profiles.anthropic.model]            │|
+|│ ▸ keys · provider             key                   ││                                           │|
 |│ ▾ judge · state               value                 ││                                           │|
 |│     readiness                 degraded !            ││                                           │|
 |│     unset engine              none                  ││                                           │|
 |│   ▾ sessions                                        ││                                           │|
-|│       (none live)             none                  ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
 | pick   ↑↓ choose · Enter or click sets · Esc closes                                                |
 styles
@@ -114,40 +114,40 @@ styles
  19  54-64  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20   2-15  - - BOLD
+ 20   2-17  - - BOLD
  20  54-64  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
- 21   2-16  - - BOLD
+ 21   2-15  - - BOLD
  21  54-64  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22   2-7   - - BOLD
- 22   8-18  - - DIM
- 22  32-34  - - DIM
+ 22   2-16  - - BOLD
  22  54-55  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
- 23   2-8   - - BOLD
- 23   9-16  - - DIM
- 23  32-36  - - DIM
+ 23   2-7   - - BOLD
+ 23   8-18  - - DIM
+ 23  32-34  - - DIM
  23  54-55  - - DIM
  23  99-99  - - DIM
  24   0-0   - - DIM
- 24  32-39  - - DIM
- 24  40-41  Red - BOLD
+ 24   2-8   - - BOLD
+ 24   9-16  - - DIM
+ 24  32-36  - - DIM
  24  54-55  - - DIM
  24  99-99  - - DIM
  25   0-0   - - DIM
- 25  32-35  - - DIM
+ 25  32-39  - - DIM
+ 25  40-41  Red - BOLD
  25  54-55  - - DIM
  25  99-99  - - DIM
  26   0-0   - - DIM
- 26   2-13  - - BOLD
+ 26  32-35  - - DIM
  26  54-55  - - DIM
  26  99-99  - - DIM
  27   0-0   - - DIM
- 27  32-35  - - DIM
+ 27   2-13  - - BOLD
  27  54-55  - - DIM
  27  99-99  - - DIM
  28   0-99  - - DIM

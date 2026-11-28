@@ -6,6 +6,7 @@
 
 use crate::util::{current_session, encode_project, groups_for, signals_base, Session};
 use agent_identity::is_valid_signal_id;
+use attend_presence::enrollment;
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -57,6 +58,24 @@ pub struct PeerAt {
     pub project: String,
 }
 
+/// A session marked finished (`attend listen finish`), as the finished
+/// refusal names it.
+#[derive(Debug, Clone, Serialize)]
+pub struct FinishedSession {
+    pub session: String,
+    /// Its name as `attend peer list` shows it.
+    pub name: String,
+    /// When it finished, in seconds since the epoch.
+    pub finished_at: u64,
+}
+
+impl std::fmt::Display for FinishedSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        write!(f, "{} (session {}) was marked finished {}", self.name, self.session, agent_fmt::when::ago(now.saturating_sub(self.finished_at)))
+    }
+}
+
 /// A channel with its recorded member count, as the `--channel` refusal
 /// lists it. The count is the file's; live members may be fewer.
 #[derive(Debug, Clone, Serialize)]
@@ -91,6 +110,9 @@ pub enum SendError {
     NotInChannel { name: String, channel: String },
     /// The message being answered came from a session that has exited.
     SenderExited { session: String, name: String },
+    /// Every session the message would reach is marked finished, so
+    /// nothing is sent to it.
+    RecipientFinished { sessions: Vec<FinishedSession> },
     /// The `to` path is this session's own project, and no other session
     /// works there, so nobody would receive the message.
     OwnProject { path: String },
@@ -149,6 +171,10 @@ impl std::fmt::Display for SendError {
                 f,
                 "the message you are replying to came from {name} (session {session}), which has exited; nothing was sent"
             ),
+            Self::RecipientFinished { sessions } => {
+                let named: Vec<String> = sessions.iter().map(ToString::to_string).collect();
+                write!(f, "{}; nothing was sent", named.join(", "))
+            }
             Self::OwnProject { path } => write!(
                 f,
                 "{path} is this session's own project and no other session works there, so nobody would receive it; drop --to to reach every peer, or name another project"
@@ -289,13 +315,16 @@ fn check_channel(me: &Session, name: &str) -> Result<(), SendError> {
     // heartbeats the username while open, and a human never appears in the
     // claude-process scan — so without it, a human-only group would reject
     // agent sends with a phantom "no live peers".
-    let live_peer_count = members.as_ref().map_or(0, |ids| {
-        ids.iter()
-            .filter(|sid| attend_presence::alive(sid, &live_ids) && self_id.as_ref().map(|s| s != *sid).unwrap_or(true))
-            .count()
-    });
-    if live_peer_count > 0 {
+    let live_peers: Vec<&String> =
+        members.iter().flatten().filter(|sid| attend_presence::alive(sid, &live_ids) && self_id.as_ref() != Some(*sid)).collect();
+    // A live member that finished reads nothing until it listens again, so
+    // the post needs one that has not.
+    let (finished, waking): (Vec<&String>, Vec<&String>) = live_peers.into_iter().partition(|sid| enrollment::is_finished(sid));
+    if !waking.is_empty() {
         return Ok(());
+    }
+    if !finished.is_empty() {
+        return Err(SendError::RecipientFinished { sessions: finished_sessions(finished.into_iter().map(String::as_str)) });
     }
     let channels = r.all_groups().into_iter().map(|(name, members, pinned)| ChannelCount { name, members, pinned }).collect();
     Err(match members {
@@ -369,19 +398,59 @@ fn known_people() -> Vec<String> {
     people
 }
 
-/// Resolve `to`: a project path to every live session there, else a
-/// session's name or id, or a person's member id. A name that matches more
-/// than one, or none, is refused.
 /// Whether recipient `to` is written as a project path, not a name.
 fn is_project_path(to: &str) -> bool {
     to.contains(['/', '\\']) || to.starts_with(['.', '~'])
 }
 
+/// The finished sessions among `ids`, each named as `attend peer list`
+/// shows it.
+fn finished_sessions<'a>(ids: impl IntoIterator<Item = &'a str>) -> Vec<FinishedSession> {
+    let ids: Vec<(&str, u64)> = ids
+        .into_iter()
+        .filter_map(|id| {
+            let at = enrollment::finished_since(id)?.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            Some((id, at))
+        })
+        .collect();
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    let sessions = live_sessions();
+    ids.into_iter()
+        .map(|(id, finished_at)| {
+            let name = sessions
+                .iter()
+                .find(|s| s.id == id)
+                .map_or_else(|| format!("session {}", id.chars().take(8).collect::<String>()), |s| s.name.clone());
+            FinishedSession { session: id.to_string(), name, finished_at }
+        })
+        .collect()
+}
+
+/// Resolve `to` for a message: a project path to every live session there
+/// that has not finished ([`resolve_project`]), else a session's name or id,
+/// or a person's member id ([`resolve_named`]). A session that finished is
+/// refused.
 fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     let to = to.trim();
     if is_project_path(to) {
         return resolve_project(me, to);
     }
+    let dest = resolve_named(me, to)?;
+    if let Dest::Sessions { ids, .. } = &dest {
+        let finished = finished_sessions(ids.iter().map(String::as_str));
+        if !finished.is_empty() {
+            return Err(SendError::RecipientFinished { sessions: finished });
+        }
+    }
+    Ok(dest)
+}
+
+/// Resolve `to`, which is no project path: a session's name or id, or a
+/// person's member id. A name that matches more than one, or none, is
+/// refused. A session that finished resolves as any other.
+fn resolve_named(me: &Session, to: &str) -> Result<Dest, SendError> {
     // This session's own id or name names nobody else: the bare session's
     // name is also its `-alpha` sibling's nickname.
     //
@@ -422,16 +491,22 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
     }
 }
 
-/// A project path: every live session working there. A path no live peer
-/// works at is refused, with the live ones listed.
+/// A project path: every live session working there that has not
+/// finished. A path where every live session has finished is refused,
+/// naming them, and a path no live peer works at is refused, with the live
+/// ones listed.
 fn resolve_project(me: &Session, path: &str) -> Result<Dest, SendError> {
     let resolved = attend_presence::session::canonical_dir(path);
     let peers = list_peers();
     let here: Vec<&(String, String, String, String, f64)> = peers.iter().filter(|(_, cwd, ..)| attend_presence::session::same_dir(cwd, &resolved)).collect();
+    let (finished, waking): (Vec<_>, Vec<_>) = here.into_iter().partition(|(id, ..)| enrollment::is_finished(id));
     // The tray is named by the path the sessions recorded, which is where
     // they read; the caller may have named the directory by another route.
-    if let Some((_, recorded, ..)) = here.first() {
-        return Ok(Dest::Sessions { cwd: recorded.clone(), ids: here.iter().map(|(id, ..)| id.clone()).collect() });
+    if let Some((_, recorded, ..)) = waking.first() {
+        return Ok(Dest::Sessions { cwd: recorded.clone(), ids: waking.iter().map(|(id, ..)| id.clone()).collect() });
+    }
+    if !finished.is_empty() {
+        return Err(SendError::RecipientFinished { sessions: finished_sessions(finished.iter().map(|(id, ..)| id.as_str())) });
     }
     // The peer list leaves this session out, so its own project reads as
     // empty when no other session works there. Say that, rather than "no
@@ -468,15 +543,16 @@ pub(crate) fn actor(me: &Session) -> attend_membership::Actor {
 }
 
 /// The one live session `to` names, by name or id, as its id, name and
-/// project root. A person, a project path or a name that matches more than
-/// one session is refused, as is one that matches none. A project path is
-/// refused even where one session works there: it names whoever does.
+/// project root, whether or not it finished. A person, a project path or a
+/// name that matches more than one session is refused, as is one that
+/// matches none. A project path is refused even where one session works
+/// there: it names whoever does.
 pub(crate) fn resolve_session(me: &Session, to: &str) -> Result<(String, String, String), SendError> {
     let to = to.trim();
     if is_project_path(to) {
         return Err(SendError::ProjectPath { path: to.to_string() });
     }
-    match resolve_recipient(me, to)? {
+    match resolve_named(me, to)? {
         Dest::Sessions { cwd, ids } if ids.len() == 1 => {
             let name = live_sessions().into_iter().find(|s| s.id == ids[0]).map_or_else(|| ids[0].clone(), |s| s.name);
             Ok((ids[0].clone(), name, cwd))
@@ -742,9 +818,9 @@ fn parent_dest(
 }
 
 /// A direct message to `sender`: a person's tray, always; a session's
-/// project tray while it is live, else refused by its name. A session id
-/// that `/clear` replaced answers through the live session that took its
-/// slot.
+/// project tray while it is live and has not finished, else refused by its
+/// name. A session id that `/clear` replaced answers through the live
+/// session that took its slot.
 #[cfg(feature = "sensor-peers")]
 fn sender_dest(sender: Sender) -> Result<Dest, SendError> {
     use agent_identity::signal::Kind;
@@ -761,6 +837,10 @@ fn sender_dest(sender: Sender) -> Result<Dest, SendError> {
                 .flatten()
                 .find_map(|id| sessions.iter().find(|s| &s.id == id));
             if let Some(live) = live {
+                let finished = finished_sessions([live.id.as_str()]);
+                if !finished.is_empty() {
+                    return Err(SendError::RecipientFinished { sessions: finished });
+                }
                 return Ok(Dest::Sessions { cwd: live.cwd.clone(), ids: vec![live.id.clone()] });
             }
             let name = match &sender.cwd {
@@ -790,12 +870,12 @@ fn list_peers() -> Vec<(String, String, String, String, f64)> {
 }
 
 #[cfg(feature = "sensor-peers")]
-fn live_session_ids() -> std::collections::HashSet<String> {
+pub(crate) fn live_session_ids() -> std::collections::HashSet<String> {
     crate::sensors::PeerSensor::new().live_session_ids()
 }
 
 #[cfg(not(feature = "sensor-peers"))]
-fn live_session_ids() -> std::collections::HashSet<String> {
+pub(crate) fn live_session_ids() -> std::collections::HashSet<String> {
     std::collections::HashSet::new()
 }
 

@@ -289,12 +289,12 @@ fn settings_lists_each_setting_beside_its_row() {
     click(&mut c, s);
     let ((x, _), shown) = menu(&mut c).expect("the settings list");
     assert!(x > px, "beside the ≡ menu: {:#?}", rows(&mut c));
-    for k in ["mods.attend.listening = ", "mods.attend.keepwarm = ", "attend.chat.mouse = ", "attend.chat.sidebar_key = ", "attend.chat.tabs.jump = "] {
+    for k in ["mods.attend.listening = ", "mods.attend.keepwarm = ", "mods.attend.continuity.hard_at_pct = ", "attend.chat.mouse = ", "attend.chat.tabs.jump = "] {
         assert!(shown.iter().any(|r| r.contains(k)), "{k}: {shown:#?}");
     }
     assert!(!bar(&mut c).contains("mouse = "), "not on the bar: {}", bar(&mut c));
     key(&mut c, KeyCode::Esc);
-    assert!(!rows(&mut c).iter().any(|r| r.contains("sidebar_key = ")), "Esc closes it");
+    assert!(!rows(&mut c).iter().any(|r| r.contains("tabs.jump = ")), "Esc closes it");
 }
 
 /// A menu opened from the column's row (Ctrl+3 twice docks it there) closes
