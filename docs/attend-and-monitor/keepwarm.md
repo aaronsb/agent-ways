@@ -228,6 +228,8 @@ The `keepwarm` line says `armed` and `not armed`, never `on` and `off`: those ar
 
 `attend peer status` shows the `keepwarm` line on its own.
 
+`attend keepwarm status --json [--session <id>]` prints one object, so that a script or a supervising session can read what the card shows without parsing text written for people. Next to `exit` and `boundary` ([the armed exit](#the-armed-exit)), it has three keys. `cache` holds the card's `state` (`warm`, `cold`, or `unknown` before the first request or when `ways context` cannot read the transcript), `last_request_at`, `lapses_at` (the last request plus the cache hour), and `next_tick_at`. `next_tick_at` is when the next check that can wake the session, or let its cache lapse, falls: an armed window's wake, an armed exit's tick, or the keepalive count's next due point. While a wake waits for its turn, `next_tick_at` is the time the wake went out. It is null when no check is armed, as after a relay stop. `relays` holds `count` (relays since the operator's last prompt), `max` (`max_relays`), `relay` (whether relay mode is on for the session's project) and `stopped` (the relay's stop reason, such as `decision`, `doubt`, `empty` or `10 of 10`, or null while it runs). `operator_prompt_at` is the operator's last prompt as the mod reported it. Times are epoch seconds. A value that cannot be read is null: the cache values without a transcript, `count`, `stopped` and `operator_prompt_at` without a ledger, and `max` and `relay` without the settings. Each value comes from a file or a `ways` call that any shell can read, so `--session` gives the same object from a shell that no Claude Code process owns.
+
 ## The cost model
 
 A cold write is a response whose cache write is at least half the previous context and whose cache read is under half of it, with the previous context over 20k tokens. The check records each one with its price. A large tool result appended to a warm prefix writes a lot but reads the whole prefix, so it does not count.
@@ -262,3 +264,4 @@ The arm file and the ledger live under `$XDG_CACHE_HOME/attend/keepwarm/`; only 
 - ADR-414: the keepalives and the wrap after an idle stretch.
 - ADR-417: relay mode, the PreCompact hook and the rename to `mods.attend.continuity`.
 - ADR-418: the drain at `relay_at_pct` and the mid-work wrap at `hard_at_pct`, the boundary tool, its judge, refusals and moves, the armed exit after a `stop` or a `doubt`, its bound against a 171k fresh start or a cold reload, and the finished mark.
+- ADR-419: the cache, relay and operator-prompt keys a supervisor reads from `attend keepwarm status --json`.
