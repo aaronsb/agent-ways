@@ -458,7 +458,8 @@ pub fn resume_failed(p: &mut Policy, why: &str) {
 /// `attend keepwarm stopped`: a resumed generation ended a turn with a
 /// `relay: stop <reason>` line. Only a session that has relayed since the
 /// operator's prompt has one; false where nothing was recorded. A stop on
-/// `decision` waits on the operator, from `now`, under `cfg`'s horizon.
+/// `decision` or `doubt` waits on the operator, from `now`, under `cfg`'s
+/// horizon.
 ///
 /// References:
 /// - ADR-418 item 6: waiting on the operator is pending.
@@ -469,8 +470,8 @@ pub fn stopped_by_agent(p: &mut Policy, reason: &str, detail: &str, cfg: &Config
     let detail = detail.split_whitespace().collect::<Vec<_>>().join(" ");
     let why = if detail.is_empty() { format!("the agent stopped the relay: {reason}") } else { format!("the agent stopped the relay: {reason}, {}", echo(&detail)) };
     stop_relay(p, reason, why);
-    if reason == "decision" {
-        p.wait = Some(hold::begin(hold::Cause::Decision, cfg, now));
+    if let Some(cause) = hold::Cause::of_relay_stop(reason) {
+        p.wait = Some(hold::begin(cause, cfg, now));
     }
     true
 }
@@ -1457,8 +1458,8 @@ pub fn next_tick_at(state: &State, reading: &Reading, arm: Option<&ArmFile>, cfg
         return None;
     }
     let runs = p.gate.as_deref().is_some_and(|g| cfg.why_off(Gate::parse(g)).is_none());
-    // A relay stop on a decision holds the cache until the operator is
-    // likely back.
+    // A relay stop on a decision or doubt holds the cache until the
+    // operator is likely back.
     if runs && p.stopped.is_some() {
         if let Some(t) = hold::tick_at(state, reading, cfg) {
             return Some(state.pinged_at.filter(|p| state.last_seen_at < *p).unwrap_or(t));
@@ -1839,7 +1840,7 @@ fn judge_relay(state: &mut State, reading: &Reading, cfg: &Config, site: &Site, 
             d.text = Some(h.instructions.clone());
             return Some(d);
         }
-        // A stop on a decision waits on the operator: once its compaction
+        // A stop on a decision or doubt waits on the operator: once its compaction
         // ran, the hold keeps the cache until the operator is likely back.
         return hold::relay_tick(state, reading, cfg, now).or(Some(d));
     }
@@ -1922,8 +1923,8 @@ fn judge_relay(state: &mut State, reading: &Reading, cfg: &Config, site: &Site, 
     // a turn that starts first defers it, and the next check asks again.
     if let Some((short, why)) = ended {
         state.policy.compact_due = true;
-        if m.stop == Some("decision") && !goal_ended {
-            state.policy.wait = Some(hold::begin(hold::Cause::Decision, cfg, now));
+        if let Some(cause) = m.stop.filter(|_| !goal_ended).and_then(hold::Cause::of_relay_stop) {
+            state.policy.wait = Some(hold::begin(cause, cfg, now));
         }
         let mut d = stop(state, cfg, site, &short, why, true, now);
         d.action = Action::Compact;
@@ -2112,7 +2113,7 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
     // Wrapped, with keepalives or the compaction after it still to come.
     let after = if p.wrapped_at.is_some() { "wrapped" } else { "running" };
     if let Some(why) = &p.stopped {
-        // A resumed turn's stop on a decision waits on the operator.
+        // A resumed turn's stop on a decision or doubt waits on the operator.
         if let Some(d) = hold::relay_tick(state, reading, cfg, now) {
             return (out, d);
         }

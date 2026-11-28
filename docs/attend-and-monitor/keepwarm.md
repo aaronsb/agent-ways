@@ -96,7 +96,7 @@ The exit runs wherever `mods.attend.keepwarm` is on and the settings read: in ha
 
 ### The operator hold
 
-Some stops wait on the operator: a relay that stopped on `decision`, a boundary `doubt`, and a boundary `stop` whose handoff's DECISIONS section lists a decision with `reversible: no`. When attend records such a stop, it works out when the operator is likely back, once:
+Some stops wait on the operator: a relay that stopped on `decision` or on `doubt`, from its wrap marker or a resumed turn's stop line, a boundary `doubt`, and a boundary `stop` whose handoff's DECISIONS section lists a decision with `reversible: no`. When attend records such a stop, it works out when the operator is likely back, once:
 
 - **The horizon.** The operator is likely back `operator_horizon` after the stop, 10 hours by default.
 - **The night.** Where the zone is known, the local night runs from midnight to `morning`, 09:00 by default. A stop in the night waits until that morning, and a horizon that would end in the night runs on to the morning. A stop at 01:15 waits about 7.75 hours, to 09:00; a stop at 21:00 waits 12 hours, to 09:00; a stop at 13:00 waits the 10 hours, to 23:00.
@@ -104,7 +104,7 @@ Some stops wait on the operator: a relay that stopped on `decision`, a boundary 
 
 At the first tick after the stop, keepwarm decides once whether to hold. The wait needs `ceil(wait ÷ tick)` pings, one per tick of about 50 minutes on the one-hour tier, and keepwarm holds when that count is within the rent-or-buy bound ([the armed exit](#the-armed-exit)) at the context the first tick reads. A hold pings each tick until the expected return and then lets the cache lapse; the operator's prompt ends it sooner, with the rest of the ledger. A wait the bound cannot cover lapses at the first tick, with no partial pinging. At Claude Opus 5.5 list prices a session at 490k tokens holds from 01:15 to 09:00 (10 pings within a bound of 13), and one at 600k tokens lapses on a stop at 13:00 (12 pings against 11).
 
-A boundary stop's hold rides the armed exit, and the tick that ends it finishes the session as the exit does. Something else pending, such as a message awaiting a reply, keeps its own rule after the hold ends or when the hold lapses. A relay that stopped on a decision runs no keepalive of its own, so the hold pings for it: once the stop's compaction has run, at the compacted context's price. When that hold ends, the cache lapses and the relay stays stopped until the operator's next prompt; attend sets no finished mark.
+A boundary stop's hold rides the armed exit, and the tick that ends it finishes the session as the exit does. Something else pending, such as a message awaiting a reply, keeps its own rule after the hold ends or when the hold lapses. A relay that stopped on a decision or on doubt runs no keepalive of its own, so the hold pings for it: once the stop's compaction has run, at the compacted context's price. When that hold ends, the cache lapses and the relay stays stopped until the operator's next prompt; attend sets no finished mark.
 
 The continuance judge's brief carries the same condition as `waiting_on_operator`: a wait the ledger holds since the operator's last prompt, and each one-way decision the handoff lists.
 

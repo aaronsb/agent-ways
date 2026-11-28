@@ -521,7 +521,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("\"10h\""),
         check: Some(check_horizon),
         doc: "How long after a stop that waits on the operator the operator is likely back, such as 10h or 8h30m.",
-        long: "A relay stop on a decision, a boundary doubt, and a boundary stop whose handoff lists a one-way decision wait on the operator. keepwarm holds the cache until the operator is likely back: the stop plus this horizon, moved by the local night where the zone is known (morning). The first tick decides once: it holds when the pings to that time fit within the rent-or-buy bound, and otherwise lets the cache lapse at once. From 1h to 48h.",
+        long: "A relay stop on a decision or on doubt, a boundary doubt, and a boundary stop whose handoff lists a one-way decision wait on the operator. keepwarm holds the cache until the operator is likely back: the stop plus this horizon, moved by the local night where the zone is known (morning). The first tick decides once: it holds when the pings to that time fit within the rent-or-buy bound, and otherwise lets the cache lapse at once. From 1h to 48h.",
         ..BASE
     },
     KeySpec {

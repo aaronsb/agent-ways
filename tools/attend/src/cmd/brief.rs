@@ -442,7 +442,7 @@ mod tests {
     }
 
     /// The brief names what the session waits on the operator for: a
-    /// relay stop on a decision the ledger holds, and each one-way
+    /// relay stop on a decision or doubt the ledger holds, and each one-way
     /// decision in the handoff; a reversible one is no wait.
     #[test]
     fn the_brief_names_what_waits_on_the_operator() {

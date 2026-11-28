@@ -213,51 +213,77 @@ fn a_hold_ends_on_the_operators_prompt() {
     assert_eq!((d.action, d.state, d.count), (Action::Keepalive, "running", 1), "{d:?}");
 }
 
-/// A relay that stopped on a decision waits on the operator: the wait is
-/// recorded with the stop, and once the stop's compaction ran, the hold
-/// pings by itself until 09:00, at the compacted context's price. Without
-/// the hold a relay stop runs no keepalive.
+/// The relay stops that wait on the operator, by the reason their marker
+/// or stop line names.
+const RELAY_WAITS: [(&str, Cause); 2] = [("decision", Cause::Decision), ("doubt", Cause::RelayDoubt)];
+
+/// A relay that stopped on a decision or on doubt waits on the operator:
+/// the wait is recorded with the stop, and once the stop's compaction ran,
+/// the hold pings by itself until 09:00, at the compacted context's price.
+/// Without the hold a relay stop runs no keepalive.
 #[test]
-fn a_relay_decision_stop_holds_until_the_operator_is_likely_back() {
-    let c = known(relay());
-    let stop = at(21, 0);
-    let mut s = Session::on(OPUS, stop - 2 * MIN, 700_000);
-    let id = "20261012T2100Z-3f9a1c2e";
-    let marker = format!("relay: stop decision tasks=2 goal=none wrap={id} head=e6bbfbdd");
-    wrapped(&mut s.state.policy, WrapOutcome::Transcript, "the reply is in the transcript".into(), None, Some(marker), stop);
-    let site = Site { handoff: Some(Handoff { wrap_id: Some(id.into()), ..handoff(id) }), ..site() };
-    let d = s.check_at(&c, Gate::Off, &site, stop);
-    assert_eq!((d.action, d.relay_stop.as_deref()), (Action::Compact, Some("decision")), "{d:?}");
-    let w = s.state.policy.wait.clone().expect("the decision stop waits on the operator");
-    assert_eq!((w.cause, w.until), (Cause::Decision, at(33, 0)));
-    // The compaction ran, and its request read a 60k context.
-    compacted(&mut s.state.policy, None, stop + 5 * MIN);
-    s.tail.push(UsageEntry { model: OPUS.into(), ..entry(stop + 5 * MIN, 60_000, 300) });
-    let r = s.reading();
-    assert_eq!(next_tick_at(&s.state, &r, None, &c, &site, stop + 6 * MIN), Some(stop + 55 * MIN), "a supervisor sees the next tick");
-    let seen = ride(&mut s, &c, &site, stop + 5 * MIN);
-    // Ticks 50 minutes apart from 21:05: fourteen fall before 09:00.
-    assert_eq!(count(&seen, Action::Keepalive), 14, "{seen:?}");
-    assert_eq!(count(&seen, Action::Finish), 0, "a relay stop's hold lapses with no finish mark: {seen:?}");
-    let v = hold::view(&s.state.policy);
-    assert_eq!((v.decision, v.until, v.pings), (Some("hold"), Some(at(33, 0)), Some(15)));
-    let w = s.state.policy.wait.as_ref().unwrap();
-    assert!(w.ended_at.is_some_and(|t| t >= at(33, 0)), "{w:?}");
-    let d = s.check_at(&c, Gate::Off, &site, at(35, 0));
-    assert_eq!((d.action, d.state, d.next_at), (Action::None, "stopped", None), "{d:?}");
+fn a_relay_stop_marker_on_a_decision_or_doubt_holds_until_the_operator_is_likely_back() {
+    for (reason, cause) in RELAY_WAITS {
+        let c = known(relay());
+        let stop = at(21, 0);
+        let mut s = Session::on(OPUS, stop - 2 * MIN, 700_000);
+        let id = "20261012T2100Z-3f9a1c2e";
+        let marker = format!("relay: stop {reason} tasks=2 goal=none wrap={id} head=e6bbfbdd");
+        wrapped(&mut s.state.policy, WrapOutcome::Transcript, "the reply is in the transcript".into(), None, Some(marker), stop);
+        let site = Site { handoff: Some(Handoff { wrap_id: Some(id.into()), ..handoff(id) }), ..site() };
+        let d = s.check_at(&c, Gate::Off, &site, stop);
+        assert_eq!((d.action, d.relay_stop.as_deref(), d.send_handoff), (Action::Compact, Some(reason), true), "{reason}: {d:?}");
+        let w = s.state.policy.wait.clone().unwrap_or_else(|| panic!("the {reason} stop waits on the operator"));
+        assert_eq!((w.cause, w.until, w.decided), (cause, at(33, 0), None), "{reason}");
+        // The compaction ran, and its request read a 60k context.
+        compacted(&mut s.state.policy, None, stop + 5 * MIN);
+        s.tail.push(UsageEntry { model: OPUS.into(), ..entry(stop + 5 * MIN, 60_000, 300) });
+        let r = s.reading();
+        assert_eq!(next_tick_at(&s.state, &r, None, &c, &site, stop + 6 * MIN), Some(stop + 55 * MIN), "{reason}: a supervisor sees the next tick");
+        let seen = ride(&mut s, &c, &site, stop + 5 * MIN);
+        // Ticks 50 minutes apart from 21:05: fourteen fall before 09:00.
+        assert_eq!(count(&seen, Action::Keepalive), 14, "{reason}: {seen:?}");
+        assert_eq!(count(&seen, Action::Finish), 0, "{reason}: a relay stop's hold lapses with no finish mark: {seen:?}");
+        let v = hold::view(&s.state.policy);
+        assert_eq!((v.decision, v.until, v.pings), (Some("hold"), Some(at(33, 0)), Some(15)), "{reason}");
+        let w = s.state.policy.wait.as_ref().unwrap();
+        assert!(w.ended_at.is_some_and(|t| t >= at(33, 0)), "{reason}: {w:?}");
+        let d = s.check_at(&c, Gate::Off, &site, at(35, 0));
+        assert_eq!((d.action, d.state, d.next_at), (Action::None, "stopped", None), "{reason}: {d:?}");
+    }
 }
 
-/// A resumed turn's `relay: stop decision` line waits on the operator the
-/// same way.
+/// A resumed turn's `relay: stop decision` or `relay: stop doubt` line
+/// waits on the operator the same way: the first tick holds at 200k (15
+/// pings within the bound of 34) and lapses at 700k (15 against 9). An
+/// `empty` stop waits on no one.
 #[test]
-fn a_stop_line_on_a_decision_waits_on_the_operator() {
+fn a_stop_line_on_a_decision_or_doubt_waits_on_the_operator() {
     let c = known(relay());
+    let stop = at(21, 0);
+    for (reason, cause) in RELAY_WAITS {
+        for (ctx, holds) in [(200_000, true), (700_000, false)] {
+            let mut s = Session::on(OPUS, stop - 2 * MIN, ctx);
+            s.state.policy.relays = 1;
+            assert!(stopped_by_agent(&mut s.state.policy, reason, "which db", &c, stop));
+            let w = s.state.policy.wait.clone().unwrap();
+            assert_eq!((w.cause, w.until), (cause, at(33, 0)), "{reason}");
+            let d = s.check_at(&c, Gate::Off, &site(), stop);
+            assert!(d.send_handoff, "{reason}: the stop's reply is handed over once: {d:?}");
+            let seen = ride(&mut s, &c, &site(), stop);
+            let d = s.state.policy.wait.as_ref().and_then(|w| w.decided).unwrap();
+            assert_eq!(d.hold, holds, "{reason} at {ctx}: {d:?}");
+            let pings = count(&seen, Action::Keepalive);
+            if holds {
+                // Ticks from 20:58: fourteen fall before 09:00.
+                assert_eq!(pings, 14, "{reason} at {ctx}: {seen:?}");
+            } else {
+                assert_eq!(pings, 0, "{reason} at {ctx}: no partial pinging: {seen:?}");
+            }
+        }
+    }
     let mut p = Policy { relays: 1, ..Policy::default() };
-    assert!(stopped_by_agent(&mut p, "decision", "which db", &c, at(21, 0)));
-    let w = p.wait.unwrap();
-    assert_eq!((w.cause, w.until), (Cause::Decision, at(33, 0)));
-    let mut p = Policy { relays: 1, ..Policy::default() };
-    assert!(stopped_by_agent(&mut p, "empty", "", &c, at(21, 0)));
+    assert!(stopped_by_agent(&mut p, "empty", "", &c, stop));
     assert_eq!(p.wait, None, "an empty stop waits on no one");
 }
 

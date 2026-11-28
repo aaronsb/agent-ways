@@ -3,7 +3,7 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! The operator hold. Some stops wait on the operator: a relay that stopped
-//! on `decision`, a judged boundary `doubt`, and a boundary `stop` whose
+//! on `decision` or `doubt`, a judged boundary `doubt`, and a boundary `stop` whose
 //! handoff lists a decision with a one-way lean (`reversible: no`). When
 //! such a stop is recorded, keepwarm works out when the operator is likely
 //! back ([`expected_return`]) and keeps it as a [`Wait`]. At the first tick
@@ -47,6 +47,9 @@ pub const DEFAULT_MORNING_MIN: u16 = 9 * 60;
 pub enum Cause {
     /// The relay stopped on `decision`.
     Decision,
+    /// The relay stopped on `doubt`, and its handoff went to the operator.
+    #[serde(rename = "relay-doubt")]
+    RelayDoubt,
     /// The boundary judge's `doubt`, whose handoff goes to the operator.
     Doubt,
     /// A boundary `stop` whose handoff lists a one-way decision.
@@ -57,9 +60,26 @@ impl Cause {
     pub fn describe(self) -> &'static str {
         match self {
             Cause::Decision => "the relay stopped on a decision",
+            Cause::RelayDoubt => "the relay stopped on doubt",
             Cause::Doubt => "the judge's doubt went to the operator",
             Cause::Decisions => "the handoff lists a one-way decision",
         }
+    }
+
+    /// The wait a relay stop for `reason` records: `decision` and `doubt`
+    /// both send the handoff to the operator and wait on the answer.
+    pub fn of_relay_stop(reason: &str) -> Option<Cause> {
+        match reason {
+            "decision" => Some(Cause::Decision),
+            "doubt" => Some(Cause::RelayDoubt),
+            _ => None,
+        }
+    }
+
+    /// Whether the wait is a relay stop's, which holds by itself; a
+    /// boundary's rides the armed exit.
+    fn is_relay(self) -> bool {
+        matches!(self, Cause::Decision | Cause::RelayDoubt)
     }
 }
 
@@ -189,8 +209,8 @@ pub fn holding(p: &Policy, now: u64) -> bool {
 }
 
 /// The relay stop's hold for one check, or `None` where none applies: the
-/// wait is no relay decision stop, an armed exit owns the session, or the
-/// hold is over. A relay that stopped on a decision runs no keepalive
+/// wait is no relay stop on a decision or doubt, an armed exit owns the session, or the
+/// hold is over. A relay that stopped on a decision or doubt runs no keepalive
 /// otherwise, so its hold pings by itself: once a tick, while the hold
 /// lasts, as the armed exit does. Its end lets the cache lapse, and the
 /// relay stays stopped until the operator's next prompt.
@@ -200,7 +220,7 @@ pub fn holding(p: &Policy, now: u64) -> bool {
 ///   next prompt.
 pub(super) fn relay_tick(state: &mut State, reading: &Reading, cfg: &Config, now: u64) -> Option<Decision> {
     let w = state.policy.wait.clone()?;
-    if w.cause != Cause::Decision || w.ended_at.is_some() || state.policy.exit.as_ref().is_some_and(|e| e.armed()) {
+    if !w.cause.is_relay() || w.ended_at.is_some() || state.policy.exit.as_ref().is_some_and(|e| e.armed()) {
         return None;
     }
     let held = |state: &State, reason: String| Decision::new(cfg, &state.policy, true, "stopped", reason);
@@ -268,7 +288,7 @@ fn end(state: &mut State, cfg: &Config, why: &str, now: u64) -> Option<Decision>
 /// When the relay stop's hold next ticks, or `None` where it does not.
 pub(super) fn tick_at(state: &State, reading: &Reading, cfg: &Config) -> Option<u64> {
     let w = state.policy.wait.as_ref()?;
-    if w.cause != Cause::Decision || w.ended_at.is_some() || state.policy.exit.as_ref().is_some_and(|e| e.armed()) {
+    if !w.cause.is_relay() || w.ended_at.is_some() || state.policy.exit.as_ref().is_some_and(|e| e.armed()) {
         return None;
     }
     reading.usage_tail.last().filter(|l| l.at_epoch > 0).map(|l| super::tick_of(l, cfg))
