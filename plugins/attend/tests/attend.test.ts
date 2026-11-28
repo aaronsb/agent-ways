@@ -474,6 +474,15 @@ function decision(o: Record<string, unknown> = {}): string {
   })
 }
 
+/** The read of a stop exit an earlier process armed, which session.start
+ *  runs in any interactive session with keepwarm on, dormant included. */
+const EXIT_READ = ['attend', 'keepwarm', 'status', '--json']
+
+/** Every keepwarm verb the mod ran. */
+function keepwarmArgvs(h: { argvs: string[][] }): string[][] {
+  return h.argvs.filter(a => a[0] === 'attend' && a[1] === 'keepwarm')
+}
+
 /** The operator types a prompt and presses Enter. */
 async function typed($: Engine, text = 'hello', kind = 'composer') {
   await $.prompt.submit({ text, wait: false, origin: { kind } } as never)
@@ -797,7 +806,8 @@ describe('dormant', () => {
     expect(h.count('message inbox')).toBe(0)
     expect(h.count('message unread')).toBe(0)
     expect(h.count('peer list')).toBe(0)
-    expect(h.count('keepwarm')).toBe(0)
+    // The one read of a stop exit an earlier process armed, and no check.
+    expect(keepwarmArgvs(h)).toEqual([EXIT_READ])
     expect(h.submitted).toEqual([])
     expect(await band($)).toBeUndefined()
   })
@@ -2429,7 +2439,7 @@ describe('keepalive policy', () => {
     await typed($)
     await $.turn.start({ text: 'hello', turnId: 't1' } as never)
     await $.turn.complete(done('t1'))
-    expect(h.argvs.filter(a => a[0] === 'attend' && a[1] !== 'listen')).toEqual([])
+    expect(h.argvs.filter(a => a[0] === 'attend' && a[1] !== 'listen')).toEqual([EXIT_READ])
     // Autocompact turned off in /config: the held prompt goes to attend.
     h.world.autocompact = false
     await clock.advance(55 * 60_000)
@@ -2492,7 +2502,7 @@ describe('keepalive policy', () => {
       await $.turn.start({ text: 'w', turnId: 't1' } as never)
       await $.turn.complete(done('t1'))
       await clock.advance(3 * 60 * 60_000)
-      expect(h.count('keepwarm')).toBe(0)
+      expect(keepwarmArgvs(h)).toEqual([EXIT_READ])
       expect(h.submitted).toEqual([])
     })
   }
@@ -3258,14 +3268,15 @@ describe('the armed exit', () => {
     expect((await row($))?.text).toMatch(/⟳ exit armed/)
   })
 
-  test('an agent list that cannot be read counts as one agent in flight, so the armed ping still goes in', async ($, on) => {
+  test('an agent list that cannot be read names no agents, so the Stop record decides, and the armed ping attend asks for still goes in', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
+    // attend counts the subagent the last Stop listed: one agent in flight.
     const ping = armed({ action: 'keepalive', text: PING, reason: 'armed: 1 agent; ping 1 of 19', next_at: S + 110 * MIN })
     const h = host(on, { config: DEFAULT, autocompact: true, policy: [ping, finish], agentsFail: true })
     await $.session.start(INTERACTIVE)
     await armByHand($)
     await clock.advance(51 * 60_000)
-    expect(policyChecks(h)[0]?.slice(-2)).toEqual(['--pending', 'agents=1'])
+    expect(policyChecks(h)[0]).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'on', '--skills='])
     expect(h.submitted).toEqual([PING])
   })
 
@@ -3316,6 +3327,59 @@ describe('the armed exit', () => {
     expect(policyChecks(h).length).toBe(1)
   })
 
+  test('a resumed process that stays dormant learns an armed exit at session start, and the operator\'s prompt resets it', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    // A new process, dormant: no row in $.state, no listening setting, and
+    // attend's ledger holds an exit an earlier process armed.
+    const exitStatus = JSON.stringify({ exit: { state: 'armed', wrap_id: WRAP_ID, verdict: 'stop', handoff: 'sufficient', own: 'stop', pings: 0, finished_at: null } })
+    const h = host(on, { config: { 'continuity.keepalive': false }, autocompact: true, exitStatus, policy: [armed()] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    expect(h.mode()).not.toBe('active')
+    expect(h.ran('keepwarm status --json')).toBe(true)
+    expect(h.ran('keepwarm reset')).toBe(false)
+    await typed($)
+    await clock.advance(1_000)
+    expect(h.ran('keepwarm reset')).toBe(true)
+  })
+
+  test('a stop verdict recorded while the main loop idles sets the timer: the check runs at the first due point', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: DEFAULT, autocompact: true, policy: [finish] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(2 * 60_000)
+    // A subagent's Bash call, say: no main-loop turn runs, and none ends to set the timer.
+    await $.tool.call({ tool: 'Bash', command: JUDGED } as never)
+    await clock.advance(49 * 60_000)
+    expect(policyChecks(h)).toEqual([])
+    await clock.advance(2 * 60_000)
+    expect(policyChecks(h)).toEqual([['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'on', '--skills=']])
+    expect((await row($))?.text).toMatch(/⟳ finished/)
+  })
+
+  test('an operator prompt while a check is in flight keeps the exit cleared: the stale finish sets no exit and no finished row', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    let release = () => {}
+    const world: World = { config: DEFAULT, autocompact: true, policy: [finish] }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await armByHand($)
+    world.hold = new Promise<void>(r => (release = r))
+    await clock.advance(51 * 60_000)
+    // The operator prompts while attend judges; its finish answers after.
+    await typed($)
+    release()
+    world.hold = undefined
+    await clock.advance(1_000)
+    expect(h.ran('keepwarm reset')).toBe(true)
+    expect(await row($)).toBeUndefined()
+    // The exit stays cleared: the plain check runs again, and its wake goes in.
+    h.world.keepwarm = 'keepwarm: a plain wake\n'
+    await clock.advance(2 * 60_000)
+    expect(h.submitted[0]).toBe('keepwarm: a plain wake')
+    expect(policyChecks(h).length).toBe(1)
+  })
+
   test('a reload keeps a finished exit: the plain check stays off until the operator prompts', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const row = { state: 'finished', count: 0, max: 8, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: null, wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true, relayCount: 0, maxRelays: 0, relayStop: null }
@@ -3346,6 +3410,9 @@ describe('the armed exit', () => {
     expect(isJudgedStop(`cd /p && ~/.local/bin/attend keepwarm judged --wrap ${WRAP_ID} --verdict=stop --handoff holds-detail --own compact`)).toBe(true)
     expect(isJudgedStop(`attend keepwarm judged --wrap ${WRAP_ID} --verdict compact --handoff sufficient --own stop`)).toBe(false)
     expect(isJudgedStop('attend keepwarm check --policy --json')).toBe(false)
+    // A command split across lines, and a quoted reason holding ; | & before the verdict.
+    expect(isJudgedStop(`attend keepwarm judged --wrap ${WRAP_ID} \\\n  --verdict stop --handoff sufficient --own stop`)).toBe(true)
+    expect(isJudgedStop(`attend keepwarm judged --wrap ${WRAP_ID} --reason "landed; CI | green & merged" --verdict stop --handoff sufficient --own stop`)).toBe(true)
   })
 })
 

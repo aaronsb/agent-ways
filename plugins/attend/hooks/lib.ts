@@ -100,16 +100,16 @@ export function resetArgv(atS: number): string[] {
  *  - ADR-414 item 7: attend's check judges the policy and the mod acts on it.
  *  - ADR-417 item 2a: a context fill past the threshold starts a wrap.
  *  - ADR-418 item 5: agents in flight keep an armed exit warm. */
-export function policyArgv(gate: Gate, skills: Skills | null, legacy = false, fill?: Fill, agents = 0): string[] {
+export function policyArgv(gate: Gate, skills: Skills | null, legacy = false, fill?: Fill, agents?: number): string[] {
   const argv = [ATTEND, 'keepwarm', 'check', '--policy', '--json', '--autocompact', gate]
   if (legacy) return argv
   const listed = skills === null ? ['--skills-unread'] : [`--skills=${skills.names.join(',')}`, ...(skills.isPartial ? ['--skills-partial'] : [])]
   const filled = fill
     ? ['--fill', String(fill.tokens), '--window', String(fill.window), ...(fill.nativeAt !== undefined ? ['--native-at', String(fill.nativeAt)] : [])]
     : []
-  // With none running, attend reads zero agents, and the shells and
-  // watchers the last Stop hook listed, as it would with the flag.
-  const pending = agents > 0 ? ['--pending', `agents=${agents}`] : []
+  // With none running, or a count the mod could not read, the flag names
+  // no agents: attend counts what the last Stop hook listed in flight.
+  const pending = agents !== undefined && agents > 0 ? ['--pending', `agents=${agents}`] : []
   return [...argv, ...listed, ...filled, ...pending]
 }
 
@@ -121,10 +121,12 @@ export function agentsInFlight(list: readonly { status: string }[]): number {
 }
 
 /** Whether a Bash command records a stop verdict by hand
- *  (`attend keepwarm judged ... --verdict stop`). A command that only
+ *  (`attend keepwarm judged ... --verdict stop`). The whole command is
+ *  matched, newlines included, so a line split with a backslash or a quoted
+ *  `--reason` holding `;`, `|` or `&` still counts. A command that only
  *  mentions one costs a policy check, which finds no exit and ends it. */
 export function isJudgedStop(command: string): boolean {
-  return /\battend\s+keepwarm\s+judged\b[^\n;|&]*--verdict[=\s]+["']?stop\b/.test(command)
+  return /\battend\s+keepwarm\s+judged\b[\s\S]*?--verdict[=\s]+["']?stop\b/.test(command)
 }
 
 /** The context at a main-loop turn's end, as `session.measure` reported
@@ -349,6 +351,14 @@ export type Keepalive = {
   /** Moves at each operator prompt: a resume whose compaction an operator
    *  prompt followed is not submitted. */
   operatorEpoch: number
+  /** When the operator last prompted, in epoch ms, whatever the policy and
+   *  the gate: the mod sees every prompt, where attend's ledger hears of one
+   *  only while the gate reads off. The brief takes it as
+   *  `operator_prompt_at`, in seconds, over the ledger's.
+   *
+   *  References:
+   *  - ADR-418 §10: the conditions row of the brief table. */
+  operatorPromptAtMs: number | undefined
   /** Relay mode as attend's last decision read it, from the project's
    *  setting at that check; the mod's settings at session start until
    *  attend first answers.
