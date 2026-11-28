@@ -145,29 +145,57 @@ A line beginning `keepwarm:` asks for one word and no tools. It is not a prompt 
 
 ## How it stops
 
+Keepwarm stops in two ways. An armed window disarms, and a session stopped at a work boundary finishes through [the armed exit](#the-armed-exit). The diagram draws the boundary with relay on. With relay off, a `compact` verdict is carried out as `stop`, a `doubt` stops and sends the handoff without compacting, and there is no drain and no mid-work wrap, so the mod compacts nothing. Either way a `doubt` arms the exit and sends the handoff over attend.
+
 ```mermaid
 stateDiagram-v2
-    [*] --> Off
-    Off --> Armed : attend keepwarm on, or auto-arm after a paid cold write
-    Armed --> Woken : 50 idle minutes, context at least 50k tokens
-    Woken --> Armed : the next response read at least half the context from cache
-    Woken --> Stopped : the next response read less (the cache was already gone)
-    Woken --> Stopped : no response within ten minutes
-    Armed --> Stopped : the hour lapsed before a wake could fire
-    Armed --> Off : the window ends, or attend keepwarm off
-    Stopped --> Armed : attend keepwarm on, or auto-arm
+    state "An armed window" as Window {
+        [*] --> Off
+        Off --> Armed : attend keepwarm on, or auto-arm after a paid cold write
+        Armed --> Woken : 50 idle minutes, context at least 50k tokens
+        Woken --> Armed : the next response read at least half the context from cache
+        Woken --> Stopped : the next response read less (the cache was already gone)
+        Woken --> Stopped : no response within ten minutes
+        Armed --> Stopped : the hour lapsed before a wake could fire
+        Armed --> Off : the window ends, or attend keepwarm off
+        Stopped --> Armed : attend keepwarm on, or auto-arm
+    }
+    state "At a work boundary, relay on" as Boundary {
+        state "attend_boundary" as Tool
+        state "Armed exit" as Exit
+        [*] --> Working
+        Working --> Draining : fill at relay_at_pct (75%)
+        Working --> Tool : work lands, /wrap boundary
+        Draining --> Tool : the next boundary
+        Draining --> Compacting : hard_at_pct (85%), a mid-work wrap, not judged
+        Tool --> Working : refused, nothing judged or armed
+        Tool --> Judge : not refused
+        Judge --> Working : continue, or a stop or doubt that work in flight holds back
+        Judge --> Compacting : compact under max_relays, continue in the drain, or doubt with the operator away
+        Judge --> Exit : stop, doubt in an operator turn, or compact at max_relays or with the count unknown
+        Compacting --> Working : resume while tasks remain
+        Compacting --> Exit : no tasks left, a failure, or a doubt
+        Exit --> Exit : a tick pings while something is pending or the handoff holds detail, up to the bound
+        Exit --> Finished : a tick with no reason to stay, or past the bound
+        Exit --> Working : operator prompt, the reset disarms
+        Finished --> Working : operator prompt, the reset clears the mark
+    }
 
     classDef rest fill:#475569,color:#ffffff,stroke:#4a5568
     classDef armed fill:#2d8e5e,color:#ffffff,stroke:#4a5568
     classDef waiting fill:#fbbf24,color:#1a1a1a,stroke:#4a5568
     classDef stopped fill:#f6821f,color:#1a1a1a,stroke:#4a5568
+    classDef work fill:#2d7d9a,color:#ffffff,stroke:#4a5568
+    classDef judge fill:#7c3aed,color:#ffffff,stroke:#4a5568
     class Off rest
-    class Armed armed
-    class Woken waiting
-    class Stopped stopped
+    class Armed,Exit armed
+    class Woken,Draining waiting
+    class Stopped,Finished stopped
+    class Working,Compacting work
+    class Tool,Judge judge
 ```
 
-The verdict comes from the first response after the wake. A cache read of at least half the previous context means the cache was warm and the window stays armed. Anything less means the cache had already lapsed, so the check disarms and records why rather than keep paying for rewrites. What the response wrote does not count, since a real turn landing beside the wake can append a large tool result to a warm prefix.
+The window's verdict comes from the first response after the wake. A cache read of at least half the previous context means the cache was warm and the window stays armed. Anything less means the cache had already lapsed, so the check disarms and records why rather than keep paying for rewrites. What the response wrote does not count, since a real turn landing beside the wake can append a large tool result to a warm prefix.
 
 ## Status
 
