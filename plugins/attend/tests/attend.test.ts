@@ -3503,6 +3503,13 @@ describe('the armed exit', () => {
     expect(isJudgedArming(judged('--verdict stop --move continue'))).toBe(false)
     expect(isJudgedArming(judged('--move compact --verdict stop'))).toBe(false)
     expect(isJudgedArming(judged('--verdict continue'))).toBe(false)
+    // A flag inside quoted text is text, a quoted value is still the value,
+    // and every judged in a compound command counts.
+    expect(isJudgedArming(judged('--verdict stop --reason "no --move continue yet"'))).toBe(true)
+    expect(isJudgedArming(judged("--verdict continue --reason 'the --verdict doubt line'"))).toBe(false)
+    expect(isJudgedArming(judged('--move "doubt" --verdict continue'))).toBe(true)
+    expect(isJudgedArming(`${judged('--verdict continue')} && ${judged('--verdict stop')}`)).toBe(true)
+    expect(isJudgedArming(`${judged('--verdict continue')}; echo --move stop`)).toBe(false)
   })
 })
 
