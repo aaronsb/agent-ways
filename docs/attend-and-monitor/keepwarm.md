@@ -21,7 +21,7 @@ These verbs act on the Claude session that runs them, so run them from inside th
 
 ## The continuity policy
 
-The continuity policy is what the attend mod does to keep a session's work going while the operator is away. It has two triggers that share one wrap: idle time drives its keepalive path, and context fill drives its relay path. It runs in an interactive Claude Code session that runs the attend mod, whether the session is listening or dormant, and never in a `claude -p` run or an SDK session.
+The continuity policy is what the attend mod does to keep a session's work going while the operator is away. It has two triggers that share one wrap: idle time drives its keepalive path, and context fill drives its relay path. It runs in an interactive Claude Code session that runs the attend mod, whether the session is listening or dormant, and never in a `claude -p` run or an SDK session. After a judge's `stop` at a work boundary, the [armed exit](#the-armed-exit) decides the idle ticks in place of the keepalive count.
 
 ### Keepalive: the idle path
 
@@ -63,6 +63,25 @@ In a session with autocompact off, nothing needs arming: the mod keeps an idle s
 
 - **The bounds.** `max_relays` (5 by default) caps the resumes since the operator's last prompt, and the operator's next prompt starts the count again. The relay stops with no resume when the marker says `stop empty` (no open work), `stop decision` (the next step needs a decision only the operator can make) or `stop doubt` (the agent's doubt about the direction is high); when a resumed turn ends with a `relay: stop` line, which the mod reports with `attend keepwarm stopped <empty|decision|doubt>`; when the count reaches `max_relays`; when the marker is missing or malformed, or the handoff is not fresh; and when a `/goal` that was active has ended. A stop with a parsed marker and a fresh handoff still compacts with the handoff, so the operator returns to a small context with the handoff at its head. A missing marker or a stale handoff compacts nothing, and a `relay: stop` line in a resumed turn compacts nothing. Every stop sends the reply that stopped the relay over attend to `wrap_to` (empty is the operator) with the `handoff:` line, and writes it to `wrap_file` when attend refuses the send.
 - **Under a `/goal`.** Relay and Claude Code's `/goal` can run together. The mod compacts and resumes under an active goal as it does without one, and the resume is the message that continues a goal Claude Code has paused. Only the goal's evaluator decides that the goal is met. The mod learns of a goal from the `/goal` command it sees, which it reports with `attend keepwarm goal active`, and from the marker's `goal=` field. When a marker reads `goal=none` after one that read `goal=active`, the goal has ended and the relay stops.
+
+### The armed exit
+
+At a work boundary, where a piece of work lands, a judge decides whether the session stops, compacts or continues. When the judge says `stop`, the judgment is recorded with `attend keepwarm judged --wrap <id> --verdict stop --handoff <sufficient|holds-detail> --own <call>`, and the exit is armed. `--handoff` is the judge's answer on the handoff: `sufficient` when a fresh session could take the next step from the handoff alone, `holds-detail` when getting this session back would need its transcript. `--own` is the working agent's own call, which the ledger keeps beside the judge's. attend refuses the record, and changes nothing, when `.claude/handoff.wrap.md` is missing or its first line does not carry `wrap=<id>`.
+
+While the exit is armed, each idle due point, where a keepalive would fall, reads the handoff's first line again and decides the tick:
+
+- **The handoff no longer carries the wrap id.** A later wrap rewrote it, so the exit no longer stands, and the due point runs by the rules above.
+- **Nothing is pending and the handoff is sufficient.** The first tick sends no wake. The cache lapses, and the session is finished.
+- **Something is pending, or the handoff holds detail.** Pending means a message this session sent that still awaits a reply (`attend message awaiting`), or an agent, a shell or a watcher still running. The tick sends the `keepwarm:` wake while the pings paid so far and the next one cost no more than whatever would replace the session, and the first tick past that finishes the session.
+- **The tick cannot ping.** On the five-minute tier, on a cache that has already lapsed, after the policy has stopped, outside the keepalive windows, or with `keepalive: false`, the tick finishes the session instead of sending a wake.
+
+A ping costs one cache read of the whole context. For a sufficient handoff, what replaces the session is a fresh start from the handoff, priced at 171k tokens written at the one-hour rate: the median context that sessions started from a handoff had reached at their first edit, measured on 2026-11-27. For a handoff that holds detail, it is a cold reload of the whole context. At Claude Opus 5.5 list prices a session at 350k tokens pays $0.07 a ping, so a sufficient handoff stays warm for up to 19 pings ($1.37) and one that holds detail for up to 40 ($2.80). A model with no row in the price table has no bound, and its ticks run by the rules above.
+
+The mod counts the agent loops in flight from `$.agent.list()` and passes them as `--pending agents=N`. Where it names none, and for shells and watchers always, attend counts what the last Stop hook's `background_tasks` listed: subagents, teammates, cloud sessions and workflows as agents, shells as shells, and monitors and MCP tasks as watchers. attend's Stop hook records that list at every Stop, and a Stop with nothing in flight leaves no record. The record is the last Stop's, so a shell that ends after it keeps the session warm until the next turn ends.
+
+When the tick finishes the session, the mod submits nothing and sets no timer, and attend marks a listening session finished. Peers see it as `finished`. A direct message or a reply to it is refused, and a send to its project or to a channel skips it. Messages already queued for it stay queued. The Claude Code process keeps running, because no mod call can end a session; its transcript stays on disk, and `claude --resume` brings it back. The operator's next prompt runs `attend keepwarm reset`, which disarms the exit and clears the mark.
+
+The exit runs wherever `mods.attend.keepwarm` is on and the settings read: in handoff mode, and with autocompact on, where the idle path does not otherwise run. An armed window (`attend keepwarm on`) still overrides its ticks. While the exit stands, relay's fill path offers no drain and no wrap. The status card's `exit` line (below) shows it, and `attend keepwarm status --json` prints the exit alone, read from the ledger.
 
 ### The PreCompact hook
 
@@ -175,7 +194,7 @@ The `keepwarm` line says `armed` and `not armed`, never `on` and `off`: those ar
 
 A cold write is a response whose cache write is at least half the previous context and whose cache read is under half of it, with the previous context over 20k tokens. The check records each one with its price. A large tool result appended to a warm prefix writes a lot but reads the whole prefix, so it does not count.
 
-Prices are a dated table in `tools/sensor-keepwarm/src/lib.rs`: cache read, one-hour cache write and output per million tokens, by model family, from list prices of September 2026. A model not in the table prices as `n/a`. On a subscription the dollars are a yardstick for the arithmetic, not a bill.
+Prices are a dated table in `tools/sensor-keepwarm/src/lib.rs`: cache read, one-hour cache write and output per million tokens, by model family, from the Claude API list prices read on 2026-11-27. A model not in the table prices as `n/a`. On a subscription the dollars are a yardstick for the arithmetic, not a bill.
 
 Each wake adds a user line and an assistant line to the transcript, on the order of a hundred tokens. A six-hour window adds under a thousand.
 
@@ -204,3 +223,4 @@ The arm file and the ledger live under `$XDG_CACHE_HOME/attend/keepwarm/`; only 
 - ADR-182: keepwarm's wake at 50 idle minutes while armed.
 - ADR-414: the keepalives and the wrap after an idle stretch.
 - ADR-417: relay mode, the PreCompact hook and the rename to `mods.attend.continuity`.
+- ADR-418: the drain at `relay_at_pct` and the mid-work wrap at `hard_at_pct`, the armed exit after a judge's `stop`, its bound against a 171k fresh start or a cold reload, and the finished mark.
