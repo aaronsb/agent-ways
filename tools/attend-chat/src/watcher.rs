@@ -602,9 +602,13 @@ mod tests {
         assert_eq!(sent(&rx), ["restored before"]);
     }
 
-    /// One burst of ten changes to a fresh mark store, each a fifth of
-    /// [`MARKS_SETTLE`] after the last, and whether it held: by the clock,
-    /// each change came within [`MARKS_SETTLE`] of the last.
+    /// One burst of a hundred changes to a fresh mark store, each a
+    /// fiftieth of [`MARKS_SETTLE`] after the last, and whether it held: by
+    /// the clock, each change came within [`MARKS_SETTLE`] of the last.
+    ///
+    /// The burst runs twice [`MARKS_SETTLE`], so a read timed from its first
+    /// change would come during it. The short step leaves each change nearly
+    /// all of [`MARKS_SETTLE`] as slack for a stalled thread.
     ///
     /// While the burst holds, the store is not read. A loaded runner can
     /// stretch a sleep past [`MARKS_SETTLE`], which ends the burst, and the
@@ -620,11 +624,11 @@ mod tests {
         let mut got = Vec::new();
         let mut held = true;
         let mut last: Option<Instant> = None;
-        for _ in 0..10 {
+        for _ in 0..100 {
             let change = Instant::now();
             feed.marks_changed();
             held &= last.is_none_or(|l| l.elapsed() < MARKS_SETTLE);
-            thread::sleep(MARKS_SETTLE / 5);
+            thread::sleep(MARKS_SETTLE / 50);
             got.extend(sent(&rx));
             held &= change.elapsed() < MARKS_SETTLE;
             if held {
