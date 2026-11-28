@@ -299,25 +299,7 @@ pub fn judge(
     if temperature {
         body["temperature"] = serde_json::json!(0);
     }
-    let mut req = http.post(&url).config().timeout_global(Some(timeout)).build();
-    req = match api {
-        Api::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
-        Api::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
-    };
-    let mut resp = req.send_json(&body).map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
-    let status = resp.status().as_u16();
-    let text = resp.body_mut().read_to_string().map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
-    // Status first: an HTML error page from a proxy is still a provider error.
-    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-    if status != 200 {
-        // A provider that refuses a request (4xx) does not bill it. A
-        // timeout or a 5xx, from the provider or a proxy, may come after the
-        // model ran, so its cost is unknown.
-        let refused = (400..500).contains(&status) && status != 408;
-        let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
-        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
-    }
-    let usage = usage(api, &reply);
+    let (reply, usage) = post(http, api, key, &url, &body, timeout)?;
     let failed = |reason: String| JudgeFailure { reason, usage: usage.clone() };
     let input = match api {
         Api::Anthropic => reply
@@ -337,6 +319,104 @@ pub fn judge(
     };
     let p_yes = judge::parse_judgements(&input, n).map_err(|e| failed(format!("answer: {e}")))?;
     Ok((p_yes, usage))
+}
+
+/// POSTs a model request with the provider's auth headers, held to
+/// `timeout`, and returns the 200 reply with the usage it reported. Any
+/// other status is a `provider_<status>` failure; a transport failure is
+/// `deadline` or `transport: …`.
+fn post(http: &ureq::Agent, api: Api, key: &str, url: &str, body: &Value, timeout: Duration) -> std::result::Result<(Value, Option<Usage>), JudgeFailure> {
+    let mut req = http.post(url).config().timeout_global(Some(timeout)).build();
+    req = match api {
+        Api::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
+        Api::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
+    };
+    let mut resp = req.send_json(body).map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
+    let status = resp.status().as_u16();
+    let text = resp.body_mut().read_to_string().map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
+    // Status first: an HTML error page from a proxy is still a provider error.
+    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if status != 200 {
+        // A provider that refuses a request (4xx) does not bill it. A
+        // timeout or a 5xx, from the provider or a proxy, may come after the
+        // model ran, so its cost is unknown.
+        let refused = (400..500).contains(&status) && status != 408;
+        let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
+        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
+    }
+    let usage = usage(api, &reply);
+    Ok((reply, usage))
+}
+
+/// The URL and body of a completion with no tools: `system` and one user
+/// turn, `prompt`.
+fn complete_request(api: Api, model: &str, system: &str, prompt: &str, max_tokens: u64) -> (String, Value) {
+    let (url, mut body) = match api {
+        Api::Anthropic => (
+            format!("{ANTHROPIC}/v1/messages"),
+            serde_json::json!({
+                "model": model,
+                "max_tokens": max_tokens,
+                "system": system,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+        ),
+        Api::Openrouter => (
+            format!("{OPENROUTER}/chat/completions"),
+            serde_json::json!({
+                "model": model,
+                "max_tokens": max_tokens,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+            }),
+        ),
+    };
+    if crate::profile::accepts_sampling(model) {
+        body["temperature"] = serde_json::json!(0);
+    }
+    (url, body)
+}
+
+/// One text completion with no tools: the continuance judge's call.
+/// Returns the reply's text, its text blocks joined, with the
+/// usage the provider reported. A failure carries the usage as
+/// [`judge`]'s does.
+#[allow(clippy::too_many_arguments)]
+pub fn complete(
+    http: &ureq::Agent,
+    provider: Provider,
+    key: &str,
+    model: &str,
+    system: &str,
+    prompt: &str,
+    max_tokens: u64,
+    timeout: Duration,
+) -> std::result::Result<(String, Option<Usage>), JudgeFailure> {
+    let Some(api) = Api::of(provider) else { return Err(JudgeFailure::bare(NOT_CALLED.to_string())) };
+    let (url, body) = complete_request(api, model, system, prompt, max_tokens);
+    let (reply, usage) = post(http, api, key, &url, &body, timeout)?;
+    reply_text(api, &reply).map(|t| (t, usage.clone())).ok_or_else(|| JudgeFailure {
+        reason: format!("answer: no text (stop_reason {})", reply.get("stop_reason").or_else(|| reply.pointer("/choices/0/finish_reason")).unwrap_or(&Value::Null)),
+        usage,
+    })
+}
+
+/// The text of a 200 reply: Anthropic's text blocks joined, thinking left
+/// out, or OpenRouter's message content. `None` when it holds no text.
+fn reply_text(api: Api, reply: &Value) -> Option<String> {
+    let text = match api {
+        Api::Anthropic => reply
+            .get("content")?
+            .as_array()?
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<String>(),
+        Api::Openrouter => reply.pointer("/choices/0/message/content")?.as_str()?.to_string(),
+    };
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// The JSON of an OpenRouter tool call's `arguments`. Some upstream providers
@@ -458,6 +538,27 @@ mod tests {
         assert_eq!(f, JudgeFailure { reason: NOT_CALLED.to_string(), usage: None });
         assert_eq!(check(Provider::ClaudeCode, "", "claude-haiku-4-5"), Check::Failed(0, NOT_CALLED.to_string()));
         assert!(models(Provider::ClaudeCode, None).is_err());
+    }
+
+    #[test]
+    fn a_completion_sends_no_tools_and_reads_only_the_text() {
+        for api in [Api::Anthropic, Api::Openrouter] {
+            let (_, body) = complete_request(api, "claude-haiku-5-5", "sys", "the brief", 4096);
+            assert!(body.get("tools").is_none() && body.get("tool_choice").is_none(), "{api:?}: {body}");
+            assert_eq!(body["max_tokens"], 4096);
+            assert!(body.get("temperature").is_none(), "Haiku 5.5 takes no sampling parameter");
+            assert!(body.to_string().contains("the brief"));
+        }
+        let (_, legacy) = complete_request(Api::Anthropic, "claude-haiku-4-5", "s", "p", 10);
+        assert_eq!(legacy["temperature"], 0);
+        let anthropic = json!({"content": [{"type": "thinking", "thinking": "hmm"}, {"type": "text", "text": "{\"a\":"}, {"type": "text", "text": "1}"}]});
+        assert_eq!(reply_text(Api::Anthropic, &anthropic).as_deref(), Some("{\"a\":1}"));
+        assert_eq!(reply_text(Api::Anthropic, &json!({"content": [{"type": "thinking", "thinking": "x"}]})), None);
+        let openrouter = json!({"choices": [{"message": {"content": "{}"}}]});
+        assert_eq!(reply_text(Api::Openrouter, &openrouter).as_deref(), Some("{}"));
+        let http = agent(Duration::from_millis(1));
+        let f = complete(&http, Provider::ClaudeCode, "", "m", "s", "p", 10, Duration::from_millis(1)).unwrap_err();
+        assert_eq!(f.reason, NOT_CALLED);
     }
 
     #[test]

@@ -249,7 +249,7 @@ pub fn parse_reply(text: &str, n: usize) -> Result<Vec<f64>, InvalidReply> {
 
 /// The body of a reply that is one code fence, untagged or tagged `json` in
 /// any case, and nothing else; any other text as it is, trimmed.
-fn unfence(text: &str) -> &str {
+pub(crate) fn unfence(text: &str) -> &str {
     let t = text.trim();
     let Some(inner) = t.strip_prefix("```").and_then(|r| r.strip_suffix("```")) else { return t };
     match inner.split_once('\n') {

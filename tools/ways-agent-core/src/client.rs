@@ -73,7 +73,7 @@ mod imp {
         if !crate::protocol::trusted_socket(&sock) {
             return Err("agent_untrusted: the socket or its directory is not this user's alone".to_string());
         }
-        let judging = matches!(request, Request::Judge(_));
+        let judging = matches!(request, Request::Judge(_) | Request::Continuance(_));
         let envelope = exchange(stream, &Envelope { protocol: PROTOCOL, request }, timeout)?;
         if judging {
             retire_if_foreign(&envelope.agent.core);

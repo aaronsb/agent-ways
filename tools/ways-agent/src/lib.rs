@@ -10,7 +10,7 @@
 //! socket protocol and its client) live in `ways-agent-core`, which the hook
 //! links; this crate adds the provider HTTP clients and the server.
 
-pub use ways_agent_core::{client, cost, engine, judge, keys, models, profile, protocol};
+pub use ways_agent_core::{client, continuance, cost, engine, judge, keys, models, profile, protocol};
 
 pub mod net;
 pub mod report;

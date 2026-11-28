@@ -18,12 +18,20 @@ use serde_json::Value;
 
 use crate::cost::{account_estimate, Usage};
 
+/// The purpose of a `judge_call` event that names none: every call logged
+/// before the continuance judge was a disclosure call.
+pub const DISCLOSURE: &str = "disclosure";
+
 /// One `judge_call` event, reduced to what the report needs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Call {
     pub ts: String,
     pub session: String,
     pub project: String,
+    /// What the call judged: [`DISCLOSURE`], or
+    /// [`crate::continuance::PURPOSE`] for a continuance call. The totals
+    /// count every purpose.
+    pub purpose: String,
     pub cost_usd: Option<f64>,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -102,6 +110,7 @@ pub fn parse_line(line: &str) -> Option<Call> {
         ts: s("ts")?.to_string(),
         session: s("session").unwrap_or("").to_string(),
         project: s("project").unwrap_or("").to_string(),
+        purpose: s("purpose").filter(|p| !p.is_empty()).unwrap_or(DISCLOSURE).to_string(),
         cost_usd: cost,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
@@ -510,6 +519,22 @@ not json
         assert_eq!(short(&calls), "$0.0300 + ~$1.5000 est + 1 unknown");
         assert_eq!(short(&calls[2..3]), "cost unknown");
         assert_eq!(short(&calls[3..]), "$0.0300");
+    }
+
+    #[test]
+    fn a_continuance_call_keeps_its_purpose_and_counts_in_the_totals() {
+        let log = r#"{"event":"judge_call","ts":"2026-11-27T09:00:00Z","session":"s1","project":"/p/a","purpose":"continuance","outcome":"judged","engine":"anthropic","provider":"anthropic","model":"claude-haiku-5-5","input_tokens":"4000","output_tokens":"200","cost_usd":"0.00050000","cost_source":"price_table"}
+{"event":"judge_call","ts":"2026-11-27T09:01:00Z","session":"s1","project":"/p/a","purpose":"continuance","outcome":"judged","engine":"claude-code","provider":"claude-code","model":"claude-haiku-5-5","input_tokens":"4000","output_tokens":"200","cost_source":"account"}
+"#;
+        let mut calls = parse_log(log);
+        calls.extend(parse_log(LOG));
+        let purposes: Vec<&str> = calls.iter().map(|c| c.purpose.as_str()).collect();
+        assert_eq!(purposes, ["continuance", "continuance", "disclosure", "disclosure", "disclosure", "disclosure"]);
+        let t = total(&calls);
+        assert_eq!((t.calls, t.known_calls, t.account_calls), (6, 3, 1));
+        assert!((t.cost_usd.unwrap() - 0.0405).abs() < 1e-9);
+        // The account call is estimated at Haiku 5.5's list price.
+        assert!((t.account_estimate_usd.unwrap() - 0.0005).abs() < 1e-9);
     }
 
     #[test]
