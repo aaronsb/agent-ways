@@ -2217,6 +2217,7 @@ dependencies = [
  "anyhow",
  "claude-sessions",
  "flate2",
+ "libc",
  "pulldown-cmark",
  "sensor-trait",
  "serde",
