@@ -4,26 +4,36 @@
 
 // The boundary tool's pure pieces (hooks/boundary.ts): the refusals, the
 // verdict's parse and the prose around it, the move the mod carries out,
-// and the argv. The handler is tested through the mod in attend.test.ts.
+// the argv and attend's record, and the compaction's instructions. The
+// handler is tested through the mod in attend.test.ts.
 //
 // References:
 // - ADR-418 §10: the refusals come first; when the two calls disagree, the
-//   more reversible move wins; the mod keeps only the verdict.
-// - ADR-418 §12: the stop and continue rows.
+//   more reversible move wins; the mod keeps only the verdict; the
+//   `max_relays` cap ends the chain.
+// - ADR-418 §11: doubt sends the handoff to the operator.
+// - ADR-418 §12: the stop, compact and continue rows.
 
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
+  COMPACT_CAP,
+  COMPACT_LEAD,
   agentLines,
   boundaryInput,
   briefInput,
+  compactInstructions,
   doubtOf,
   handoffCarries,
+  hasRoom,
+  hasTasks,
   inFlightOf,
   isBoundaryWrap,
   judgedArgv,
   parseJudgeOut,
+  parseRecorded,
   refusalOf,
+  relaysOf,
   settle,
   taskLines,
   verdictOf,
@@ -67,10 +77,35 @@ describe('the move', () => {
     expect(settle('compact', 'compact', QUIET, false).notes).toEqual(['Relay is off in this session, so compaction stays with the operator: the compact verdict is carried out as stop.'])
   })
 
-  test('relay on stops on compact and doubt until the tool compacts', () => {
-    const p = settle('compact', 'compact', QUIET, true)
-    expect([p.move, p.notes]).toEqual(['stop', ['The mod does not carry out compact through this tool yet: it stops, the more reversible move, and does not compact.']])
-    expect(settle('stop', 'doubt', QUIET, true).move).toBe('stop')
+  test('relay off records doubt, which arms and sends the handoff, and still compacts nothing', () => {
+    const p = settle('stop', 'doubt', QUIET, false, true)
+    expect([p.move, p.record, p.isHandoffSent]).toEqual(['stop', 'doubt', true])
+    expect(p.notes).toEqual(['Relay is off in this session: doubt stops without compacting, and the handoff in .claude/handoff.wrap.md goes to the operator over attend.'])
+    const c = settle('compact', 'compact', QUIET, false, true)
+    expect([c.move, c.record, c.isHandoffSent]).toEqual(['stop', 'stop', false])
+  })
+
+  test('relay on compacts below max_relays, and at the cap or with no count the compact verdict is carried out as stop', () => {
+    const p = settle('compact', 'compact', QUIET, true, true, { n: 2, max: 5 })
+    expect([p.move, p.record, p.notes, p.todo]).toEqual(['compact', 'compact', [], 'End the turn now and start nothing new: the mod compacts once it ends.'])
+    const cap = settle('compact', 'compact', QUIET, true, false, { n: 5, max: 5 })
+    expect([cap.move, cap.record, cap.notes]).toEqual(['stop', 'stop', ["5 of 5 relays have run since the operator's last prompt, the most this session allows: the compact verdict is carried out as stop."]])
+    expect(settle('compact', 'compact', QUIET, true, false).notes).toEqual(['The relay count could not be read, so max_relays cannot be checked: the compact verdict is carried out as stop.'])
+    // An agent in flight comes through a compaction; it refuses a stop.
+    expect(settle('compact', 'compact', BUSY, true, true, { n: 0, max: 5 }).move).toBe('compact')
+    expect(settle('compact', 'compact', BUSY, true, false, { n: 5, max: 5 }).refused?.call).toBe('stop')
+    expect([hasRoom({ n: 4, max: 5 }), hasRoom({ n: 5, max: 5 }), hasRoom(undefined)]).toEqual([true, false, false])
+  })
+
+  test('relay on, doubt compacts and sends the handoff; in an operator\'s turn it stops without compacting; things in flight refuse it', () => {
+    const p = settle('stop', 'doubt', QUIET, true, true)
+    expect([p.move, p.record, p.isHandoffSent, p.notes]).toEqual(['doubt', 'doubt', true, []])
+    // At the cap too: a doubt counts no relay.
+    expect(settle('compact', 'doubt', QUIET, true, false, { n: 5, max: 5 }).move).toBe('doubt')
+    const o = settle('stop', 'doubt', OPERATOR, true, true)
+    expect([o.move, o.record, o.isHandoffSent]).toEqual(['stop', 'doubt', true])
+    const busy = settle('stop', 'doubt', BUSY, true, true)
+    expect([busy.move, busy.record, busy.isHandoffSent, busy.refused?.call]).toEqual(['continue', 'continue', false, 'doubt'])
   })
 
   test('the disagreement rule: own continue against stop or compact continues and fixes the handoff; own stop against compact stops', () => {
@@ -91,13 +126,45 @@ describe('the move', () => {
     expect([d.move, d.notes[0]]).toEqual(['stop', 'The session drains, so the continue verdict goes on as a compaction.'])
   })
 
-  test('attend records the move, and the reason names the judge\'s verdict where they differ', () => {
+  test('attend records the judge\'s verdict and the move apart, with the judge\'s own reason', () => {
     const j = verdictOf({ ...V, verdict: 'compact' })!
-    expect(judgedArgv('20261127T0900Z-3f9a1c2e', settle('compact', 'compact', QUIET, false), j, 'compact')).toEqual([
-      'attend', 'keepwarm', 'judged', '--wrap', '20261127T0900Z-3f9a1c2e', '--verdict', 'stop', '--handoff', 'sufficient', '--own', 'compact', '--reason', 'the judge said compact; carried out as stop: nothing remains',
+    expect(judgedArgv('20261127T0900Z-3f9a1c2e', settle('compact', 'compact', QUIET, false).record, j, 'compact')).toEqual([
+      'attend', 'keepwarm', 'judged', '--json', '--wrap', '20261127T0900Z-3f9a1c2e', '--verdict', 'compact', '--handoff', 'sufficient', '--own', 'compact', '--move', 'stop', '--reason', 'nothing remains',
     ])
-    const s = verdictOf(V)!
-    expect(judgedArgv('20261127T0900Z-3f9a1c2e', settle('stop', 'stop', QUIET, false), s, 'stop').slice(-2)).toEqual(['--reason', 'nothing remains'])
+    const d = verdictOf({ ...V, verdict: 'doubt', reason: 'two\nlines' })!
+    expect(judgedArgv('20261127T0900Z-3f9a1c2e', 'doubt', d, 'stop').slice(-6)).toEqual(['--own', 'stop', '--move', 'doubt', '--reason', 'two lines'])
+  })
+
+  test('attend\'s record: whether it armed, and the doubt\'s route; anything else is no record', () => {
+    const route = { dest: 'send', file: '/state/wrap/s1.md', to: 'aaron', after: 'relay', after_keepalives: 0, handoff: 'handoff: the boundary judge said doubt.' }
+    expect(parseRecorded(JSON.stringify({ recorded: true, armed: true, move: 'doubt', wrap: route }))).toEqual({
+      isArmed: true, route: { dest: 'send', file: '/state/wrap/s1.md', to: 'aaron', after: 'relay', afterKeepalives: 0, handoff: 'handoff: the boundary judge said doubt.' },
+    })
+    expect(parseRecorded('{"recorded":true,"armed":false,"move":"compact","wrap":null}\n')).toEqual({ isArmed: false, route: null })
+    // A route that does not parse is none.
+    expect(parseRecorded(JSON.stringify({ recorded: true, armed: true, move: 'doubt', wrap: { to: 'aaron' } }))?.route).toBeNull()
+    expect(parseRecorded('exit armed for wrap 20261127T0900Z-3f9a1c2e')).toBeUndefined()
+    expect(parseRecorded('{"armed":true}')).toBeUndefined()
+  })
+})
+
+describe('the compaction', () => {
+  const PATH = '/work/agent-ways/.claude/handoff.wrap.md'
+
+  test('the instructions open with the lead and hold the handoff whole within the cap', () => {
+    expect(compactInstructions('2026-11-27 e6bbfbdd wrap=x\nDO NEXT: go.\n\n', PATH)).toBe(`${COMPACT_LEAD}\n\n2026-11-27 e6bbfbdd wrap=x\nDO NEXT: go.`)
+    const long = Array.from({ length: 400 }, (_, i) => `- task ${i} ${'x'.repeat(40)}`).join('\n')
+    const cut = compactInstructions(long, PATH)
+    expect(cut.length).toBeLessThanOrEqual(COMPACT_CAP)
+    expect(cut.startsWith(`${COMPACT_LEAD}\n\n- task 0 `)).toBe(true)
+    expect(cut.endsWith(`x\n\n(The handoff continues in ${PATH}; read it there.)`)).toBe(true)
+  })
+
+  test('the relay count comes from the brief, and a task list that cannot be read counts as work left', () => {
+    expect(relaysOf({ relays: { n: 2, max: 5 } })).toEqual({ n: 2, max: 5 })
+    expect(relaysOf({ relays: 'unknown' })).toBeUndefined()
+    expect(relaysOf(undefined)).toBeUndefined()
+    expect([hasTasks({ open: [], inProgress: [] }), hasTasks({ open: ['#1 a'], inProgress: [] }), hasTasks(undefined)]).toEqual([false, true, true])
   })
 })
 
