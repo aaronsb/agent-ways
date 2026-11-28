@@ -153,9 +153,16 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
         }
         KeepwarmCmd::Compacted { failed, trigger } => {
             let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
-            let boundary = trigger.is_some();
-            if !update_policy(&dir, sid, |p| if boundary { policy::boundary_compacted(p, failed, now) } else { policy::compacted(p, failed, now) }) {
+            let mut took = true;
+            let recorded = update_policy(&dir, sid, |p| match trigger {
+                Some(_) => took = policy::boundary_compacted(p, failed, now),
+                None => policy::compacted(p, failed, now),
+            });
+            if !recorded {
                 std::process::exit(1);
+            }
+            if !took {
+                eprintln!("keepwarm: a relay wrap waits to be judged, so its compaction is the relay's; the boundary compaction is not recorded");
             }
         }
         KeepwarmCmd::Resumed { failed, trigger } => {

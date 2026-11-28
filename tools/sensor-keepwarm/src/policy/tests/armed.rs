@@ -231,7 +231,7 @@ fn pending_parses_the_mod_s_counts() {
 fn a_boundary_compaction_counts_toward_max_relays() {
     let mut p = Policy::default();
     drained(&mut p, MONDAY);
-    boundary_compacted(&mut p, None, MONDAY + MIN);
+    assert!(boundary_compacted(&mut p, None, MONDAY + MIN));
     assert_eq!((p.drained_at, p.trigger.as_deref()), (None, Some("boundary")));
     assert!(boundary_resumed(&mut p, MONDAY + 2 * MIN));
     assert_eq!(p.relays, 1);
@@ -268,4 +268,21 @@ fn the_card_shows_the_exit_its_rent_purchase_and_pings_left() {
         exit::card_line(&s.state, MONDAY + 200 * MIN).unwrap(),
         format!("exit        finished 50m ago · wrap {WRAP}, the judge said stop, the handoff is sufficient, own call stop · 2 pings rent $0.14 paid of $1.37 (a fresh start) · your next prompt clears it")
     );
+}
+
+/// A boundary compaction reported while a relay wrap the policy sent still
+/// waits for its answer is refused: the tick after it judges the wrap, and
+/// does not read the compaction as a lost resume.
+#[test]
+fn a_boundary_compaction_during_a_pending_relay_wrap_is_not_a_lost_resume() {
+    use super::relay::{filled, relay};
+    let mut s = Session::new(MONDAY, 700_000);
+    let d = s.check_at(&filled(relay(), 860_000), Gate::Off, &site(), MONDAY + MIN);
+    assert_eq!(d.action, Action::Wrap, "{d:?}");
+    let before = s.state.policy.clone();
+    assert!(!boundary_compacted(&mut s.state.policy, None, MONDAY + 2 * MIN), "refused while the relay wrap waits");
+    assert_eq!(s.state.policy, before, "a refusal records nothing");
+    let d = s.check_at(&relay(), Gate::Off, &site(), MONDAY + 3 * MIN);
+    assert_ne!(d.relay_stop.as_deref(), Some("resume lost"), "{d:?}");
+    assert_eq!((d.action, d.state), (Action::None, "wrapped"), "{d:?}");
 }

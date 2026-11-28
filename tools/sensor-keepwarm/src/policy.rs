@@ -387,18 +387,25 @@ pub fn compacted(p: &mut Policy, failed: Option<String>, now: u64) {
 /// `attend keepwarm compacted --trigger boundary`: a compaction the
 /// boundary tool started ran, or why it failed. It ends the drain as any
 /// compaction does, and waits for its resume, which counts a relay
-/// ([`boundary_resumed`]). No relay wrap is judged after it.
+/// ([`boundary_resumed`]). While a relay wrap the policy sent is on record,
+/// its compaction is the relay's to judge, so the report is refused and
+/// records nothing: [`judge_relay`] would read the compaction as a lost
+/// resume. False then.
 ///
 /// References:
 /// - ADR-418 item 13: a compaction the agent starts through the tool
 ///   counts toward `max_relays` like any other relay.
-pub fn boundary_compacted(p: &mut Policy, failed: Option<String>, now: u64) {
+pub fn boundary_compacted(p: &mut Policy, failed: Option<String>, now: u64) -> bool {
+    if p.relay && p.wrapped_at.is_some() {
+        return false;
+    }
     if failed.is_none() {
         p.drained_at = None;
         p.compacted_at = Some(now);
     }
     p.trigger = Some("boundary".into());
     p.compact_failed = failed;
+    true
 }
 
 /// `attend keepwarm resumed --trigger boundary`: the resume after a
