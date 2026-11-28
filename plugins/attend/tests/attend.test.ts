@@ -12,7 +12,7 @@ import {
   RELAY_MARKER,
   compactedArgv,
   nativeThresholdFrom,
-  relayAtTokens,
+  drainAtTokens,
   relayMarkerOf,
   relayStopOf,
   rowAfterResume,
@@ -575,6 +575,7 @@ describe('configuration', () => {
       marginMinutes: 10,
       relay: false,
       relayAtPct: 75,
+      hardAtPct: 85,
     })
   })
 
@@ -2756,7 +2757,8 @@ describe('relay mode', () => {
   const RELAY = { 'continuity.relay': 'on' }
   const ID = '20261126T214012Z-s1abcdef'
   const MARKER = `relay: continue tasks=2 goal=none wrap=${ID} head=e6bbfbdd`
-  const WRAP = `wrap: context at 80% (160k of 200k), past the relay threshold of 75%.\nThe operator is away. This wrap is in relay mode with wrap id ${ID}.`
+  const WRAP = `wrap: context at 86% (172k of 200k), past the hard line of 85%.\nThe operator is away. This wrap is in relay mode with wrap id ${ID}.`
+  const DRAIN_TURN = 'drain: context at 76% (152k of 200k), past the drain point of 75%.\nThe drain has started: start nothing new, finish the work in flight and collect your agents\' reports.'
   const RESUME = 'relay: the conversation was compacted after a wrap; this is relay 1 of 5 since the operator\'s last prompt. Read /work/agent-ways/.claude/handoff.wrap.md.'
   const INSTRUCTIONS = 'Summarize this session as the handoff below; keep its TASKS and DO NEXT whole.\n\n2026-11-26 e6bbfbdd wrap=' + ID
   const route = (o: Record<string, unknown> = {}) => ({
@@ -2800,6 +2802,71 @@ describe('relay mode', () => {
     await clock.advance(2_000)
     expect(policyChecks(h)[1]).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'on', '--skills=', '--fill', '160000', '--window', '200000', '--native-at', '180000'])
     expect(h.submitted).toEqual([WRAP])
+  })
+
+  // References:
+  // - ADR-418 item 14: the drain at relay_at_pct, the mid-work wrap at hard_at_pct.
+  test('a turn ending past the drain point gets one drain turn and the row reads draining; past the hard line the wrap goes in', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drain = relayed({ action: 'drain', text: DRAIN_TURN, draining: true, drain_at_tokens: 150_000, hard_at_tokens: 170_000 })
+    const draining = relayed({ draining: true })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [decision({ relay: true }), drain, draining, wrap] })
+    await started($, clock)
+    await turn($, 't1', 'do the work', 'done')
+    await measured($, 152_000)
+    await clock.advance(2_000)
+    expect(policyChecks(h)[1]?.slice(-4)).toEqual(['--fill', '152000', '--window', '200000'])
+    expect(h.submitted).toEqual([DRAIN_TURN])
+    expect(h.origins[0]).toEqual({ kind: 'plugin', name: 'attend' })
+    expect(await rowSegment($)).toMatch(/⟳ draining\b/)
+    await turn($, 't2', framedPluginPrompt('attend', DRAIN_TURN), 'finishing the work in flight')
+    await measured($, 160_000)
+    await clock.advance(2_000)
+    expect(h.submitted).toEqual([DRAIN_TURN])
+    expect(await rowSegment($)).toMatch(/⟳ draining\b/)
+    await turn($, 't3', 'more work', 'done')
+    await measured($, 172_000)
+    await clock.advance(2_000)
+    expect(h.submitted).toEqual([DRAIN_TURN, WRAP])
+  })
+
+  test('a drain turn a prompt overtakes is not submitted', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drain = relayed({ action: 'drain', text: DRAIN_TURN, draining: true })
+    const world: World = { config: RELAY, autocompact: false, policy: [decision({ relay: true }), drain] }
+    const h = host(on, world)
+    await started($, clock)
+    await turn($, 't1', 'do the work', 'done')
+    await measured($, 152_000)
+    let release = () => {}
+    world.hold = new Promise<void>(r => (release = r))
+    await clock.advance(2_000)
+    await typed($)
+    release()
+    world.hold = undefined
+    await clock.advance(2_000)
+    expect(policyChecks(h)[1]?.slice(-4)).toEqual(['--fill', '152000', '--window', '200000'])
+    expect(h.submitted).toEqual([])
+  })
+
+  test('once the context falls under the drain point while draining, attend hears the fill once', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drain = relayed({ action: 'drain', text: DRAIN_TURN, draining: true })
+    const h = host(on, { config: RELAY, autocompact: false, policy: [decision({ relay: true }), drain, decision({ relay: true })] })
+    await started($, clock)
+    await turn($, 't1', 'do the work', 'done')
+    await measured($, 152_000)
+    await clock.advance(2_000)
+    expect(h.submitted).toEqual([DRAIN_TURN])
+    await measured($, undefined)
+    await turn($, 't2', 'after the compaction', 'done')
+    await measured($, 40_000)
+    await clock.advance(2_000)
+    expect(policyChecks(h)[2]?.slice(-4)).toEqual(['--fill', '40000', '--window', '200000'])
+    await turn($, 't3', 'more', 'done')
+    await measured($, 45_000)
+    await clock.advance(2_000)
+    expect(policyChecks(h).length).toBe(3)
   })
 
   test('the wrap\'s marker goes to attend; attend\'s compact compacts with the handoff and then the resume goes in', async ($, on) => {
@@ -3036,12 +3103,23 @@ describe('relay mode', () => {
     expect(relayStopOf('x\nrelay: stop decision which database')).toEqual({ reason: 'decision', detail: 'which database' })
     expect(relayStopOf(`relay: stop empty tasks=0 goal=none wrap=${ID} head=e6bbfbdd`)).toBeUndefined()
     expect(relayStopOf('relay: stop maybe')).toBeUndefined()
-    const c = parseConfig(configJson({ 'continuity.relay': 'on', 'continuity.relay_at_pct': 60 }))
-    expect([c.relay, c.relayAtPct]).toEqual([true, 60])
+    const c = parseConfig(configJson({ 'continuity.relay': 'on', 'continuity.relay_at_pct': 60, 'continuity.hard_at_pct': 90 }))
+    expect([c.relay, c.relayAtPct, c.hardAtPct]).toEqual([true, 60, 90])
     expect(parseConfig(configJson({ 'continuity.relay': 'yes' })).relay).toBe(false)
-    expect(relayAtTokens(DEFAULT_CONFIG, 1_000_000, 'off')).toBe(750_000)
-    expect(relayAtTokens(DEFAULT_CONFIG, 1_000_000, 'on', 700_000)).toBe(650_000)
-    expect(relayAtTokens(DEFAULT_CONFIG, 1_000_000, 'off', 700_000)).toBe(750_000)
+    expect(DEFAULT_CONFIG.hardAtPct).toBe(85)
+    expect(drainAtTokens(DEFAULT_CONFIG, 1_000_000, 'off')).toBe(750_000)
+    expect(drainAtTokens(DEFAULT_CONFIG, 1_000_000, 'on', 880_000)).toBe(750_000)
+    expect(drainAtTokens(DEFAULT_CONFIG, 1_000_000, 'on', 770_000)).toBe(720_000)
+    expect(drainAtTokens(DEFAULT_CONFIG, 1_000_000, 'off', 770_000)).toBe(750_000)
+    expect(drainAtTokens({ ...DEFAULT_CONFIG, hardAtPct: 70 }, 1_000_000, 'off')).toBe(700_000)
+    const drain = parseKeepaliveDecision(relayed({ action: 'drain', text: DRAIN_TURN, draining: true, drain_at_tokens: 750_000, hard_at_tokens: 850_000 }))!
+    expect([drain.action, drain.draining, drain.drainAtTokens, drain.hardAtTokens]).toEqual(['drain', true, 750_000, 850_000])
+    expect(planCheck(drain, false).submit).toEqual({ kind: 'drain', text: DRAIN_TURN, route: null })
+    const dk = keepaliveRowOf(drain, null)!
+    expect(keepaliveSegment(dk, T0)).toBe('⟳ draining')
+    expect(keepaliveSegment(keepaliveRowOf(parseKeepaliveDecision(relayed({ state: 'resumed', relay_count: 2, draining: true }))!, null)!, T0)).toBe('⟳ relay 2/5 · draining')
+    expect(keepaliveSegment(rowAfterPrompt(dk)!, T0)).toBe('⟳ draining')
+    expect(keepaliveSegment(rowAfterResume(dk, 1, 5)!, T0)).toBe('⟳ relay 1/5')
     expect(nativeThresholdFrom({ context: { breakdown: { isAutoCompactEnabled: true, autoCompactThreshold: 167_000 } } })).toBe(167_000)
     expect(nativeThresholdFrom({ context: { breakdown: { isAutoCompactEnabled: false } } })).toBeUndefined()
     expect(policyArgv('off', { names: ['wrap'], isPartial: false }, false, { tokens: 1, window: 2 })).toEqual([

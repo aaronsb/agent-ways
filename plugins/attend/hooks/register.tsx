@@ -65,7 +65,7 @@ import {
   goalArgv,
   isOpenChannel,
   nativeThresholdFrom,
-  relayAtTokens,
+  drainAtTokens,
   relayMarkerOf,
   relayStopOf,
   resumedArgv,
@@ -967,7 +967,8 @@ async function checkKeepalive($: $, mod: Mod) {
     // References:
     // - ADR-417 item 2: with relay on, the gate ignores autocompact.
     if (!isListening && gate !== 'off' && !ka.relay) return
-    // The fill a turn's end left past relay's threshold, judged once.
+    // The fill a turn's end left past the drain point, or under it while
+    // the session drains, judged once.
     const due = ka.fillDue
     ka.fillDue = undefined
     const fill: Fill | undefined = due && { tokens: due.tokens, window: due.window, nativeAt: gate === 'on' ? ka.nativeAt : undefined }
@@ -988,6 +989,7 @@ async function checkKeepalive($: $, mod: Mod) {
     ka.retries = 0
     // attend read the relay setting for this check: it governs what follows.
     ka.relay = d.relay
+    ka.isDraining = d.draining
     await setKeepaliveRow($, k => keepaliveRowOf(d, k))
     // A relay that stopped hands the reply to the operator, once.
     if (d.sendHandoff && d.wrap) await sendRelayHandoff($, ka, d.wrap, d.text)
@@ -1340,6 +1342,7 @@ export const register: Register = on => {
       wrap: undefined,
       nativeAt: undefined,
       fillDue: undefined,
+      isDraining: false,
       isRelayPending: false,
       relayReply: undefined,
       operatorEpoch: 0,
@@ -1437,17 +1440,25 @@ export const register: Register = on => {
     const before = mod.contextTokens
     mod.contextTokens = e.context.tokens
     if (isContextReset(before, e.context.tokens)) await markCompacted($)
-    // Relay's fill path: a turn's end past the threshold asks attend, once
-    // no turn runs. The native threshold may lower it, so the mod asks
-    // wherever attend could find it past.
+    // Relay's fill path: a turn's end past the drain point asks attend,
+    // once no turn runs, which judges the drain and the hard line. The
+    // native threshold may lower the drain point, so the mod asks wherever
+    // attend could find it past. A turn's end under the drain point while
+    // the session drains asks attend once, which ends the drain: the
+    // context was compacted or cleared.
     //
     // References:
-    // - ADR-417 item 2a: a context fill past the threshold starts a wrap.
+    // - ADR-418 item 14: a fill at the drain point drains, and one at the
+    //   hard line wraps.
     const { tokens, window } = e.context
     const ka = mod.ka
-    if (ka.applies && ka.relay && tokens !== undefined && window > 0 && tokens >= relayAtTokens(mod.config, window, 'on', ka.nativeAt)) {
-      ka.fillDue = { tokens, window }
-      if (mod.running.size === 0) await armKeepalive($, mod, (await $.clock.now()) + RELAY_CHECK_MS)
+    if (ka.applies && ka.relay && tokens !== undefined && window > 0) {
+      const isPast = tokens >= drainAtTokens(mod.config, window, 'on', ka.nativeAt)
+      if (isPast || ka.isDraining) {
+        ka.fillDue = { tokens, window }
+        if (!isPast) ka.isDraining = false
+        if (mod.running.size === 0) await armKeepalive($, mod, (await $.clock.now()) + RELAY_CHECK_MS)
+      }
     }
     return next(e)
   })

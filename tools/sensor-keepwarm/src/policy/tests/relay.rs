@@ -12,16 +12,16 @@
 
 use super::*;
 
-const WINDOW: u64 = 1_000_000;
+pub(super) const WINDOW: u64 = 1_000_000;
 const HANDOFF: &str = "/work/agent-ways/.claude/handoff.wrap.md";
 
-fn relay() -> Config {
+pub(super) fn relay() -> Config {
     let mut c = cfg();
     c.relay = true;
     c
 }
 
-fn filled(mut c: Config, tokens: u64) -> Config {
+pub(super) fn filled(mut c: Config, tokens: u64) -> Config {
     c.fill = Some(Fill { tokens, window: WINDOW, native_at: None });
     c
 }
@@ -40,7 +40,7 @@ fn site_with(id: Option<&str>) -> Site {
 }
 
 impl Session {
-    fn check_at(&mut self, cfg: &Config, gate: Gate, site: &Site, now: u64) -> Decision {
+    pub(super) fn check_at(&mut self, cfg: &Config, gate: Gate, site: &Site, now: u64) -> Decision {
         let r = self.reading();
         let ledger = self.state.ledger(now);
         let text = serde_json::to_string(&ledger).unwrap();
@@ -62,9 +62,9 @@ fn marker(stop: Option<&str>, goal: &str, id: &str) -> String {
     format!("relay: {head} tasks=2 goal={goal} wrap={id} head=e6bbfbdd")
 }
 
-/// A fill wrap sent at 10:00 and the id its text issued.
+/// A fill wrap sent at the hard line and the id its text issued.
 fn fill_wrap(s: &mut Session, now: u64) -> (Decision, String) {
-    let d = s.check_at(&filled(relay(), 760_000), Gate::Off, &site(), now);
+    let d = s.check_at(&filled(relay(), 860_000), Gate::Off, &site(), now);
     assert_eq!(d.action, Action::Wrap, "{d:?}");
     let id = d.wrap_id.clone().expect("a relay wrap carries its id");
     (d, id)
@@ -116,37 +116,23 @@ fn the_relay_settings_are_read_and_held_to_their_ranges() {
 }
 
 #[test]
-fn the_fill_threshold_sits_under_autocompact_s_when_that_is_lower() {
-    let mut c = filled(relay(), 0);
-    assert_eq!(c.relay_at_tokens(Gate::Off), Some(750_000));
-    c.fill = Some(Fill { tokens: 0, window: WINDOW, native_at: Some(700_000) });
-    assert_eq!(c.relay_at_tokens(Gate::On), Some(650_000), "five points of the window under the native threshold");
-    assert_eq!(c.relay_at_tokens(Gate::Off), Some(750_000), "with autocompact off its threshold does not apply");
-    c.fill = Some(Fill { tokens: 0, window: WINDOW, native_at: Some(950_000) });
-    assert_eq!(c.relay_at_tokens(Gate::On), Some(750_000), "relay_at_pct when it is lower");
-    let mut off = c.clone();
-    off.relay = false;
-    assert_eq!(off.relay_at_tokens(Gate::Off), None);
-}
-
-#[test]
-fn a_fill_past_the_threshold_sends_one_relay_wrap_naming_its_id() {
+fn a_fill_past_the_hard_line_sends_one_relay_wrap_naming_its_id() {
     let mut s = Session::new(MONDAY, 700_000);
     let below = s.check_at(&filled(relay(), 740_000), Gate::Off, &site(), MONDAY + MIN);
     assert_eq!(below.action, Action::None);
-    assert_eq!(below.relay_at_tokens, Some(750_000));
+    assert_eq!((below.relay_at_tokens, below.hard_at_tokens), (Some(750_000), Some(850_000)));
     let (d, id) = fill_wrap(&mut s, MONDAY + 2 * MIN);
     assert_eq!(id, "20261012T000200Z-sid1");
     let text = d.text.unwrap();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("wrap: context at 76% (760k of 1M), past the relay threshold of 75%."));
+    assert_eq!(lines.next(), Some("wrap: context at 86% (860k of 1M), past the hard line of 85%."));
     assert!(text.contains(&format!("This wrap is in relay mode with wrap id {id}: write wrap={id} on the handoff's first line and end your reply with the relay marker.")), "{text}");
     assert!(text.contains("Run the wrap skill with the argument stay"), "{text}");
     assert_eq!(d.wrap.as_ref().unwrap().after, "relay");
     assert_eq!((s.state.policy.trigger.as_deref(), s.state.policy.last_wrap_id.as_deref()), (Some("fill"), Some(id.as_str())));
     // One fill wrap per generation.
     s.turn(MONDAY + 3 * MIN);
-    let again = s.check_at(&filled(relay(), 800_000), Gate::Off, &site(), MONDAY + 4 * MIN);
+    let again = s.check_at(&filled(relay(), 900_000), Gate::Off, &site(), MONDAY + 4 * MIN);
     assert_eq!((again.action, again.state), (Action::None, "wrapped"));
 }
 
@@ -155,7 +141,7 @@ fn relay_off_has_no_fill_path() {
     let mut s = Session::new(MONDAY, 700_000);
     let d = s.check_at(&filled(cfg(), 900_000), Gate::Off, &site(), MONDAY + MIN);
     assert_eq!(d.action, Action::None);
-    assert_eq!(d.relay_at_tokens, None);
+    assert_eq!((d.relay_at_tokens, d.hard_at_tokens), (None, None));
 }
 
 #[test]
@@ -456,7 +442,7 @@ fn with_keepalive_off_relay_runs_only_its_fill_path() {
     let d = s.check_at(&c, Gate::Off, &site(), MONDAY + 50 * MIN);
     assert_eq!((d.action, d.policy), (Action::None, true));
     assert_eq!(d.reason, "mods.attend.continuity.keepalive is false, so only relay's fill path runs");
-    let d = s.check_at(&filled(c, 800_000), Gate::Off, &site(), MONDAY + 51 * MIN);
+    let d = s.check_at(&filled(c, 860_000), Gate::Off, &site(), MONDAY + 51 * MIN);
     assert_eq!(d.action, Action::Wrap);
 }
 
@@ -495,7 +481,7 @@ fn the_card_names_the_mode_the_count_and_a_stop() {
     s.check_at(&cfg(), Gate::Off, &site(), MONDAY + MIN);
     assert_eq!(last(&s, &cfg()), "relay       off: a wrap ends with a /compact line for the operator (handoff mode)");
     s.state.policy.relays = 2;
-    assert_eq!(last(&s, &relay()), "relay       on · 2 of 5 since your prompt at 00:00 · wraps at 75% of the window");
+    assert_eq!(last(&s, &relay()), "relay       on · 2 of 5 since your prompt at 00:00 · drains at 75% and wraps mid-work at 85% of the window");
     stop_relay(&mut s.state.policy, "decision", "the wrap reported stop decision: the next step needs a decision only the operator can make");
     assert_eq!(
         last(&s, &relay()),

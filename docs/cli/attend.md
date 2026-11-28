@@ -630,9 +630,9 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 * `--skills <SKILLS>` — The skills the session lists, comma-separated, as the host read them. The wrap and the compaction after it run only when mods.attend.continuity.wrap_skill names one of them. Absent, as from a host that predates the flag, the wrap is not held to a listing
 * `--skills-unread` — The host could not read the session's skills: no wrap or compaction
 * `--skills-partial` — The --skills listing was cut short by the host's budget: a skill missing from it is not held against the wrap
-* `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window sends a wrap
+* `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window starts the drain with one drain turn, a fill past mods.attend.continuity.hard_at_pct sends a wrap, and a fill under the drain point ends the drain
 * `--window <WINDOW>` — The model's whole context window, in tokens
-* `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the fill path wraps five points of the window under it where that is lower
+* `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the hard line sits five points of the window under it where that is lower
 
 
 

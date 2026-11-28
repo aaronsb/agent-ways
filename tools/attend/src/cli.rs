@@ -818,14 +818,16 @@ pub struct KeepwarmCheckArgs {
     pub skills_partial: bool,
     /// The context's tokens at a main-loop turn's end, for relay's fill
     /// path: with relay on, a fill past
-    /// mods.attend.continuity.relay_at_pct of --window sends a wrap
+    /// mods.attend.continuity.relay_at_pct of --window starts the drain
+    /// with one drain turn, a fill past mods.attend.continuity.hard_at_pct
+    /// sends a wrap, and a fill under the drain point ends the drain
     #[arg(long, requires_all = ["policy", "window"])]
     pub fill: Option<u64>,
     /// The model's whole context window, in tokens
     #[arg(long, requires = "fill")]
     pub window: Option<u64>,
     /// Claude Code's own autocompact threshold, in tokens; with autocompact
-    /// on, the fill path wraps five points of the window under it where
+    /// on, the hard line sits five points of the window under it where
     /// that is lower
     #[arg(long, requires = "fill")]
     pub native_at: Option<u64>,

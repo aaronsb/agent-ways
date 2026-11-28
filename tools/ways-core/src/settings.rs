@@ -585,7 +585,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Choice(&["on", "off"]),
         default: DefaultValue::Yaml("off"),
         doc: "What follows a wrap: off ends it with a /compact line for the operator; on compacts and resumes the work.",
-        long: "off is handoff mode, wrap as it was: the wrap ends with a /compact <focus> line, and the idle path's wrap is followed by after_wrap. on is relay mode: the attend mod asks for a wrap when the context reaches relay_at_pct, compacts the conversation with the wrap's handoff, and submits a turn that reads .claude/handoff.wrap.md and starts its DO NEXT, up to max_relays times since the operator's last prompt. The agent stops the relay in its wrap's closing marker when no work is left, a decision only the operator can make is next, or its doubt is high, and the handoff then goes to the operator over attend. Relay starts turns nobody watches and spends tokens, so it is off unless set. It is its own setting, not Claude Code's autocompact switch; the project's value wins over the user's.",
+        long: "off is handoff mode, wrap as it was: the wrap ends with a /compact <focus> line, and the idle path's wrap is followed by after_wrap. on is relay mode: from relay_at_pct the session drains and wraps at its next boundary, and at hard_at_pct the attend mod asks for a wrap mid-work. After a wrap the mod compacts the conversation with the wrap's handoff and submits a turn that reads .claude/handoff.wrap.md and starts its DO NEXT, up to max_relays times since the operator's last prompt. The agent stops the relay in its wrap's closing marker when no work is left, a decision only the operator can make is next, or its doubt is high, and the handoff then goes to the operator over attend. Relay starts turns nobody watches and spends tokens, so it is off unless set. It is its own setting, not Claude Code's autocompact switch; the project's value wins over the user's.",
         ..BASE
     },
     KeySpec {
@@ -594,8 +594,18 @@ const KEYS: &[KeySpec] = &[
         path: &["mods", "attend", "continuity", "relay_at_pct"],
         kind: Kind::Int { min: 50, max: 95 },
         default: DefaultValue::Yaml("75"),
-        doc: "The context fill, in percent of the model's window, at which relay mode asks for a wrap.",
-        long: "Judged at each main-loop turn's end. 75 leaves a quarter of the window for the wrap to read state and write a dense handoff, below the 85% at which the compaction-checkpoint way fires. With Claude Code's autocompact on, the trigger is lowered to five points of the window under its threshold where that is lower, so the relay's wrap comes first.",
+        doc: "The context fill, in percent of the model's window, at which relay mode starts the drain.",
+        long: "Judged at each main-loop turn's end. At this fill the attend mod submits one drain: turn, and the agent starts nothing new, finishes the work in flight, collects its agents' reports and wraps at the next boundary, where a piece of work lands. The mod submits no wrap here. Where hard_at_pct, after its lowering under Claude Code's autocompact, is not above this value, the drain point is the hard line and no drain runs.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.attend.continuity.hard_at_pct",
+        section: "mods",
+        path: &["mods", "attend", "continuity", "hard_at_pct"],
+        kind: Kind::Int { min: 55, max: 95 },
+        default: DefaultValue::Yaml("85"),
+        doc: "The context fill, in percent of the model's window, at which relay mode wraps mid-work.",
+        long: "Judged at each main-loop turn's end. At this fill the attend mod submits the relay's wrap whatever the work is doing, then compacts with the handoff and resumes. It sits above relay_at_pct, and `ways settings lint` reports a value that is not. With Claude Code's autocompact on, the hard line is lowered to five points of the window under Claude Code's own threshold where that is lower, so the wrap has room to run before Claude Code compacts on its own; the drain and wrap turns then name the lowered line.",
         ..BASE
     },
     KeySpec {
@@ -1030,8 +1040,31 @@ pub const SCREENS_WRITE_PROJECT: &[&str] = &[
     "mods.attend.continuity.wrap_skill",
     "mods.attend.continuity.relay",
     "mods.attend.continuity.relay_at_pct",
+    "mods.attend.continuity.hard_at_pct",
     "mods.attend.continuity.max_relays",
 ];
+
+/// The continuity findings that relate two keys, which no single key's
+/// check sees: a `hard_at_pct` not above the effective `relay_at_pct`. The
+/// value loads, and relay mode then runs with no drain, so each is a
+/// warning, named in the file that sets `hard_at_pct`, or else in the one
+/// that sets `relay_at_pct`.
+///
+/// References:
+/// - ADR-418 item 2: hard_at_pct sits above relay_at_pct.
+pub fn continuity_findings(layers: &[Layer]) -> Vec<String> {
+    let at = |name: &str| SCHEMA.keys.iter().find(|k| k.name == name).map(|spec| agent_settings::load::resolve(spec, &[], layers));
+    let (Some(hard), Some(relay)) = (at("mods.attend.continuity.hard_at_pct"), at("mods.attend.continuity.relay_at_pct")) else {
+        return Vec::new();
+    };
+    let pct = |r: &agent_settings::load::Resolved| r.value.clone().or_else(|| r.default.clone()).and_then(|v| v.as_u64());
+    let (Some(h), Some(r)) = (pct(&hard), pct(&relay)) else { return Vec::new() };
+    if h > r {
+        return Vec::new();
+    }
+    let file = hard.layer.or(relay.layer).and_then(|i| layers.get(i)).and_then(|l| l.path.as_ref()).map_or_else(|| "<defaults>".to_string(), |p| p.display().to_string());
+    vec![format!("{file}: [mods] {}: warning: {h} is not above relay_at_pct ({r}), so the hard line is the drain point and no drain runs", hard.name)]
+}
 
 /// Whether the mod `name` (an entry of [`MODS`]) is wanted in a target
 /// (ADR-512 item 1): `mods.<name>.install` from the user file, then the
@@ -1235,6 +1268,30 @@ mod tests {
         for (key, bad) in [("relay_at_pct", "49"), ("relay_at_pct", "96"), ("max_relays", "51"), ("relay", "yes")] {
             let l = layer("user", LayerScope::User, &format!("mods:\n  attend:\n    continuity:\n      {key}: {bad}\n"));
             assert!(l.findings.iter().any(|f| f.fallback), "{key}: {bad} should fail: {:?}", l.findings);
+        }
+    }
+
+    /// A hard line not above the drain point loads, and the lint names it
+    /// against the effective relay_at_pct, whichever file sets each.
+    ///
+    /// References:
+    /// - ADR-418 item 2: hard_at_pct sits above relay_at_pct.
+    #[test]
+    fn a_hard_line_not_above_the_drain_point_is_a_lint_finding() {
+        assert_eq!(resolved("mods.attend.continuity.hard_at_pct", &[]), Some(Value::Number(85.into())));
+        assert!(continuity_findings(&[]).is_empty());
+        let user = layer("user", LayerScope::User, "mods:\n  attend:\n    continuity:\n      hard_at_pct: 70\n");
+        assert!(user.findings.is_empty(), "70 is in range: {:?}", user.findings);
+        let f = continuity_findings(std::slice::from_ref(&user));
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert!(f[0].ends_with("[mods] mods.attend.continuity.hard_at_pct: warning: 70 is not above relay_at_pct (75), so the hard line is the drain point and no drain runs"), "{}", f[0]);
+        let project = layer("project", LayerScope::Project, "mods:\n  attend:\n    continuity:\n      relay_at_pct: 65\n");
+        assert!(continuity_findings(&[user.clone(), project]).is_empty(), "the project's relay_at_pct is the effective one");
+        let project = layer("project", LayerScope::Project, "mods:\n  attend:\n    continuity:\n      relay_at_pct: 90\n");
+        assert_eq!(continuity_findings(&[project]).len(), 1, "against the default hard line");
+        for bad in ["54", "96"] {
+            let l = layer("user", LayerScope::User, &format!("mods:\n  attend:\n    continuity:\n      hard_at_pct: {bad}\n"));
+            assert!(l.findings.iter().any(|f| f.fallback), "{bad} should fail: {:?}", l.findings);
         }
     }
 
