@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1120" height="580" viewBox="0 0 1120 580" font-family="DejaVu Sans, Arial, sans-serif">
-<rect width="1120" height="580" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1350" height="710" viewBox="0 0 1350 710" font-family="DejaVu Sans, Arial, sans-serif">
+<rect width="1350" height="710" fill="#ffffff"/>
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#222"/></marker><marker id="ahn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0d7a6b"/></marker></defs>
 <text x="18" y="28" font-size="16" fill="#222">The states a session moves through at a work boundary</text>
+<text x="18" y="48" font-size="12" fill="#555">Drawn with relay on, as built; the inset gives relay off. The edges out of the judge are the moves the mod carries out.</text>
 <line x1="30" y1="80" x2="70" y2="80" stroke="#0d7a6b" stroke-width="2"/>
 <text x="80" y="84" font-size="12" fill="#222">new in this record</text>
 <line x1="250" y1="80" x2="290" y2="80" stroke="#222" stroke-width="1.4"/>
@@ -12,46 +13,97 @@
 <text x="52" y="105" font-size="12" fill="#222">new state</text>
 <rect x="140" y="96" width="14" height="10" fill="#ffffff" stroke="#222" stroke-width="1.4"/>
 <text x="162" y="105" font-size="12" fill="#222">state that exists today</text>
-<rect x="30" y="278" width="170" height="64" fill="#ffffff" stroke="#222" stroke-width="1.4" rx="8"/>
-<text x="115.0" y="304" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Working</text>
-<text x="115.0" y="323" font-size="11.5" fill="#555" text-anchor="middle">tasks in flight</text>
-<rect x="260" y="278" width="170" height="64" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
-<text x="345.0" y="304" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Boundary</text>
-<text x="345.0" y="323" font-size="11.5" fill="#555" text-anchor="middle">a piece of work landed</text>
-<rect x="490" y="278" width="170" height="64" fill="#ffffff" stroke="#222" stroke-width="1.4" rx="8"/>
-<text x="575" y="299" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Wrap, then judge</text>
-<text x="575" y="317" font-size="11.5" fill="#555" text-anchor="middle">handoff written; a clean</text>
-<text x="575" y="332" font-size="11.5" fill="#555" text-anchor="middle">model call decides</text>
-<rect x="710" y="138" width="170" height="64" fill="#ffffff" stroke="#222" stroke-width="1.4" rx="8"/>
-<text x="795.0" y="164" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Compacting</text>
-<text x="795.0" y="183" font-size="11.5" fill="#555" text-anchor="middle">compact with the handoff</text>
-<rect x="710" y="418" width="170" height="64" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
-<text x="795.0" y="444" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Armed exit</text>
-<text x="795.0" y="463" font-size="11.5" fill="#555" text-anchor="middle">warm while it pays</text>
-<rect x="920" y="418" width="180" height="64" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
-<text x="1010.0" y="444" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Finished</text>
-<text x="1010.0" y="463" font-size="11.5" fill="#555" text-anchor="middle">cache lapsed, transcript kept</text>
-<path d="M 200 310 H 256" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
-<text x="230" y="300" font-size="12" fill="#222" text-anchor="middle">done</text>
-<path d="M 430 310 H 486" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
-<text x="460" y="300" font-size="12" fill="#222" text-anchor="middle">tool</text>
-<path d="M 165 278 V 246 H 560 V 274" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
-<text x="362" y="238" font-size="12" fill="#222" text-anchor="middle">85% with no boundary yet: wrap mid-work</text>
-<path d="M 710 170 H 80 V 274" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
-<text x="400" y="162" font-size="12" fill="#222" text-anchor="middle">resume turn, tasks remain</text>
-<path d="M 660 294 L 712 206" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
-<text x="676" y="246" font-size="12" fill="#222" text-anchor="end">compact</text>
-<path d="M 660 326 L 712 414" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
-<text x="680" y="384" font-size="12" fill="#222" text-anchor="end">stop</text>
-<path d="M 575 342 V 382 H 150 V 346" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
-<text x="362" y="374" font-size="12" fill="#222" text-anchor="middle">continue: the wrap stands as a checkpoint</text>
-<path d="M 795 202 V 414" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
-<text x="805" y="312" font-size="12" fill="#222">no tasks left: no resume</text>
-<path d="M 880 450 H 916" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
-<text x="900" y="390" font-size="12" fill="#222" text-anchor="middle">tick: nothing pending,</text>
-<text x="900" y="406" font-size="12" fill="#222" text-anchor="middle">or rent passes buy</text>
-<path d="M 770 482 V 528 H 115 V 346" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
-<text x="440" y="520" font-size="12" fill="#222" text-anchor="middle">operator prompt: disarms, cache still warm</text>
-<path d="M 1010 482 V 562 H 60 V 346" fill="none" stroke="#0d7a6b" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ahn)"/>
-<text x="530" y="554" font-size="12" fill="#222" text-anchor="middle">a new session reads the handoff, or claude --resume reloads this one cold</text>
+<!-- states -->
+<rect x="30" y="310" width="170" height="64" fill="#ffffff" stroke="#222" stroke-width="1.4" rx="8"/>
+<text x="115" y="336" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Working</text>
+<text x="115" y="355" font-size="11.5" fill="#555" text-anchor="middle">tasks in flight</text>
+<rect x="320" y="146" width="190" height="76" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
+<text x="415" y="170" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Draining</text>
+<text x="415" y="189" font-size="11.5" fill="#555" text-anchor="middle">starts nothing new and</text>
+<text x="415" y="204" font-size="11.5" fill="#555" text-anchor="middle">wraps at the next boundary</text>
+<rect x="320" y="290" width="190" height="104" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
+<text x="415" y="312" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">attend_boundary</text>
+<text x="415" y="331" font-size="11.5" fill="#555" text-anchor="middle">the mod refuses first:</text>
+<text x="415" y="347" font-size="11.5" fill="#555" text-anchor="middle">stop, with work in flight</text>
+<text x="415" y="363" font-size="11.5" fill="#555" text-anchor="middle">continue, in the drain</text>
+<text x="415" y="379" font-size="11.5" fill="#555" text-anchor="middle">compact, in an operator turn</text>
+<rect x="600" y="300" width="190" height="84" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
+<text x="695" y="323" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Judge</text>
+<text x="695" y="342" font-size="11.5" fill="#555" text-anchor="middle">a clean model call; the</text>
+<text x="695" y="357" font-size="11.5" fill="#555" text-anchor="middle">ledger keeps its verdict</text>
+<text x="695" y="372" font-size="11.5" fill="#555" text-anchor="middle">and the move carried out</text>
+<rect x="870" y="140" width="210" height="104" fill="#ffffff" stroke="#222" stroke-width="1.4" rx="8"/>
+<text x="975" y="162" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Compacting</text>
+<text x="975" y="181" font-size="11.5" fill="#555" text-anchor="middle">with the handoff, once</text>
+<text x="975" y="196" font-size="11.5" fill="#555" text-anchor="middle">the turn ends; another</text>
+<text x="975" y="211" font-size="11.5" fill="#555" text-anchor="middle">turn defers it, and an</text>
+<text x="975" y="226" font-size="11.5" fill="#555" text-anchor="middle">operator prompt cancels it</text>
+<rect x="870" y="466" width="210" height="104" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
+<text x="975" y="488" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Armed exit</text>
+<text x="975" y="507" font-size="11.5" fill="#555" text-anchor="middle">each tick pings while</text>
+<text x="975" y="522" font-size="11.5" fill="#555" text-anchor="middle">something is pending or the</text>
+<text x="975" y="537" font-size="11.5" fill="#555" text-anchor="middle">handoff holds detail, up to</text>
+<text x="975" y="552" font-size="11.5" fill="#555" text-anchor="middle">the rent-or-buy bound</text>
+<rect x="1140" y="466" width="190" height="104" fill="#ffffff" stroke="#0d7a6b" stroke-width="2" rx="8"/>
+<text x="1235" y="488" font-size="14" fill="#222" text-anchor="middle" font-weight="bold">Finished</text>
+<text x="1235" y="507" font-size="11.5" fill="#555" text-anchor="middle">cache lapsed; attend marks</text>
+<text x="1235" y="522" font-size="11.5" fill="#555" text-anchor="middle">a listening session finished;</text>
+<text x="1235" y="537" font-size="11.5" fill="#555" text-anchor="middle">the process runs on and</text>
+<text x="1235" y="552" font-size="11.5" fill="#555" text-anchor="middle">the transcript stays</text>
+<!-- relay off inset -->
+<rect x="1130" y="140" width="200" height="132" fill="#ffffff" stroke="#555" stroke-width="1.2" stroke-dasharray="3 3" rx="4"/>
+<text x="1144" y="161" font-size="12.5" fill="#222" font-weight="bold">With relay off</text>
+<text x="1144" y="180" font-size="11.5" fill="#555">a compact verdict is</text>
+<text x="1144" y="195" font-size="11.5" fill="#555">carried out as stop;</text>
+<text x="1144" y="210" font-size="11.5" fill="#555">a doubt stops and sends</text>
+<text x="1144" y="225" font-size="11.5" fill="#555">the handoff, uncompacted;</text>
+<text x="1144" y="240" font-size="11.5" fill="#555">no drain, no mid-work wrap.</text>
+<text x="1144" y="259" font-size="11.5" fill="#222">The mod compacts nothing.</text>
+<!-- the fill path -->
+<path d="M 150 310 V 184 H 316" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="235" y="160" font-size="12" fill="#222" text-anchor="middle">fill reaches</text>
+<text x="235" y="176" font-size="12" fill="#222" text-anchor="middle">relay_at_pct (75%)</text>
+<path d="M 415 222 V 286" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="425" y="258" font-size="12" fill="#222">the next boundary</text>
+<path d="M 510 184 H 866" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
+<text x="688" y="176" font-size="12" fill="#222" text-anchor="middle">hard_at_pct (85%): a mid-work wrap</text>
+<text x="688" y="200" font-size="12" fill="#222" text-anchor="middle">with the relay marker, not judged</text>
+<!-- into the tool and the judge -->
+<path d="M 200 342 H 316" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="258" y="318" font-size="12" fill="#222" text-anchor="middle">work lands:</text>
+<text x="258" y="334" font-size="12" fill="#222" text-anchor="middle">/wrap boundary</text>
+<path d="M 380 394 V 420 H 170 V 378" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="275" y="438" font-size="12" fill="#222" text-anchor="middle">refused: nothing judged or armed</text>
+<path d="M 510 342 H 596" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="553" y="334" font-size="12" fill="#222" text-anchor="middle">not refused</text>
+<!-- the verdicts -->
+<path d="M 680 384 V 460 H 120 V 378" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="410" y="478" font-size="12" fill="#222" text-anchor="middle">continue, or a stop or doubt that work in flight holds back:</text>
+<text x="410" y="494" font-size="12" fill="#222" text-anchor="middle">back to work, and the wrap stands as a checkpoint</text>
+<path d="M 760 300 L 866 216" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="788" y="236" font-size="12" fill="#222" text-anchor="end">compact under max_relays;</text>
+<text x="788" y="252" font-size="12" fill="#222" text-anchor="end">continue in the drain, too;</text>
+<text x="788" y="268" font-size="12" fill="#222" text-anchor="end">doubt, the operator away</text>
+<path d="M 740 384 V 518 H 866" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="858" y="538" font-size="12" fill="#222" text-anchor="end">stop; doubt in an operator turn;</text>
+<text x="858" y="554" font-size="12" fill="#222" text-anchor="end">compact at max_relays or</text>
+<text x="858" y="570" font-size="12" fill="#222" text-anchor="end">with the count unknown</text>
+<!-- after the compaction -->
+<path d="M 900 140 V 122 H 70 V 306" fill="none" stroke="#222" stroke-width="1.4" marker-end="url(#ah)"/>
+<text x="690" y="138" font-size="12" fill="#222" text-anchor="middle">resume while tasks remain: one relay toward max_relays</text>
+<path d="M 975 244 V 462" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="985" y="332" font-size="12" fill="#222">after a boundary: no tasks</text>
+<text x="985" y="348" font-size="12" fill="#222">left, a failure, or a doubt;</text>
+<text x="985" y="364" font-size="12" fill="#222">no resume</text>
+<!-- the exit -->
+<path d="M 1080 518 H 1136" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="1110" y="434" font-size="12" fill="#222" text-anchor="middle">a tick with no reason to stay,</text>
+<text x="1110" y="450" font-size="12" fill="#222" text-anchor="middle">or past the bound: no ping</text>
+<path d="M 920 570 V 610 H 70 V 378" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="480" y="603" font-size="12" fill="#222" text-anchor="middle">operator prompt: attend keepwarm reset disarms the exit; the cache is still warm</text>
+<path d="M 1200 570 V 640 H 50 V 378" fill="none" stroke="#0d7a6b" stroke-width="2" marker-end="url(#ahn)"/>
+<text x="560" y="633" font-size="12" fill="#222" text-anchor="middle">operator prompt: the reset clears the finished mark; the cache is cold</text>
+<path d="M 1300 570 V 664" fill="none" stroke="#0d7a6b" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ahn)"/>
+<text x="1330" y="686" font-size="12" fill="#222" text-anchor="end">a new session reads the handoff, or claude --resume reloads this one cold</text>
+<text x="30" y="686" font-size="12" fill="#555">Whether or not it compacts, a doubt arms the exit and sends the handoff over attend.</text>
 </svg>
