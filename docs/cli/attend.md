@@ -45,6 +45,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend keepwarm wrapped`↴](#attend-keepwarm-wrapped)
 * [`attend keepwarm compacted`↴](#attend-keepwarm-compacted)
 * [`attend keepwarm resumed`↴](#attend-keepwarm-resumed)
+* [`attend keepwarm drained`↴](#attend-keepwarm-drained)
 * [`attend keepwarm goal`↴](#attend-keepwarm-goal)
 * [`attend keepwarm stopped`↴](#attend-keepwarm-stopped)
 * [`attend keepwarm wrap-id`↴](#attend-keepwarm-wrap-id)
@@ -587,6 +588,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
 * `compacted` — Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends
 * `resumed` — Record that a relay's resume turn went in: the relay count goes up by one and the keepalive count starts again. The attend mod runs it once the compaction after a relay wrap has run
+* `drained` — Record that relay's drain turn went in, which starts this generation's drain: no further drain turn is offered until a compaction, a resume or a fill under the drain point ends it. The attend mod runs it once the drain turn has entered
 * `goal` — Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended
 * `stopped` — Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt
 * `wrap-id` — Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh
@@ -640,9 +642,9 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 * `--skills <SKILLS>` — The skills the session lists, comma-separated, as the host read them. The wrap and the compaction after it run only when mods.attend.continuity.wrap_skill names one of them. Absent, as from a host that predates the flag, the wrap is not held to a listing
 * `--skills-unread` — The host could not read the session's skills: no wrap or compaction
 * `--skills-partial` — The --skills listing was cut short by the host's budget: a skill missing from it is not held against the wrap
-* `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window sends a wrap
+* `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window starts the drain with one drain turn, a fill past mods.attend.continuity.hard_at_pct sends a wrap, and a fill under the drain point ends the drain
 * `--window <WINDOW>` — The model's whole context window, in tokens
-* `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the fill path wraps five points of the window under it where that is lower
+* `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the hard line sits five points of the window under it where that is lower
 
 
 
@@ -701,6 +703,14 @@ Record that a relay's resume turn went in: the relay count goes up by one and th
 ###### **Options:**
 
 * `--failed <FAILED>` — Why the resume did not go in, which stops the relay
+
+
+
+## `attend keepwarm drained`
+
+Record that relay's drain turn went in, which starts this generation's drain: no further drain turn is offered until a compaction, a resume or a fill under the drain point ends it. The attend mod runs it once the drain turn has entered
+
+**Usage:** `attend keepwarm drained`
 
 
 

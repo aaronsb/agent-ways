@@ -770,7 +770,7 @@ fn a_check_prunes_other_sessions_stale_files() {
     drop(held);
 }
 
-/// Relay mode through the CLI: a fill past the threshold sends a wrap
+/// Relay mode through the CLI: a fill past the hard line sends a wrap
 /// naming its id; the mod reports the wrap's marker; with the handoff the
 /// skill wrote, the check asks for a compaction with the handoff and a
 /// resume naming the file; `resumed` counts the relay; `wrap-id` gives the
@@ -794,10 +794,18 @@ fn a_relay_wraps_on_fill_compacts_with_the_handoff_and_resumes() {
     };
     let d = fill("700000");
     assert_eq!((d["action"].as_str(), d["relay"].as_bool(), d["relay_at_tokens"].as_u64()), (Some("none"), Some(true), Some(750_000)), "{d}");
-    let d = fill("760000");
+    // The drain is offered until the mod reports its turn went in.
+    for tokens in ["760000", "770000"] {
+        let d = fill(tokens);
+        assert_eq!((d["action"].as_str(), d["draining"].as_bool()), (Some("drain"), Some(true)), "{d}");
+    }
+    assert!(w.run(&["keepwarm", "drained"]).status.success());
+    let d = fill("780000");
+    assert_eq!((d["action"].as_str(), d["draining"].as_bool()), (Some("none"), Some(true)), "{d}");
+    let d = fill("860000");
     assert_eq!(d["action"], "wrap", "{d}");
     let id = d["wrap_id"].as_str().unwrap().to_string();
-    assert!(d["text"].as_str().unwrap().starts_with("wrap: context at 76% (760k of 1M), past the relay threshold of 75%.\n"), "{d}");
+    assert!(d["text"].as_str().unwrap().starts_with("wrap: context at 86% (860k of 1M), past the hard line of 85%.\n"), "{d}");
     assert_eq!(w.run(&["keepwarm", "wrap-id"]).stdout, format!("{id}\n").into_bytes());
     // The skill wrote the handoff with the id; the mod reports the marker.
     let handoff = std::path::Path::new(&w.f.origin).join(".claude").join("handoff.wrap.md");
@@ -829,8 +837,8 @@ fn relay_wrap_judged(w: &Warm, marker_head: &str) -> (String, PathBuf) {
     w.settings(r#"{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.relay":{"value":"on"}}"#);
     let init = std::process::Command::new("git").args(["init", "-q"]).current_dir(&w.f.origin).status().unwrap();
     assert!(init.success());
-    w.reading(&[(MIN, 760_000, 500)]);
-    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "off", "--skills", "wrap", "--fill", "760000", "--window", "1000000"]);
+    w.reading(&[(MIN, 860_000, 500)]);
+    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "off", "--skills", "wrap", "--fill", "860000", "--window", "1000000"]);
     let d: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(d["action"], "wrap", "{d}");
     let id = d["wrap_id"].as_str().unwrap().to_string();

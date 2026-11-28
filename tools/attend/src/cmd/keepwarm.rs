@@ -124,6 +124,11 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 std::process::exit(1);
             }
         }
+        KeepwarmCmd::Drained => {
+            if !update_policy(&dir, sid, |p| policy::drained(p, now)) {
+                std::process::exit(1);
+            }
+        }
         KeepwarmCmd::Goal { state } => {
             if !update_policy(&dir, sid, |p| policy::goal(p, state == "active")) {
                 std::process::exit(1);

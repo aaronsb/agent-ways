@@ -125,6 +125,12 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
             println!("{line}");
         }
     }
+    // The continuity keys that relate to each other, as the ways files
+    // combine; a warning leaves the exit alone.
+    let ways_layers: Vec<_> = layers.iter().filter(|l| l.file == ways_core::settings::FILE).cloned().collect();
+    for line in ways_core::settings::continuity_findings(&ways_layers) {
+        println!("{line}");
+    }
     // attend's sensor files (ADR-403), for the project, with one file alone
     // naming none of them.
     if file.is_none() {

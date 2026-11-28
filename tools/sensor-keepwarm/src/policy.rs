@@ -18,9 +18,11 @@
 //! handoff the mod compacts the conversation with it and submits a turn
 //! that resumes the work, up to `max_relays` times. A stop the agent
 //! reports, the cap, a stale handoff or an ended goal stops the relay.
-//! Relay also has a fill path: a wrap once the context reaches
-//! `relay_at_pct` of the window. Nothing more follows a stop until the
-//! operator prompts again.
+//! Relay also has a fill path. Once the context reaches `relay_at_pct` of
+//! the window the session drains: one `drain:` turn tells the agent to
+//! start nothing new and to wrap at the next boundary. Once it reaches
+//! `hard_at_pct` the policy wraps mid-work. Nothing more follows a stop
+//! until the operator prompts again.
 //!
 //! The judgment lives here; the attend mod supplies what only it can see
 //! (the operator's prompts, through [`reset`], the autocompact gate, the
@@ -31,6 +33,8 @@
 //! References:
 //! - ADR-414: the keepalive policy, which is the idle path here.
 //! - ADR-417: one continuity policy with a relay mode and a fill path.
+//! - ADR-418: the fill path drains from `relay_at_pct` and wraps mid-work
+//!   at `hard_at_pct`.
 
 use crate::windows::Windows;
 use crate::{
@@ -53,12 +57,20 @@ pub const MARGIN_RANGE: (u64, u64) = (3, 30);
 pub const DEFAULT_AFTER_MAX: u32 = 0;
 pub const AFTER_RANGE: (u32, u32) = (0, 48);
 /// `mods.attend.continuity.relay_at_pct`: the context fill, in percent of
-/// the window, at which relay mode asks for a wrap.
+/// the window, at which relay mode starts the drain.
 ///
 /// References:
-/// - ADR-417 item 2a: a context fill past the threshold starts a wrap.
+/// - ADR-418 item 2: the drain starts at `relay_at_pct`.
 pub const DEFAULT_RELAY_AT_PCT: u32 = 75;
 pub const RELAY_AT_RANGE: (u32, u32) = (50, 95);
+/// `mods.attend.continuity.hard_at_pct`: the context fill, in percent of
+/// the window, at which relay mode wraps mid-work. A value not above
+/// `relay_at_pct` leaves no drain band.
+///
+/// References:
+/// - ADR-418 item 2: the hard line, proposed at 85%.
+pub const DEFAULT_HARD_AT_PCT: u32 = 85;
+pub const HARD_AT_RANGE: (u32, u32) = (55, 95);
 /// `mods.attend.continuity.max_relays`: resumes since the operator's last
 /// prompt.
 ///
@@ -66,9 +78,12 @@ pub const RELAY_AT_RANGE: (u32, u32) = (50, 95);
 /// - ADR-417 item 5: the resumes are capped per operator prompt.
 pub const DEFAULT_MAX_RELAYS: u32 = 5;
 pub const MAX_RELAYS_RANGE: (u32, u32) = (0, 50);
-/// With Claude Code's autocompact on, the fill trigger sits this many
+/// With Claude Code's autocompact on, the hard line sits at least this many
 /// points of the window under its threshold, so the relay's wrap comes
-/// first.
+/// first and has room to run.
+///
+/// References:
+/// - ADR-418 item 14: the lowering moves from the drain point to the hard line.
 const NATIVE_MARGIN_PCT: u64 = 5;
 /// `mods.attend.continuity.wrap_skill`: the skill's name and its arguments.
 pub const DEFAULT_WRAP_SKILL: &str = "wrap stay";
@@ -218,6 +233,14 @@ pub struct Policy {
     /// marker reported it: `active` or `none`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<String>,
+    /// When this generation's drain started: the mod reported that the
+    /// drain turn went in. An operator prompt keeps it; a
+    /// compaction, a resume, or a fill under the drain point clears it.
+    ///
+    /// References:
+    /// - ADR-418 item 2: from the drain point the session starts nothing new.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drained_at: Option<u64>,
 }
 
 /// What the last check found of `wrap_skill` in the session's listing.
@@ -248,9 +271,10 @@ impl Policy {
 }
 
 /// The operator prompted (`attend keepwarm reset`): both counts start
-/// again, and a sent wrap and a stop are cleared. The last wrap's id and
-/// the goal stay: the PreCompact hook still checks the handoff against the
-/// id, and a prompt does not end a goal.
+/// again, and a sent wrap and a stop are cleared. The last wrap's id, the
+/// goal and the drain stay: the PreCompact hook still checks the handoff
+/// against the id, a prompt does not end a goal, and a prompt leaves the
+/// context as full as it was.
 pub fn reset(p: &mut Policy, now: u64) {
     *p = Policy {
         operator_at: Some(now),
@@ -258,6 +282,7 @@ pub fn reset(p: &mut Policy, now: u64) {
         last_wrap_id: p.last_wrap_id.take(),
         judged_wrap_id: p.judged_wrap_id.take(),
         goal: p.goal.take(),
+        drained_at: p.drained_at.take(),
         ..Policy::default()
     };
 }
@@ -327,15 +352,18 @@ pub fn wrapped(p: &mut Policy, outcome: WrapOutcome, line: String, focus: Option
 }
 
 /// `attend keepwarm compacted`: the compaction after the wrap ran, or why
-/// it failed. Only a wrapped stretch is compacted: a report that lands
-/// after the operator's prompt reset the ledger changes nothing. A relay
-/// compaction is recorded here and not when it is asked for, so one the
-/// mod deferred is asked for again. A relay compaction that failed stops
-/// the relay.
+/// it failed. A compaction that ran ends the drain. Otherwise only a
+/// wrapped stretch is compacted: a report that lands after the operator's
+/// prompt reset the ledger changes nothing. A relay compaction is recorded
+/// here and not when it is asked for, so one the mod deferred is asked for
+/// again. A relay compaction that failed stops the relay.
 ///
 /// References:
 /// - ADR-417 item 4: a compaction that is skipped or fails stops the relay.
 pub fn compacted(p: &mut Policy, failed: Option<String>, now: u64) {
+    if failed.is_none() {
+        p.drained_at = None;
+    }
     if p.wrapped_at.is_none() {
         return;
     }
@@ -620,7 +648,10 @@ pub struct Config {
     /// References:
     /// - ADR-417 item 1: the `relay` setting picks relay mode or handoff mode.
     pub relay: bool,
+    /// The drain point, in percent of the window.
     pub relay_at_pct: u32,
+    /// The hard line, in percent of the window.
+    pub hard_at_pct: u32,
     pub max_relays: u32,
     /// The skills the session lists, as the host read them. Not a setting:
     /// the caller fills it.
@@ -634,7 +665,8 @@ pub struct Config {
 /// `--native-at`), for relay's fill path.
 ///
 /// References:
-/// - ADR-417 item 2a: a context fill past the threshold starts a wrap.
+/// - ADR-418 item 14: a fill at the drain point drains, and one at the hard
+///   line wraps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Fill {
     pub tokens: u64,
@@ -643,6 +675,33 @@ pub struct Fill {
     /// Claude Code's own autocompact threshold in tokens, where the host
     /// read one.
     pub native_at: Option<u64>,
+}
+
+/// Relay's two fill lines for one fill, in tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Lines {
+    drain_at: u64,
+    hard_at: u64,
+    /// Claude Code's threshold, where it lowered the hard line.
+    native_at: Option<u64>,
+    window: u64,
+}
+
+impl Lines {
+    fn pct(&self, tokens: u64) -> u64 {
+        tokens * 100 / self.window.max(1)
+    }
+
+    /// `the hard line of 85%`, or where Claude Code's threshold lowered
+    /// it, `the hard line of 83%, five points under Claude Code's own
+    /// compaction at 88%`.
+    fn hard_line(&self) -> String {
+        let line = format!("the hard line of {}%", self.pct(self.hard_at));
+        match self.native_at {
+            Some(n) => format!("{line}, five points under Claude Code's own compaction at {}%", self.pct(n)),
+            None => line,
+        }
+    }
 }
 
 /// What the host said of the session's skills (`--skills`).
@@ -677,6 +736,7 @@ impl Default for Config {
             wrap_skill: WrapSkill::default(),
             relay: false,
             relay_at_pct: DEFAULT_RELAY_AT_PCT,
+            hard_at_pct: DEFAULT_HARD_AT_PCT,
             max_relays: DEFAULT_MAX_RELAYS,
             session_skills: SessionSkills::NotChecked,
             fill: None,
@@ -734,23 +794,41 @@ impl Config {
             wrap_skill: text("continuity.wrap_skill").map_or(d.wrap_skill, |s| WrapSkill::parse(&s)),
             relay: text("continuity.relay").as_deref() == Some("on"),
             relay_at_pct: ranged("continuity.relay_at_pct", RELAY_AT_RANGE, d.relay_at_pct),
+            hard_at_pct: ranged("continuity.hard_at_pct", HARD_AT_RANGE, d.hard_at_pct),
             max_relays: ranged("continuity.max_relays", MAX_RELAYS_RANGE, d.max_relays),
             session_skills: SessionSkills::NotChecked,
             fill: None,
         }
     }
 
-    /// The fill at which relay mode wraps: `relay_at_pct` of the window,
-    /// lowered with autocompact on to five points of the window under
-    /// Claude Code's own threshold where that is lower. `None` without a
-    /// fill or with relay off.
-    pub fn relay_at_tokens(&self, gate: Gate) -> Option<u64> {
+    /// Relay's fill lines for this config's fill; `None` without a fill or
+    /// with relay off.
+    fn lines(&self, gate: Gate) -> Option<Lines> {
         let f = self.fill.filter(|f| self.relay && f.window > 0)?;
-        let at = f.window * self.relay_at_pct as u64 / 100;
-        Some(match (gate, f.native_at) {
-            (Gate::On, Some(n)) if n > 0 => at.min(n.saturating_sub(f.window * NATIVE_MARGIN_PCT / 100)),
-            _ => at,
-        })
+        let pct = |p: u32| f.window * p as u64 / 100;
+        let hard = pct(self.hard_at_pct);
+        let under_native = match (gate, f.native_at) {
+            (Gate::On, Some(n)) if n > 0 => Some((n.saturating_sub(f.window * NATIVE_MARGIN_PCT / 100), n)),
+            _ => None,
+        };
+        let (hard_at, native_at) = match under_native {
+            Some((at, n)) if at < hard => (at, Some(n)),
+            _ => (hard, None),
+        };
+        Some(Lines { drain_at: pct(self.relay_at_pct).min(hard_at), hard_at, native_at, window: f.window })
+    }
+
+    /// The drain point: `relay_at_pct` of the window, or the hard line
+    /// where that is lower.
+    pub fn drain_at_tokens(&self, gate: Gate) -> Option<u64> {
+        self.lines(gate).map(|l| l.drain_at)
+    }
+
+    /// The hard line: `hard_at_pct` of the window, lowered with autocompact
+    /// on to five points of the window under Claude Code's own threshold
+    /// where that is lower.
+    pub fn hard_at_tokens(&self, gate: Gate) -> Option<u64> {
+        self.lines(gate).map(|l| l.hard_at)
     }
 
     /// Why no wrap follows the keepalives, or `None` when one does: `wrap`
@@ -1040,12 +1118,18 @@ pub fn route_notes(cfg: &Config, site: &Site, now: u64) -> Vec<String> {
     notes
 }
 
-/// `none`, `keepalive`, `wrap` or `compact`.
+/// `none`, `keepalive`, `drain`, `wrap` or `compact`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
     None,
     Keepalive,
+    /// Submit `text`, the `drain:` turn, between turns.
+    ///
+    /// References:
+    /// - ADR-418 item 14: at the drain point the mod tells the agent that
+    ///   the drain has started.
+    Drain,
     Wrap,
     /// Compact the conversation between turns; `text` is the focus, or in
     /// relay mode the handoff's instructions, and `resume` the turn to
@@ -1082,8 +1166,8 @@ pub struct WrapRoute {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Decision {
     pub action: Action,
-    /// The turn to submit, for `keepalive` and `wrap`; the compaction's
-    /// focus, for `compact`.
+    /// The turn to submit, for `keepalive`, `drain` and `wrap`; the
+    /// compaction's focus, for `compact`.
     pub text: Option<String>,
     /// When to ask again, in epoch seconds; `None` when nothing is due
     /// before the next main-loop turn.
@@ -1120,8 +1204,14 @@ pub struct Decision {
     /// Resumes since the operator's last prompt, of `max_relays`.
     pub relay_count: u32,
     pub max_relays: u32,
-    /// The fill at which relay mode wraps, where the host gave a fill.
+    /// The drain point, where the host gave a fill. Mods from before the
+    /// drain read it under this name.
     pub relay_at_tokens: Option<u64>,
+    /// The drain point and the hard line, where the host gave a fill.
+    pub drain_at_tokens: Option<u64>,
+    pub hard_at_tokens: Option<u64>,
+    /// This generation's drain has started.
+    pub draining: bool,
     /// With `compact`: the turn to submit once the compaction has run
     /// without a skip. `None` for a compaction that stops the relay.
     pub resume: Option<String>,
@@ -1171,6 +1261,9 @@ impl Decision {
             relay_count: p.relays,
             max_relays: cfg.max_relays,
             relay_at_tokens: None,
+            drain_at_tokens: None,
+            hard_at_tokens: None,
+            draining: cfg.relay && p.drained_at.is_some(),
             resume: None,
             relay_stop: p.relay_stop.clone(),
             send_handoff: false,
@@ -1313,11 +1406,16 @@ enum Cause {
     Bound,
     /// Outside the keepalive hours.
     Hours,
-    /// The context reached relay's threshold.
+    /// The context reached relay's hard line.
     ///
     /// References:
-    /// - ADR-417 item 2a: a context fill past the threshold starts a wrap.
-    Fill { tokens: u64, window: u64, at: u64 },
+    /// - ADR-418 item 14: the mod submits the mid-work wrap at the hard line.
+    Fill { tokens: u64, lines: Lines },
+}
+
+/// `context at 86% (860k of 1M)`.
+fn fill_text(tokens_now: u64, l: &Lines) -> String {
+    format!("context at {}% ({} of {})", l.pct(tokens_now), tokens(tokens_now), tokens(l.window))
 }
 
 /// `760k`, `1M`, `1.5M`.
@@ -1329,20 +1427,14 @@ fn tokens(n: u64) -> String {
 ///
 /// References:
 /// - ADR-414 item 6: the wrap turn the policy submits.
-/// - ADR-417 item 2: the fill threshold as one more reason for a wrap.
+/// - ADR-418 item 14: the hard line as one more reason for a wrap.
 fn wrap_text(cfg: &Config, site: &Site, p: &Policy, route: &WrapRoute, cause: Cause, now: u64) -> String {
     let since = p.since().map_or_else(|| "a long idle stretch".to_string(), |t| format!("{} since the operator's last prompt", fmt_duration(now.saturating_sub(t))));
     let first = match cause {
         Cause::Bound => format!("wrap: {since} and {} keepalives, the most this session allows.", p.count),
         Cause::Hours if cfg.windows.list.is_empty() => format!("wrap: {since}, and no keepalive hours are set."),
         Cause::Hours => format!("wrap: {since}, and the keepalive hours ({}) have ended.", cfg.windows.describe()),
-        Cause::Fill { tokens: t, window, at } => format!(
-            "wrap: context at {}% ({} of {}), past the relay threshold of {}%.",
-            t * 100 / window.max(1),
-            tokens(t),
-            tokens(window),
-            at * 100 / window.max(1),
-        ),
+        Cause::Fill { tokens: t, lines } => format!("wrap: {}, past {}.", fill_text(t, &lines), lines.hard_line()),
     };
     let after = match &p.wrap_id {
         Some(id) if p.relay => format!(
@@ -1429,6 +1521,43 @@ fn send_wrap(state: &mut State, cfg: &Config, site: &Site, cause: Cause, reason:
     d.text = Some(wrap_text(cfg, site, &p, &r, cause, now));
     d.wrap = Some(r);
     d
+}
+
+/// The `drain:` turn's text: its first line says how full the context is.
+///
+/// References:
+/// - ADR-418 item 2: during the drain the session starts nothing new,
+///   finishes the work in flight, and wraps at the next boundary.
+fn drain_text(cfg: &Config, t: u64, l: &Lines) -> String {
+    format!(
+        "drain: {}, past the drain point of {}%.\nThe drain has started: start nothing new, finish the work in flight and collect your agents' reports. {} at the next boundary, where a piece of work lands. The mod wraps mid-work at {}.",
+        fill_text(t, l),
+        l.pct(l.drain_at),
+        cfg.wrap_skill.ask(),
+        l.hard_line(),
+    )
+}
+
+/// Offers the drain: the decision that submits its turn. The drain is
+/// recorded once the mod reports that the turn went in ([`drained`]), so a
+/// turn a prompt overtook is offered again at the next check.
+fn offer_drain(state: &State, cfg: &Config, t: u64, l: &Lines) -> Decision {
+    let state_name = if state.policy.resumed_at.is_some() { "resumed" } else { "running" };
+    let mut d = Decision::new(cfg, &state.policy, true, state_name, "the context reached the drain point");
+    d.action = Action::Drain;
+    d.text = Some(drain_text(cfg, t, l));
+    d.draining = true;
+    d
+}
+
+/// `attend keepwarm drained`: the drain turn went in, so this generation's
+/// drain has started.
+///
+/// References:
+/// - ADR-418 item 14: at the drain point the mod tells the agent that the
+///   drain has started.
+pub fn drained(p: &mut Policy, now: u64) {
+    p.drained_at.get_or_insert(now);
 }
 
 /// The relay's judgment of a wrap that ran in relay mode, once the mod
@@ -1584,7 +1713,9 @@ fn hand(state: &mut State, cfg: &Config, site: &Site, compacts: bool, now: u64) 
 /// is.
 pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &Config, gate: Gate, site: &Site, now: u64) -> (Outcome, Decision) {
     let (mut out, mut d) = step_mode(state, reading, arm, &cfg.for_mode(), gate, site, now);
-    d.relay_at_tokens = cfg.relay_at_tokens(gate);
+    if let Some(l) = cfg.lines(gate) {
+        (d.relay_at_tokens, d.drain_at_tokens, d.hard_at_tokens) = (Some(l.drain_at), Some(l.drain_at), Some(l.hard_at));
+    }
     out.changed |= d.action != Action::None;
     (out, d)
 }
@@ -1647,19 +1778,30 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
     if let Some(d) = judge_relay(state, cfg, site, now) {
         return (out, d);
     }
-    // Relay's fill path: one wrap per generation, once the context reaches
-    // the threshold.
+    // Relay's fill path: one drain and one wrap per generation. A fill
+    // under the drain point means the context was compacted or cleared,
+    // which ends the drain.
     //
     // References:
-    // - ADR-417 item 2a: a context fill past the threshold starts a wrap.
-    let fill_at = cfg.relay_at_tokens(gate);
-    if let (Some(at), Some(f)) = (fill_at, cfg.fill) {
+    // - ADR-418 item 14: the drain at `relay_at_pct`, the mid-work wrap at
+    //   `hard_at_pct`.
+    if let (Some(l), Some(f)) = (cfg.lines(gate), cfg.fill) {
+        if f.tokens < l.drain_at {
+            state.policy.drained_at = None;
+        }
         let p = &state.policy;
-        if f.tokens >= at && p.wrapped_at.is_none() && p.stopped.is_none() && state.pinged_at.is_none() && cfg.no_wrap().is_none() {
-            let mut out = out;
-            out.changed = true;
-            let d = send_wrap(state, cfg, site, Cause::Fill { tokens: f.tokens, window: f.window, at }, "the context reached the relay threshold", now);
-            return (out, d);
+        let open = p.wrapped_at.is_none() && p.stopped.is_none() && state.pinged_at.is_none() && cfg.no_wrap().is_none();
+        let d = if !open {
+            None
+        } else if f.tokens >= l.hard_at {
+            Some(send_wrap(state, cfg, site, Cause::Fill { tokens: f.tokens, lines: l }, "the context reached the hard line", now))
+        } else if f.tokens >= l.drain_at && p.drained_at.is_none() {
+            Some(offer_drain(state, cfg, f.tokens, &l))
+        } else {
+            None
+        };
+        if let Some(d) = d {
+            return (Outcome { changed: true, ..out }, d);
         }
     }
     let p = state.policy.clone();
@@ -1882,8 +2024,8 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u6
     lines
 }
 
-/// The card's relay line: the mode, the count against the cap, the
-/// threshold, and where the relay stands or why it stopped.
+/// The card's relay line: the mode, the count against the cap, the drain
+/// point and the hard line, and where the relay stands or why it stopped.
 fn relay_line(p: &Policy, cfg: &Config) -> String {
     if !cfg.relay {
         return "relay       off: a wrap ends with a /compact line for the operator (handoff mode)".into();
@@ -1891,13 +2033,20 @@ fn relay_line(p: &Policy, cfg: &Config) -> String {
     if let (Some(_), Some(why)) = (&p.relay_stop, &p.stopped) {
         return format!("relay       stopped: {why}; your next prompt starts it again");
     }
-    let mut line = format!("relay       on · {} of {}{} · wraps at {}% of the window", p.relays, cfg.max_relays, since_text(p, cfg), cfg.relay_at_pct);
+    let mut line = format!("relay       on · {} of {}{} · ", p.relays, cfg.max_relays, since_text(p, cfg));
+    if cfg.hard_at_pct > cfg.relay_at_pct {
+        line.push_str(&format!("drains at {}% and wraps mid-work at {}% of the window", cfg.relay_at_pct, cfg.hard_at_pct));
+    } else {
+        line.push_str(&format!("wraps mid-work at {}% of the window, with no drain", cfg.hard_at_pct));
+    }
     if p.relay && p.compacted_at.is_some() {
         line.push_str(" · compacted, waiting for the resume");
     } else if let (true, Some(t)) = (p.relay, p.wrapped_at) {
         line.push_str(&format!(" · wrapped at {}, waiting for its answer", cfg.windows.hm(t)));
     } else if p.resumed_at.is_some() {
         line.push_str(" · the resume's turn has not started yet");
+    } else if p.drained_at.is_some() {
+        line.push_str(" · draining");
     }
     line
 }

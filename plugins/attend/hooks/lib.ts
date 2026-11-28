@@ -74,6 +74,13 @@ export const BEAT_ARGV = [ATTEND, 'listen', 'beat', '--mod', MOD_VERSION] as con
 export const PLAIN_BEAT_ARGV = [ATTEND, 'listen', 'beat'] as const
 export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
+/** The drain turn went in: attend records that this generation's drain
+ *  has started, and offers the turn again until it hears so.
+ *
+ *  References:
+ *  - ADR-418 item 14: at the drain point the mod tells the agent that the
+ *    drain has started. */
+export const DRAINED_ARGV = [ATTEND, 'keepwarm', 'drained'] as const
 /** The operator prompted at `atS` (epoch seconds): the keepalive count
  *  starts again (ADR-414 item 4). */
 export function resetArgv(atS: number): string[] {
@@ -302,12 +309,16 @@ export type Keepalive = {
   wrap: { route: WrapRoute; text: string; turnId: string | undefined; reply: string | undefined; sawTurn: boolean } | undefined
   /** Claude Code's autocompact threshold, read with the gate. */
   nativeAt: number | undefined
-  /** The context at the last main-loop turn's end, past relay's
-   *  threshold: attend is asked with it once no turn runs.
+  /** The context at the last main-loop turn's end, past the drain point,
+   *  or under it while attend last said the session drains: attend is
+   *  asked with it once no turn runs.
    *
    *  References:
-   *  - ADR-417 item 2a: a context fill past the threshold starts a wrap. */
+   *  - ADR-418 item 14: a fill at the drain point drains, and one at the
+   *    hard line wraps. */
   fillDue: Fill | undefined
+  /** attend's last decision said this generation's drain has started. */
+  isDraining: boolean
   /** A relay wrap's reply was reported and waits for attend's word: the
    *  next check judges it, and a turn that comes first defers it to that
    *  turn's end. */
@@ -464,9 +475,13 @@ export type ModConfig = {
   /** `mods.attend.continuity.relay` is `on`: a wrap is followed by a
    *  compaction and a resume, and the context fill can start one. */
   relay: boolean
-  /** `mods.attend.continuity.relay_at_pct`. attend judges the fill; the mod
-   *  uses it only to ask attend once a turn's end has passed it. */
+  /** `mods.attend.continuity.relay_at_pct`, the drain point. attend judges
+   *  the fill; the mod uses it only to ask attend once a turn's end has
+   *  passed the drain point. */
   relayAtPct: number
+  /** `mods.attend.continuity.hard_at_pct`, the hard line, which can lower
+   *  the drain point. */
+  hardAtPct: number
 }
 
 /** What the mod runs under when ways cannot answer. The keepalive policy
@@ -485,6 +500,7 @@ export const DEFAULT_CONFIG: ModConfig = {
   marginMinutes: 10,
   relay: false,
   relayAtPct: 75,
+  hardAtPct: 85,
 }
 
 /** The notice when `ways settings list mods.attend` exits non-zero: the mod
@@ -539,6 +555,7 @@ export function parseConfig(stdout: string): ModConfig {
     marginMinutes: num('continuity.margin_minutes', DEFAULT_CONFIG.marginMinutes),
     relay: v('continuity.relay') === 'on',
     relayAtPct: num('continuity.relay_at_pct', DEFAULT_CONFIG.relayAtPct),
+    hardAtPct: num('continuity.hard_at_pct', DEFAULT_CONFIG.hardAtPct),
   }
 }
 
@@ -594,12 +611,17 @@ export function nativeThresholdFrom(usage: unknown): number | undefined {
   return typeof t === 'number' && Number.isFinite(t) && t > 0 ? t : undefined
 }
 
-/** The fill at which relay mode wraps, as attend judges it: `relay_at_pct`
- *  of the window, lowered with autocompact on to five points of the
- *  window under its threshold where that is lower. */
-export function relayAtTokens(c: ModConfig, window: number, gate: Gate, nativeAt?: number): number {
-  const at = Math.floor((window * c.relayAtPct) / 100)
-  return gate === 'on' && nativeAt !== undefined ? Math.min(at, nativeAt - Math.floor(window * 0.05)) : at
+/** The drain point as attend judges it: `relay_at_pct` of the window, or
+ *  the hard line where that is lower. The hard line is `hard_at_pct` of
+ *  the window, lowered with autocompact on to five points of the window
+ *  under Claude Code's threshold where that is lower.
+ *
+ *  References:
+ *  - ADR-418 item 14: the lowering moves from the drain point to the hard line. */
+export function drainAtTokens(c: ModConfig, window: number, gate: Gate, nativeAt?: number): number {
+  const pct = (p: number) => Math.floor((window * p) / 100)
+  const hard = gate === 'on' && nativeAt !== undefined ? Math.min(pct(c.hardAtPct), nativeAt - pct(5)) : pct(c.hardAtPct)
+  return Math.min(pct(c.relayAtPct), hard)
 }
 
 /** The relay marker a wrap's reply ends with.
@@ -698,8 +720,9 @@ export type WrapRoute = {
 
 /** What `attend keepwarm check --policy --json` decided. */
 export type Decision = {
-  /** `compact`: compact the conversation between turns, `text` the focus. */
-  action: 'none' | 'keepalive' | 'wrap' | 'compact'
+  /** `drain`: submit `text`, the `drain:` turn, between turns. `compact`:
+   *  compact the conversation between turns, `text` the focus. */
+  action: 'none' | 'keepalive' | 'drain' | 'wrap' | 'compact'
   text: string | null
   /** When to ask again, in epoch seconds. */
   nextAt: number | null
@@ -725,6 +748,10 @@ export type Decision = {
   relayCount: number
   maxRelays: number
   relayAtTokens: number | null
+  drainAtTokens: number | null
+  hardAtTokens: number | null
+  /** This generation's drain has started. */
+  draining: boolean
   /** With `compact`: the turn to submit once the compaction ran without a skip. */
   resume: string | null
   /** Why the relay stopped, in a few words for the row. */
@@ -748,7 +775,7 @@ export function parseDecision(stdout: string): Decision | undefined {
     return undefined
   }
   const action = d.action
-  if (action !== 'none' && action !== 'keepalive' && action !== 'wrap' && action !== 'compact') return undefined
+  if (action !== 'none' && action !== 'keepalive' && action !== 'drain' && action !== 'wrap' && action !== 'compact') return undefined
   const str = (v: unknown) => (typeof v === 'string' ? v : null)
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
   const states = ['running', 'wrapped', 'compacted', 'resumed', 'stopped', 'off'] as const
@@ -789,6 +816,9 @@ export function parseDecision(stdout: string): Decision | undefined {
     relayCount: num(d.relay_count) ?? 0,
     maxRelays: num(d.max_relays) ?? 0,
     relayAtTokens: num(d.relay_at_tokens),
+    drainAtTokens: num(d.drain_at_tokens),
+    hardAtTokens: num(d.hard_at_tokens),
+    draining: d.draining === true,
     resume: str(d.resume),
     relayStop: str(d.relay_stop),
     sendHandoff: d.send_handoff === true,
@@ -831,6 +861,7 @@ export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): Keepalive
     relayCount: d.relay ? d.relayCount : 0,
     maxRelays: d.maxRelays,
     relayStop: d.relay && d.state === 'stopped' ? d.relayStop : null,
+    isDraining: d.relay && d.draining,
   }
 }
 
@@ -847,13 +878,17 @@ function nextIn(nextAt: number, nowMs: number): string {
 /** `⟳ 2/8 · next 41m · wrap ~21:40`, `⟳ 0/1 · idle: under 50k`,
  *  `⟳ wrapped 21:40`, `⟳ wrapped 21:40 · 1/3 · next 41m · compact ~00:10`,
  *  `⟳ compacted 00:10`, `⟳ stopped`; in relay mode `⟳ relay 2/5` once a
- *  relay has run and `⟳ relay stopped: decision`.
+ *  relay has run, `⟳ draining` or `⟳ relay 2/5 · draining` once the drain
+ *  has started, and `⟳ relay stopped: decision`.
  *
  *  References:
- *  - ADR-417 item 4: the row's words for a relay and for its stop. */
+ *  - ADR-417 item 4: the row's words for a relay and for its stop.
+ *  - ADR-418 item 14: the row shows the drain. */
 export function keepaliveSegment(k: KeepaliveRow, nowMs: number): string {
   if (k.relayStop) return `⟳ relay stopped: ${k.relayStop}`
-  if (k.relayCount > 0 && (k.state === 'running' || k.state === 'resumed')) return `⟳ relay ${k.relayCount}/${k.maxRelays}`
+  const isWorking = k.state === 'running' || k.state === 'resumed'
+  if (k.isDraining && isWorking) return k.relayCount > 0 ? `⟳ relay ${k.relayCount}/${k.maxRelays} · draining` : '⟳ draining'
+  if (k.relayCount > 0 && isWorking) return `⟳ relay ${k.relayCount}/${k.maxRelays}`
   if (k.state === 'compacted') return `⟳ compacted ${k.compactedAt ?? ''}`.trimEnd()
   if (k.state === 'wrapped') {
     const parts = [`⟳ wrapped ${k.wrappedAt ?? ''}`.trimEnd()]
@@ -893,7 +928,7 @@ export function gateIsFresh(gate: Gate, gateAtMs: number, nowMs: number): boolea
  *  13). A retry is the caller's to bound. */
 export type CheckPlan = {
   /** `compact` is no prompt: the mod compacts with `text` as the focus. */
-  submit: { kind: 'keepalive' | 'wrap' | 'compact'; text: string; route: WrapRoute | null } | null
+  submit: { kind: 'keepalive' | 'drain' | 'wrap' | 'compact'; text: string; route: WrapRoute | null } | null
   armAtMs: number | null
   retry: boolean
 }
@@ -901,6 +936,7 @@ export type CheckPlan = {
 export function planCheck(d: Decision, isListening: boolean): CheckPlan {
   let submit: CheckPlan['submit'] = null
   if (d.action === 'keepalive' && d.text && (isListening || d.policy)) submit = { kind: 'keepalive', text: d.text, route: null }
+  if (d.action === 'drain' && d.text && d.policy) submit = { kind: 'drain', text: d.text, route: null }
   if (d.action === 'wrap' && d.text && d.wrap && d.policy) submit = { kind: 'wrap', text: d.text, route: d.wrap }
   if (d.action === 'compact' && d.text && d.policy) submit = { kind: 'compact', text: d.text, route: null }
   const armAtMs = !d.retry && d.nextAt !== null && (d.policy || isListening) ? d.nextAt * 1000 : null
@@ -1007,9 +1043,10 @@ export function rowAfterPrompt(k: KeepaliveRow | null): KeepaliveRow | null {
   return k && { ...k, state: 'running', count: 0, afterCount: 0, compactsAt: null, compactedAt: null, wrappedAt: null, isRefused: false, isShown: false, relayCount: 0, relayStop: null }
 }
 
-/** After a relay's resume went in: the count shows the relay. */
+/** After a relay's resume went in: the count shows the relay, and the new
+ *  generation has not drained. */
 export function rowAfterResume(k: KeepaliveRow | null, relayCount: number, maxRelays: number): KeepaliveRow | null {
-  return k && { ...k, state: 'resumed', count: 0, afterCount: 0, wrappedAt: null, compactedAt: null, relayCount, maxRelays, relayStop: null, isShown: true }
+  return k && { ...k, state: 'resumed', count: 0, afterCount: 0, wrappedAt: null, compactedAt: null, relayCount, maxRelays, relayStop: null, isShown: true, isDraining: false }
 }
 
 /** After a main-loop turn's end: the next check's time, while it runs, the

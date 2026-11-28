@@ -198,6 +198,7 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
         "mods.attend.continuity.wrap_skill = wrap stay (default)",
         "mods.attend.continuity.relay = off (default)",
         "mods.attend.continuity.relay_at_pct = 75 (default)",
+        "mods.attend.continuity.hard_at_pct = 85 (default)",
         "mods.attend.continuity.max_relays = 5 (default)",
     ] {
         assert!(s.contains(line), "{line}: {s}");

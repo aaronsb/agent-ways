@@ -41,6 +41,7 @@ pub const MOD_KEYS: &[&str] = &[
     "mods.attend.continuity.wrap_skill",
     "mods.attend.continuity.relay",
     "mods.attend.continuity.relay_at_pct",
+    "mods.attend.continuity.hard_at_pct",
     "mods.attend.continuity.max_relays",
 ];
 
@@ -477,6 +478,7 @@ mod tests {
                 "mods.attend.continuity.wrap_skill = wrap stay (default)",
                 "mods.attend.continuity.relay = off (default)",
                 "mods.attend.continuity.relay_at_pct = 75 (default)",
+                "mods.attend.continuity.hard_at_pct = 85 (default)",
                 "mods.attend.continuity.max_relays = 5 (default)",
                 "attend.chat.tabs.jump = auto (default)",
                 "attend.chat.tabs.menu_on_repeat = true (default)",
