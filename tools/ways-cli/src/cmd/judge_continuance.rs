@@ -9,7 +9,10 @@
 //! The verb resolves the session's engine as the gate does: the engine the
 //! session holds, else what it resolves to now. It never publishes a
 //! resolution, so it does not move the session's disclosure engine. On that
-//! engine's profile it reads the continuance judgement.
+//! engine's profile it reads the continuance judgement. The attend mod
+//! passes `--host`, since it sends the job through `$.model.complete`
+//! itself: a claude-code engine then runs whether or not the ways mod
+//! registered as the session's host ([`judgement_for`]).
 //!
 //! Output, one line of JSON, and the exit code:
 //! - On a key engine the ways agent makes the call, and the verb prints the
@@ -38,7 +41,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use ways_agent_core::continuance::{self, Conditions, Verdict};
 use ways_agent_core::cost::{JudgeCall, Usage};
-use ways_agent_core::engine::Continuance;
+use ways_agent_core::engine::{self, Continuance, Resolution};
 use ways_agent_core::profile::{self, Provider};
 use ways_agent_core::protocol::{ContinuanceRequest, JudgeAnswer, JudgeJob, Reply, Request};
 
@@ -78,16 +81,16 @@ pub struct SpendLog<'a> {
     pub sink: EventSink<'a>,
 }
 
-pub fn run(session: &str, handoff: Option<&Path>, parse: bool) -> Result<()> {
+pub fn run(session: &str, handoff: Option<&Path>, parse: bool, caller_hosts: bool) -> Result<()> {
     let store = Store::for_session(session).unwrap_or_else(|| usage(&format!("not a session id: {session:?}")));
     let mut input = String::new();
     std::io::stdin().read_to_string(&mut input).context("reading stdin")?;
-    let held = store.resolution().map(|s| s.resolution);
-    let judgement = continuance::for_session(
+    let judgement = judgement_for(
         &profile::user_layer_path(),
-        held.as_ref(),
-        |p| ways_agent_core::keys::locate_file(p).is_some(),
+        store.resolution().map(|s| s.resolution),
+        caller_hosts,
         store.host_registered(),
+        |p| ways_agent_core::keys::locate_file(p).is_some(),
     );
     let project = std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default();
     let log = SpendLog { session, project: &project, sink: &|fields| crate::session::log_event(fields) };
@@ -101,6 +104,26 @@ pub fn run(session: &str, handoff: Option<&Path>, parse: bool) -> Result<()> {
     };
     println!("{}", outcome.line());
     Ok(())
+}
+
+/// The continuance judgement the session runs, from the layer at `path`.
+///
+/// `caller_hosts` is `--host`: the caller sends the job through
+/// `$.model.complete` itself, so a claude-code engine runs hosted whether or
+/// not the ways mod registered (`host_registered`). A held resolution
+/// stands, except one that took a key engine only because no host was
+/// registered ([`engine::NO_HOST`]): with the caller hosting, that session
+/// resolves again, hosted. Nothing is published either way, so the
+/// session's disclosure engine stays as held.
+pub fn judgement_for(
+    path: &Path,
+    held: Option<Resolution>,
+    caller_hosts: bool,
+    host_registered: bool,
+    has_key: impl Fn(Provider) -> bool,
+) -> Result<Continuance, String> {
+    let held = held.filter(|r| !(caller_hosts && r.reason == engine::NO_HOST));
+    continuance::for_session(path, held.as_ref(), has_key, caller_hosts || host_registered)
 }
 
 fn usage(message: &str) -> ! {
@@ -253,6 +276,36 @@ mod tests {
 
     fn field<'a>(event: &'a [(String, String)], key: &str) -> Option<&'a str> {
         event.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn host_resolves_claude_code_as_hosted_and_without_it_the_registration_decides() {
+        let dir = std::env::temp_dir().join(format!("ways-continuance-host-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent.yaml");
+        std::fs::write(&path, "engine: claude-code\n").unwrap();
+        let key = |p: Provider| p == Provider::Anthropic;
+        let engine_of = |held: Option<Resolution>, caller_hosts, registered| judgement_for(&path, held, caller_hosts, registered, key).map(|c| c.engine);
+        let ok = |e: &str| Ok(e.to_string());
+        // Nothing held: --host runs claude-code; without it, the ways mod's
+        // registration decides, and with none the key engine stands in.
+        assert_eq!(engine_of(None, true, false), ok("claude-code"));
+        assert_eq!(engine_of(None, false, true), ok("claude-code"));
+        assert_eq!(engine_of(None, false, false), ok("anthropic"));
+        // Held on a key engine for want of a host: --host resolves it hosted;
+        // without --host the held engine stands, registered or not.
+        let stand_in = || Some(Resolution { engine: Some("anthropic".into()), reason: engine::NO_HOST.into() });
+        assert_eq!(engine_of(stand_in(), true, false), ok("claude-code"));
+        assert_eq!(engine_of(stand_in(), false, false), ok("anthropic"));
+        assert_eq!(engine_of(stand_in(), false, true), ok("anthropic"));
+        // A key engine held for any other reason stands under --host.
+        let explicit = Some(Resolution { engine: Some("anthropic".into()), reason: engine::EXPLICIT.into() });
+        assert_eq!(engine_of(explicit, true, false), ok("anthropic"));
+        // No key and no host: unavailable without --host, hosted with it.
+        let none = judgement_for(&path, None, false, false, |_| false).unwrap_err();
+        assert!(none.starts_with(engine::ENGINE_UNAVAILABLE), "{none}");
+        assert_eq!(judgement_for(&path, None, true, false, |_| false).map(|c| c.provider), Ok(Provider::ClaudeCode));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -79,6 +79,10 @@ pub enum JudgeCommand {
         /// Read the `$.model.complete` answer to a job on stdin, and print its verdict
         #[arg(long)]
         parse: bool,
+        /// The caller hosts `$.model.complete`, so the claude-code engine
+        /// runs whether or not the ways mod registered; the attend mod passes it
+        #[arg(long)]
+        host: bool,
     },
     /// Judge the candidates a lane handed off on stdin and log the verdicts
     /// (shadow mode, and the sample of held candidates); the lanes start it
@@ -98,7 +102,9 @@ pub fn run(command: JudgeCommand) -> Result<()> {
             }
             Ok(())
         }
-        JudgeCommand::Continuance { session, handoff, parse } => crate::cmd::judge_continuance::run(&session, handoff.as_deref(), parse),
+        JudgeCommand::Continuance { session, handoff, parse, host } => {
+            crate::cmd::judge_continuance::run(&session, handoff.as_deref(), parse, host)
+        }
         JudgeCommand::Detached => {
             let mut input = String::new();
             std::io::stdin().read_to_string(&mut input).context("reading the job")?;

@@ -134,6 +134,24 @@ fn with_the_agent_unreachable_it_prints_a_fallback_naming_why_and_exits_0() {
 }
 
 #[test]
+fn with_host_claude_code_prints_the_job_with_no_ways_mod_registered() {
+    let fx = Fx::new("cc-host", "engine: claude-code\n");
+    // No `ways judge host`, and a key on disk: without --host the session
+    // would stand in on anthropic and ask the agent.
+    let args = ["judge", "continuance", "--session", &fx.session, "--handoff", "handoff.wrap.md", "--host"];
+    let v = line(&fx.ways(&args, CONDITIONS));
+    assert_eq!(v["job"]["model"], "claude-haiku-5-5", "{v}");
+    // Nothing was published: the session's disclosure engine is not held.
+    assert!(!fx.base.join(format!("state/agent-ways/judge/{}/resolution.json", fx.session)).exists());
+    // Without --host, the same session goes to the agent: here a fallback,
+    // since a start failed moments ago.
+    let marker = fx.base.join("state/agent-ways/agent/start-failed");
+    std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+    std::fs::write(&marker, "").unwrap();
+    assert_eq!(line(&fx.continuance()), serde_json::json!({"fallback": "agent_start_backoff"}));
+}
+
+#[test]
 fn on_claude_code_it_prints_the_job_and_parse_prints_the_verdict() {
     let fx = Fx::new("cc", "engine: claude-code\nmode: off\n");
     let host = fx.ways(&["judge", "host", "--session", &fx.session], "");
