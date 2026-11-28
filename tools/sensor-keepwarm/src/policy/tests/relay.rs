@@ -409,10 +409,10 @@ fn a_failed_compaction_or_resume_stops_the_relay() {
 #[test]
 fn a_resumed_generation_s_stop_line_stops_the_relay() {
     let mut p = Policy::default();
-    assert!(!stopped_by_agent(&mut p, "decision", "which db"), "no relay since the prompt");
+    assert!(!stopped_by_agent(&mut p, "decision", "which db", &relay(), MONDAY), "no relay since the prompt");
     p.relays = 1;
-    assert!(!stopped_by_agent(&mut p, "later", ""));
-    assert!(stopped_by_agent(&mut p, "decision", "which  db"));
+    assert!(!stopped_by_agent(&mut p, "later", "", &relay(), MONDAY));
+    assert!(stopped_by_agent(&mut p, "decision", "which  db", &relay(), MONDAY));
     assert_eq!((p.relay_stop.as_deref(), p.stopped.as_deref()), (Some("decision"), Some("the agent stopped the relay: decision, which db")));
     // The next check hands the turn's reply to the mod, once.
     let mut s = Session::new(MONDAY, 300_000);

@@ -86,6 +86,13 @@ struct Conditions {
     commits_since_wrap: M<Vec<String>>,
     merges_since_wrap: M<Vec<String>>,
     tasks_closed_since_wrap: M<Vec<String>>,
+    /// What the session waits on the operator for, one line each: a wait
+    /// the ledger holds since the operator's last prompt, and each one-way
+    /// decision the handoff lists. Unknown where the handoff cannot be read.
+    ///
+    /// References:
+    /// - ADR-418 item 6: waiting on the operator is pending.
+    waiting_on_operator: M<Vec<String>>,
 }
 
 /// What the mod passes on stdin: a JSON object whose `agents_in_flight`,
@@ -141,7 +148,10 @@ pub(crate) fn cmd_brief(ident: &attend_presence::session::SessionIdentity, args:
     });
     let since = probe({
         let (project, handoff) = (project.clone(), args.handoff.clone());
-        move || since_wrap(&project, handoff, deadline)
+        move || {
+            let text = handoff_text(&project, handoff, deadline)?;
+            Some((since_wrap(&project, &text, deadline), text))
+        }
     });
     let prs = probe({
         let project = project.clone();
@@ -157,7 +167,9 @@ pub(crate) fn cmd_brief(ident: &attend_presence::session::SessionIdentity, args:
     let reading = take(reading, deadline);
     let kw = sensor_keepwarm::brief::measure(reading.as_ref(), from_mod.window(), ledger.as_ref(), from_mod.operator_prompt_at(), max_relays, now);
     let awaiting = take(awaiting, deadline);
-    let (commits, merges) = take(since, deadline).unzip();
+    let (since, handoff) = take(since, deadline).map_or((None, None), |(s, t)| (s, Some(t)));
+    let (commits, merges) = since.unzip();
+    let wait = ledger.as_ref().and_then(|l| l.policy.wait.as_ref());
     // No record is a last Stop with nothing in flight; with no session
     // there is no record to read.
     let recorded = session.as_deref().map(|sid| sensor_keepwarm::background::read(&keepwarm_dir(), sid).unwrap_or_default());
@@ -180,6 +192,7 @@ pub(crate) fn cmd_brief(ident: &attend_presence::session::SessionIdentity, args:
         commits_since_wrap: M(commits),
         merges_since_wrap: M(merges),
         tasks_closed_since_wrap: from_mod.lines("tasks_closed_since_wrap"),
+        waiting_on_operator: M(handoff.as_deref().map(|text| waiting_on_operator(text, wait))),
     };
     super::print_json(&conditions);
 }
@@ -312,17 +325,29 @@ fn handoff_head(text: &str) -> Option<&str> {
     ((4..=40).contains(&head.len()) && head.chars().all(|c| c.is_ascii_hexdigit())).then_some(head)
 }
 
-/// The commits since the handoff's head, and the merges among them, one
-/// `<short> <subject>` line each, newest first, at most [`MAX_LISTED`] of
-/// each and then `… N more`. `handoff` is the file, by default the
-/// repository's `.claude/handoff.wrap.md`.
-fn since_wrap(project: &Path, handoff: Option<PathBuf>, deadline: Instant) -> Option<(Vec<String>, Vec<String>)> {
+/// The handoff's text: `handoff`, by default the repository's
+/// `.claude/handoff.wrap.md`.
+fn handoff_text(project: &Path, handoff: Option<PathBuf>, deadline: Instant) -> Option<String> {
     let path = match handoff {
         Some(p) => p,
         None => PathBuf::from(git(project, &["rev-parse", "--show-toplevel"], deadline)?.trim()).join(ways_core::handoff::FILE),
     };
-    let text = std::fs::read_to_string(path).ok()?;
-    let range = format!("{}..HEAD", handoff_head(&text)?);
+    std::fs::read_to_string(path).ok()
+}
+
+/// What the session waits on the operator for: the ledger's `wait`, and
+/// each one-way decision in the handoff's `text`.
+fn waiting_on_operator(text: &str, wait: Option<&sensor_keepwarm::policy::hold::Wait>) -> Vec<String> {
+    let held = wait.map(|w| format!("{}; the operator is likely back about {}", w.cause.describe(), w.until_hm));
+    let decisions = sensor_keepwarm::policy::hold::one_way_decisions(text).into_iter().map(|q| format!("a one-way decision waits for the operator: {q}"));
+    held.into_iter().chain(decisions).collect()
+}
+
+/// The commits since the head the handoff's `text` names, and the merges
+/// among them, one `<short> <subject>` line each, newest first, at most
+/// [`MAX_LISTED`] of each and then `… N more`.
+fn since_wrap(project: &Path, text: &str, deadline: Instant) -> Option<(Vec<String>, Vec<String>)> {
+    let range = format!("{}..HEAD", handoff_head(text)?);
     let max = format!("--max-count={MAX_LISTED}");
     let log = |merges: &[&str]| {
         let args: Vec<&str> = ["log", "--format=%h %s", max.as_str()].iter().chain(merges).chain(&[range.as_str(), "--"]).copied().collect();
@@ -414,6 +439,24 @@ mod tests {
             (json(&f.agents), json(&f.shells), json(&f.watchers)),
             (serde_json::json!(["workflow: wave3"]), serde_json::json!(["cargo test"]), serde_json::json!(["watch CI"]))
         );
+    }
+
+    /// The brief names what the session waits on the operator for: a
+    /// relay stop on a decision or doubt the ledger holds, and each one-way
+    /// decision in the handoff; a reversible one is no wait.
+    #[test]
+    fn the_brief_names_what_waits_on_the_operator() {
+        use sensor_keepwarm::policy::hold::{Cause, Wait};
+        let text = "2026-11-27 e6bbfbdd wrap=20261127T000000Z-abcdef12\nDECISIONS\n1. Cut 1.58.0 now? — blocks: #3 — lean: yes — reversible: no\n2. Rename it? — blocks: none — lean: no — reversible: yes\n\nDO NEXT — start #1.";
+        let wait = Wait { cause: Cause::Decision, at: 0, until: 3600, until_hm: "09:00".into(), zone: None, decided: None, pings: 0, ended_at: None };
+        assert_eq!(
+            waiting_on_operator(text, Some(&wait)),
+            [
+                "the relay stopped on a decision; the operator is likely back about 09:00",
+                "a one-way decision waits for the operator: Cut 1.58.0 now?",
+            ]
+        );
+        assert!(waiting_on_operator("2026-11-27 e6bbfbdd wrap=x\nDO NEXT — start #1.", None).is_empty());
     }
 
     #[test]

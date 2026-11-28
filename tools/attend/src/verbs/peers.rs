@@ -39,6 +39,13 @@ pub struct Agent {
     /// peers sensor for a peer). `None`, `null` in JSON, when the transcript
     /// holds no such figure yet: unknown, not empty.
     pub context_pct: Option<f64>,
+    /// The zone keepwarm reads the session's operator's night in, from the
+    /// settings its last policy check read: `{"zone", "source"}`, or `None`
+    /// where no check has run.
+    ///
+    /// References:
+    /// - ADR-419: a supervisor tells when a worker's operator is likely back.
+    pub timezone: Option<sensor_keepwarm::windows::ZoneView>,
     /// Works in the same directory as this session.
     pub here: bool,
 }
@@ -237,7 +244,22 @@ fn agent(
         }
     };
     let instance = instance.filter(|i| i != attend_instances::BARE);
-    Agent { session_id, cwd: cwd.to_string(), name, nickname, instance, status, finished: None, context_pct, here }
+    #[cfg(feature = "sensor-keepwarm")]
+    let timezone = session_id.as_deref().and_then(crate::cmd::keepwarm::kept_zone);
+    #[cfg(not(feature = "sensor-keepwarm"))]
+    let timezone = None;
+    Agent {
+        session_id,
+        cwd: cwd.to_string(),
+        name,
+        nickname,
+        instance,
+        status,
+        finished: None,
+        context_pct,
+        timezone,
+        here,
+    }
 }
 
 /// Session `session_id`'s `(nickname, name)` at `cwd`: the persona, and the
@@ -277,6 +299,7 @@ mod tests {
             status: "waiting".to_string(),
             finished: None,
             context_pct: None,
+            timezone: None,
             here: false,
         }
     }

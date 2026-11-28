@@ -159,6 +159,7 @@ mod tests {
             status: "waiting".to_string(),
             finished: None,
             context_pct: None,
+            timezone: None,
             here: false,
         }
     }

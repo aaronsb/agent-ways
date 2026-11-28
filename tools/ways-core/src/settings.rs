@@ -508,8 +508,31 @@ const KEYS: &[KeySpec] = &[
         was: Some(&["mods", "attend", "keepalive", "timezone"]),
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"\""),
-        doc: "The IANA zone the windows are read in; empty for the host's zone.",
-        long: "Such as Europe/Berlin or America/Chicago. A name the host's time zone database does not know is reported by `attend keepwarm status`, and the host's zone is used.",
+        check: Some(check_zone),
+        doc: "The IANA zone the windows and the operator's night are read in; empty for the host's zone.",
+        long: "Such as Europe/Berlin or America/Chicago, checked against the system zone database. It overrides the host's zone, for an operator who works in another zone than the host's clock. Empty uses the host's zone; a host that reports UTC or no zone then leaves the zone unknown, and a stop that waits on the operator waits the plain operator_horizon with no morning. `attend keepwarm status --json` and `attend peer list --json` show the zone in use and where it came from. A name the host's time zone database does not know is reported by `attend keepwarm status`, and the host's zone is used.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.attend.continuity.operator_horizon",
+        section: "mods",
+        path: &["mods", "attend", "continuity", "operator_horizon"],
+        kind: Kind::Text,
+        default: DefaultValue::Yaml("\"10h\""),
+        check: Some(check_horizon),
+        doc: "How long after a stop that waits on the operator the operator is likely back, such as 10h or 8h30m.",
+        long: "A relay stop on a decision or on doubt, a boundary doubt, and a boundary stop whose handoff lists a one-way decision wait on the operator. keepwarm holds the cache until the operator is likely back: the stop plus this horizon, moved by the local night where the zone is known (morning). The first tick decides once: it holds when the pings to that time fit within the rent-or-buy bound, and otherwise lets the cache lapse at once. From 1h to 48h.",
+        ..BASE
+    },
+    KeySpec {
+        name: "mods.attend.continuity.morning",
+        section: "mods",
+        path: &["mods", "attend", "continuity", "morning"],
+        kind: Kind::Text,
+        default: DefaultValue::Yaml("\"09:00\""),
+        check: Some(check_morning),
+        doc: "Where the operator's local night ends, HH:MM; a stop that waits on the operator in the night waits until then.",
+        long: "The night runs from local midnight to this time, in the zone timezone gives. A stop in the night waits until the morning, and a stop whose operator_horizon would end in the night waits on to the morning: a stop at 01:15 waits to 09:00, one at 21:00 waits to 09:00, and one at 13:00 waits the 10h horizon. With the zone unknown the morning does not apply.",
         ..BASE
     },
     KeySpec {
@@ -1004,6 +1027,72 @@ fn check_words(v: &Value) -> Result<(), String> {
     agent_theme::Words::check(&list)
 }
 
+/// Where the system zone database may live, in the order the time zone
+/// libraries look; `TZDIR` first.
+const ZONEINFO_DIRS: &[&str] = &["/usr/share/zoneinfo", "/usr/lib/zoneinfo", "/usr/share/lib/zoneinfo", "/etc/zoneinfo"];
+
+/// `mods.attend.continuity.timezone`: empty, or an IANA name the system
+/// zone database holds as a TZif file. With no database found the name is
+/// not held against the value; `attend keepwarm status` reports a zone the
+/// host does not know.
+fn check_zone(v: &Value) -> Result<(), String> {
+    let name = v.as_str().ok_or("expected text")?.trim();
+    if name.is_empty() {
+        return Ok(());
+    }
+    let shaped = !name.starts_with('/') && !name.split('/').any(|p| p.is_empty() || p == "." || p == "..");
+    if !shaped || !name.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c)) {
+        return Err(format!("`{name}` is not an IANA zone name, such as America/Denver"));
+    }
+    let tzdir = std::env::var_os("TZDIR").map(PathBuf::from);
+    let dirs: Vec<PathBuf> = tzdir.into_iter().chain(ZONEINFO_DIRS.iter().map(PathBuf::from)).filter(|d| d.is_dir()).collect();
+    let Some(first) = dirs.first() else { return Ok(()) };
+    let is_zone = |d: &PathBuf| {
+        use std::io::Read;
+        let mut magic = [0u8; 4];
+        std::fs::File::open(d.join(name)).and_then(|mut f| f.read_exact(&mut magic)).is_ok_and(|_| &magic == b"TZif")
+    };
+    if dirs.iter().any(is_zone) {
+        Ok(())
+    } else {
+        Err(format!("`{name}` is not a zone in the system zone database ({})", first.display()))
+    }
+}
+
+/// `mods.attend.continuity.operator_horizon`: `<h>h`, `<m>m` or `<h>h<m>m`,
+/// from 1h to 48h.
+fn check_horizon(v: &Value) -> Result<(), String> {
+    let t = v.as_str().ok_or("expected text")?.trim();
+    let bad = || format!("`{t}` is not a duration from 1h to 48h, such as 10h, 90m or 8h30m");
+    let num = |s: &str| (!s.is_empty() && s.chars().all(|c| c.is_ascii_digit())).then(|| s.parse::<u64>().ok()).flatten();
+    let (hours, rest) = match t.split_once('h') {
+        Some((h, rest)) => (num(h).ok_or_else(bad)?, rest),
+        None => (0, t),
+    };
+    let minutes = match rest {
+        "" if t.contains('h') => 0,
+        r => num(r.strip_suffix('m').ok_or_else(bad)?).ok_or_else(bad)?,
+    };
+    let secs = hours * 3600 + minutes * 60;
+    if (3600..=48 * 3600).contains(&secs) {
+        Ok(())
+    } else {
+        Err(bad())
+    }
+}
+
+/// `mods.attend.continuity.morning`: `HH:MM`, from 00:00 to 23:59.
+fn check_morning(v: &Value) -> Result<(), String> {
+    let t = v.as_str().ok_or("expected text")?.trim();
+    let bad = || format!("`{t}` is not a time of day, HH:MM from 00:00 to 23:59");
+    let (h, m) = t.split_once(':').ok_or_else(bad)?;
+    let two = |s: &str, max: u32| (s.len() == 2 && s.chars().all(|c| c.is_ascii_digit())).then(|| s.parse::<u32>().ok()).flatten().filter(|n| *n <= max);
+    match (two(h, 23), two(m, 59)) {
+        (Some(_), Some(_)) => Ok(()),
+        _ => Err(bad()),
+    }
+}
+
 fn check_targets(v: &Value) -> Result<(), String> {
     serde_yaml::from_value::<Vec<crate::config::Target>>(v.clone()).map(|_| ()).map_err(|e| e.to_string())
 }
@@ -1032,6 +1121,8 @@ pub const SCREENS_WRITE_PROJECT: &[&str] = &[
     "mods.attend.continuity.margin_minutes",
     "mods.attend.continuity.windows",
     "mods.attend.continuity.timezone",
+    "mods.attend.continuity.operator_horizon",
+    "mods.attend.continuity.morning",
     "mods.attend.continuity.wrap",
     "mods.attend.continuity.wrap_file",
     "mods.attend.continuity.wrap_to",
@@ -1269,6 +1360,39 @@ mod tests {
             let l = layer("user", LayerScope::User, &format!("mods:\n  attend:\n    continuity:\n      {key}: {bad}\n"));
             assert!(l.findings.iter().any(|f| f.fallback), "{key}: {bad} should fail: {:?}", l.findings);
         }
+    }
+
+    /// The operator hold's settings: the horizon is a duration from 1h to
+    /// 48h, the morning an `HH:MM`, and the zone an IANA name the system
+    /// zone database holds. A bad value falls back to the default.
+    ///
+    /// References:
+    /// - ADR-418 item 6: the operator horizon, the morning and the zone.
+    #[test]
+    fn the_operator_horizon_the_morning_and_the_zone_are_checked() {
+        assert_eq!(resolved("mods.attend.continuity.operator_horizon", &[]), Some(Value::String("10h".into())));
+        assert_eq!(resolved("mods.attend.continuity.morning", &[]), Some(Value::String("09:00".into())));
+        let good = layer("user", LayerScope::User, "mods:\n  attend:\n    continuity:\n      operator_horizon: 8h30m\n      morning: '07:45'\n      timezone: America/Denver\n");
+        assert!(good.findings.is_empty(), "{:?}", good.findings);
+        assert_eq!(resolved("mods.attend.continuity.operator_horizon", std::slice::from_ref(&good)), Some(Value::String("8h30m".into())));
+        for (key, bad) in [
+            ("operator_horizon", "30m"),
+            ("operator_horizon", "49h"),
+            ("operator_horizon", "soon"),
+            ("operator_horizon", "h"),
+            ("morning", "'24:00'"),
+            ("morning", "9am"),
+            ("morning", "'9:00'"),
+            ("timezone", "Not/AZone"),
+            ("timezone", "../etc/passwd"),
+        ] {
+            let l = layer("user", LayerScope::User, &format!("mods:\n  attend:\n    continuity:\n      {key}: {bad}\n"));
+            assert!(l.findings.iter().any(|f| f.fallback), "{key}: {bad} should fail: {:?}", l.findings);
+        }
+        for ok in ["10h", "90m", "1h", "48h", "2h30m"] {
+            assert!(check_horizon(&Value::String(ok.into())).is_ok(), "{ok}");
+        }
+        assert!(check_zone(&Value::String(String::new())).is_ok());
     }
 
     /// A hard line not above the drain point loads, and the lint names it

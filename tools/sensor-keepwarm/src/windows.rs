@@ -74,7 +74,7 @@ fn parse_days(s: &str) -> Result<u8, String> {
     Ok(mask)
 }
 
-fn parse_time(s: &str, is_end: bool) -> Result<u16, String> {
+pub(crate) fn parse_time(s: &str, is_end: bool) -> Result<u16, String> {
     let bad = || format!("`{s}` is not a time (HH:MM)");
     let (h, m) = s.split_once(':').ok_or_else(bad)?;
     if h.is_empty() || h.len() > 2 || m.len() != 2 {
@@ -110,6 +110,90 @@ pub fn parse_window(text: &str) -> Result<Window, String> {
     Ok(Window { days, start, end, text: t.join(" ") })
 }
 
+/// Where a known zone came from: `mods.attend.continuity.timezone`, or the
+/// host's clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ZoneSource {
+    Override,
+    Host,
+}
+
+/// The zone the keepalive windows and the operator's expected return are
+/// read in ([`resolve_zone`]). `name` and `source` are `None` when the zone
+/// is unknown: no override, and a host that reports UTC, no zone, or a zone
+/// with no IANA name. `tz` is then the host's clock, or UTC, so the windows
+/// still read a time.
+///
+/// References:
+/// - ADR-418 item 6: with the zone unknown the expected return is the plain
+///   operator horizon.
+#[derive(Clone, Debug)]
+pub struct Zone {
+    pub tz: TimeZone,
+    /// The IANA name, where the zone is known.
+    pub name: Option<String>,
+    pub source: Option<ZoneSource>,
+    /// The override, when the host's zone database does not know it; the
+    /// host's zone is used in its place.
+    pub bad: Option<String>,
+}
+
+impl Zone {
+    /// The zone, where it is known.
+    pub fn known(&self) -> Option<&TimeZone> {
+        self.name.as_ref().map(|_| &self.tz)
+    }
+}
+
+/// `{"zone": <IANA name|null>, "source": "override"|"host"|null}`, as
+/// `attend keepwarm status --json` and `attend peer list --json` show it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ZoneView {
+    pub zone: Option<String>,
+    pub source: Option<ZoneSource>,
+}
+
+impl From<&Zone> for ZoneView {
+    fn from(z: &Zone) -> Self {
+        ZoneView { zone: z.name.clone(), source: z.source }
+    }
+}
+
+/// The names a host reports for UTC. A host set to one of them has, as
+/// far as keepwarm can tell, no zone of its own.
+const UTC_NAMES: [&str; 18] = [
+    "UTC", "Etc/UTC", "UCT", "Etc/UCT", "Universal", "Etc/Universal", "Zulu", "Etc/Zulu", "GMT", "Etc/GMT", "GMT0", "Etc/GMT0", "GMT+0",
+    "Etc/GMT+0", "GMT-0", "Etc/GMT-0", "Greenwich", "Etc/Greenwich",
+];
+
+/// The zone the setting `name` (`mods.attend.continuity.timezone`) gives on
+/// this host: the override when the system zone database knows it, else
+/// the host's zone ([`resolve_with`]).
+pub fn resolve_zone(name: &str) -> Zone {
+    resolve_with(name, TimeZone::try_system().ok())
+}
+
+/// [`resolve_zone`] with the host's zone given: `host` is what the system
+/// reports, `None` where it reports none.
+pub fn resolve_with(name: &str, host: Option<TimeZone>) -> Zone {
+    let name = name.trim();
+    let mut bad = None;
+    if !name.is_empty() {
+        match TimeZone::get(name) {
+            Ok(tz) => return Zone { tz, name: Some(name.to_string()), source: Some(ZoneSource::Override), bad: None },
+            Err(_) => bad = Some(name.to_string()),
+        }
+    }
+    let Some(tz) = host else {
+        return Zone { tz: TimeZone::UTC, name: None, source: None, bad };
+    };
+    match tz.iana_name().filter(|n| !UTC_NAMES.contains(n)).map(str::to_string) {
+        Some(n) => Zone { tz, name: Some(n), source: Some(ZoneSource::Host), bad },
+        None => Zone { tz, name: None, source: None, bad },
+    }
+}
+
 /// The windows in force, with the entries dropped and the zone they are
 /// read in.
 #[derive(Clone, Debug)]
@@ -117,7 +201,7 @@ pub struct Windows {
     pub list: Vec<Window>,
     /// Each dropped entry, with why.
     pub dropped: Vec<(String, String)>,
-    tz: TimeZone,
+    zone: Zone,
     /// The zone named in `timezone`, when it is not one the host knows; the
     /// host's zone is used in its place.
     pub bad_zone: Option<String>,
@@ -140,14 +224,27 @@ impl Windows {
                 Err(why) => dropped.push((e.clone(), why)),
             }
         }
-        let (tz, bad_zone) = zone_of(zone);
-        Windows { list, dropped, tz, bad_zone }
+        let zone = resolve_zone(zone);
+        Windows { list, dropped, bad_zone: zone.bad.clone(), zone }
     }
 
-    /// The same windows read in `tz`, for tests.
-    pub fn with_zone(mut self, tz: TimeZone) -> Self {
-        self.tz = tz;
+    /// The same windows read in `tz`, as the host's zone with no override,
+    /// for tests.
+    pub fn with_zone(self, tz: TimeZone) -> Self {
+        self.with_resolved(resolve_with("", Some(tz)))
+    }
+
+    /// The same windows read in `zone`, for tests.
+    pub fn with_resolved(mut self, zone: Zone) -> Self {
+        self.bad_zone = zone.bad.clone();
+        self.zone = zone;
         self
+    }
+
+    /// The zone the windows are read in, which the operator's expected
+    /// return is read in too.
+    pub fn zone(&self) -> &Zone {
+        &self.zone
     }
 
     /// Whether `epoch` falls inside any window.
@@ -159,7 +256,7 @@ impl Windows {
     /// Weekday (Monday 0) and minute of the day at `epoch` in the zone.
     fn civil(&self, epoch: u64) -> Option<(u8, u16)> {
         let ts = Timestamp::from_second(epoch as i64).ok()?;
-        let z = ts.to_zoned(self.tz.clone());
+        let z = ts.to_zoned(self.zone.tz.clone());
         let day = z.weekday().to_monday_zero_offset() as u8;
         Some((day, z.hour() as u16 * 60 + z.minute() as u16))
     }
@@ -168,7 +265,7 @@ impl Windows {
     pub fn hm(&self, epoch: u64) -> String {
         match Timestamp::from_second(epoch as i64) {
             Ok(ts) => {
-                let z = ts.to_zoned(self.tz.clone());
+                let z = ts.to_zoned(self.zone.tz.clone());
                 format!("{:02}:{:02}", z.hour(), z.minute())
             }
             Err(_) => "--:--".into(),
@@ -179,7 +276,7 @@ impl Windows {
     pub fn date(&self, epoch: u64) -> String {
         match Timestamp::from_second(epoch as i64) {
             Ok(ts) => {
-                let z = ts.to_zoned(self.tz.clone());
+                let z = ts.to_zoned(self.zone.tz.clone());
                 format!("{:04}-{:02}-{:02}", z.year(), z.month(), z.day())
             }
             Err(_) => "0000-00-00".into(),
@@ -193,19 +290,6 @@ impl Windows {
         } else {
             self.list.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(", ")
         }
-    }
-}
-
-/// The zone `name` names, or the host's when it is empty or unknown; the
-/// second value is an unknown name.
-fn zone_of(name: &str) -> (TimeZone, Option<String>) {
-    let name = name.trim();
-    if name.is_empty() {
-        return (TimeZone::try_system().unwrap_or(TimeZone::UTC), None);
-    }
-    match TimeZone::get(name) {
-        Ok(tz) => (tz, None),
-        Err(_) => (TimeZone::try_system().unwrap_or(TimeZone::UTC), Some(name.to_string())),
     }
 }
 

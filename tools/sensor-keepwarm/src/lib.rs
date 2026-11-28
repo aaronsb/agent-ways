@@ -804,6 +804,7 @@ pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, n
     };
     lines.push(format!("keepwarm    {keepwarm}"));
     lines.extend(policy::armed::card_line(&s, now));
+    lines.extend(policy::hold::card_line(&s.policy));
     if let Some(p) = price_of(&s.model) {
         let pings = (p.write_1h / p.read).floor() as u64;
         lines.push(format!(

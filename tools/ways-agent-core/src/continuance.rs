@@ -75,6 +75,11 @@ pub enum UnknownTag {
 
 impl<T> Measured<T> {
     pub const UNKNOWN: Measured<T> = Measured::Unknown(UnknownTag::Unknown);
+
+    /// [`Measured::UNKNOWN`], for a field's serde default.
+    pub fn unknown() -> Measured<T> {
+        Measured::UNKNOWN
+    }
 }
 
 /// An open pull request and its checks.
@@ -126,6 +131,14 @@ pub struct Conditions {
     pub commits_since_wrap: Measured<Vec<String>>,
     pub merges_since_wrap: Measured<Vec<String>>,
     pub tasks_closed_since_wrap: Measured<Vec<String>>,
+    /// What the session waits on the operator for, one line each: a relay
+    /// stop on a decision, a doubt sent to the operator, a one-way decision
+    /// in the handoff. A brief from before the field reads it as unknown.
+    ///
+    /// References:
+    /// - ADR-418 item 6: waiting on the operator is pending.
+    #[serde(default = "Measured::unknown")]
+    pub waiting_on_operator: Measured<Vec<String>>,
 }
 
 /// What the judge chose.
@@ -444,6 +457,11 @@ mod tests {
         let mut missing = fixture.clone();
         missing.as_object_mut().unwrap().remove("git_status");
         assert!(serde_json::from_value::<Conditions>(missing).is_err());
+        // A brief from an attend before waiting_on_operator reads it as
+        // unknown.
+        let mut older = fixture.clone();
+        older.as_object_mut().unwrap().remove("waiting_on_operator");
+        assert_eq!(serde_json::from_value::<Conditions>(older).unwrap().waiting_on_operator, Measured::UNKNOWN);
         let mut extra = fixture.clone();
         extra["later_probe"] = 1.into();
         assert_eq!(serde_json::from_value::<Conditions>(extra).unwrap(), c);

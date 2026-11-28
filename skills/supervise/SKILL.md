@@ -74,8 +74,8 @@ KW="$(attend keepwarm status --session "$W" --json 2>/dev/null)" || KW=null
 OPEN="$(grep -cE '^#[0-9]+ \[(OPEN|IN PROGRESS)' "$H" 2>/dev/null)"
 jq -nc --argjson p "${PEER:-null}" --argjson k "${KW:-null}" --arg open "${OPEN:-0}" --arg head "$(head -n1 "$H" 2>/dev/null)" '{
   at: (now|floor), gone: ($p == null), status: $p.status, finished: $p.finished, ctx: $p.context_pct,
-  exit: $k.exit.state, wrap: $k.boundary.wrap, move: $k.boundary.move,
-  cache: $k.cache.state, lapses_at: $k.cache.lapses_at, next_tick_at: $k.cache.next_tick_at,
+  exit: $k.exit.state, wrap: $k.boundary.wrap, move: $k.boundary.move, tz: $p.timezone.zone,
+  cache: $k.cache.state, lapses_at: $k.cache.lapses_at, next_tick_at: $k.cache.next_tick_at, hold: $k.hold.decision, hold_until: $k.hold.until,
   relays: $k.relays.count, max: $k.relays.max, stopped: $k.relays.stopped, op_at: $k.operator_prompt_at,
   open: ($open|tonumber), handoff: $head}' | tee ".claude/supervise/$W.now.json"
 tail -n 8 "$LOG"
@@ -96,10 +96,12 @@ The snapshot is also saved beside the log for step 5. The last two lines show th
 |---|---|---|
 | Stopped on a decision or doubt | `stopped` is `"decision"` or `"doubt"`, `move` is `"doubt"`, or a `handoff:` message from the worker says its relay stopped on a decision or that the judge said doubt; and the log shows no forward for this wrap (`wrap`, or the `wrap=` on the handoff's first line) | Forward to the operator. Do not nudge the worker. |
 | Finished or cold | `gone`, `finished != null`, `exit == "finished"`, `cache == "cold"`, `lapses_at` set and `at >= lapses_at`, or `stopped == "empty"` | Report once, then end the loop. |
-| Idle with open tasks, inside the warm window | idle: `exit == "armed"`, `stopped != null`, or `status == "waiting"` here and on the previous check line; and `open > 0`; and warm: `cache == "warm"`, `at < lapses_at`, and, with `exit == "armed"`, `next_tick_at - at >= 120` | Send one nudge, unless this stretch already had one. |
+| Idle with open tasks, inside the warm window | idle: `exit == "armed"`, `stopped != null`, or `status == "waiting"` here and on the previous check line; and `open > 0`; and warm: `cache == "warm"`, `at < lapses_at`, and, with `exit == "armed"` or a `hold_until`, `next_tick_at - at >= 120` | Send one nudge, unless this stretch already had one. |
 | Working | anything else | Log the check. |
 
 Read the idle case with these fallbacks:
+
+- A `hold_until` is when a worker that waits on its operator stops being held warm. While `at < hold_until`, a lapse at `lapses_at` is not the end of the window: the next tick renews it. A `hold` of `"lapse"` means the cache lapses at the next tick.
 
 - A null `cache` or `lapses_at`, `cache == "unknown"`, or a null `next_tick_at` with an armed exit leaves the window unknown. Send no nudge, and log `cache unknown, no nudge`.
 - An armed exit whose next tick is under two minutes away leaves no room for a turn. Send no nudge, and report to the operator that the window is closing.
@@ -110,7 +112,7 @@ Read the idle case with these fallbacks:
 **4. Act.**
 
 - **Nudge:** call `attend_send` with `to` set to the worker's session id and the message "Do you need any assistance?".
-- **Forward:** call `attend_send` with `to` set to the operator's member id, their login name (`id -un`). Write a summary of what landed since the last report, drawn from the log and the handoff's LANDED and TASKS, then quote the handoff's DECISIONS lines exactly as written.
+- **Forward:** call `attend_send` with `to` set to the operator's member id, their login name (`id -un`). Write a summary of what landed since the last report, drawn from the log and the handoff's LANDED and TASKS, then quote the handoff's DECISIONS lines exactly as written. With a `hold_until`, say until when the worker stays warm, in the worker's zone where `tz` names one (`TZ=<tz> date -d @<hold_until> +%H:%M`).
 - **Report:** the same `attend_send` to the operator: how the worker ended (finished, cold, exited, or the operator returned), the relay count, and the open TASKS left.
 
 **5. Log the check** with one line: the snapshot, the case, and what you did.
