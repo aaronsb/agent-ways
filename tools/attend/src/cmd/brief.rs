@@ -248,7 +248,9 @@ fn read_stdin() -> Option<Value> {
 
 /// `program args` run in `dir`, its stdout when it exits 0 by `deadline`.
 /// It runs in a process group of its own, which is killed at the deadline,
-/// so nothing it started outlives the probe holding its stdout.
+/// so nothing it started outlives the probe holding its stdout. It starts
+/// through [`sensor_keepwarm::spawn_probe`], so its pipe never leaks into a
+/// sibling probe's child.
 fn run(program: &str, args: &[&str], dir: &Path, env: &[(&str, &str)], deadline: Instant) -> Option<String> {
     use std::io::Read;
     let mut cmd = Command::new(program);
@@ -258,7 +260,7 @@ fn run(program: &str, args: &[&str], dir: &Path, env: &[(&str, &str)], deadline:
     }
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-    let mut child = cmd.spawn().ok()?;
+    let mut child = sensor_keepwarm::spawn_probe(&mut cmd).ok()?;
     let out = child.stdout.take()?;
     let read = probe(move || {
         let mut buf = Vec::new();

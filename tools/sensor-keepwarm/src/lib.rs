@@ -399,14 +399,15 @@ pub fn read_context(session_id: &str, working_dir: &str) -> Option<Reading> {
 pub fn context_json(session_id: &str, working_dir: &str, timeout: Duration) -> Option<Vec<u8>> {
     use std::io::Read;
     use std::process::Stdio;
-    let mut child = Command::new("ways")
-        .args(["context", "--json", "--session", session_id])
-        .current_dir(working_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+    let mut child = spawn_probe(
+        Command::new("ways")
+            .args(["context", "--json", "--session", session_id])
+            .current_dir(working_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()),
+    )
+    .ok()?;
     // Read on a thread, so a reading larger than the pipe's buffer cannot
     // hold the child open past the deadline.
     let mut stdout = child.stdout.take()?;
@@ -428,6 +429,23 @@ pub fn context_json(session_id: &str, working_dir: &str, timeout: Duration) -> O
     };
     let out = reader.join().ok()??;
     status.success().then_some(out)
+}
+
+/// Starts `cmd`, one spawn at a time across the process. On macOS std
+/// makes a pipe with `pipe()` and sets close-on-exec on each end only
+/// afterwards, so a child another thread spawns between the two inherits
+/// both ends, and the pipe's reader then waits for that child's exit too.
+/// `attend keepwarm brief` runs its probes side by side, and its git, gh
+/// and `ways context` probes start through here, so each of their pipes is
+/// close-on-exec before the next of those spawns begins. The
+/// lock is held across the spawn only, never across the wait.
+///
+/// References:
+/// - #1410: a brief's probe lost to a pipe end leaked into a sibling.
+pub fn spawn_probe(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    cmd.spawn()
 }
 
 // ── State and the decision ─────────────────────────────────────
