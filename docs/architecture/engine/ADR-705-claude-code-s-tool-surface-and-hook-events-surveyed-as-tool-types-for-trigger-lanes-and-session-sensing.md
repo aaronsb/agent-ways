@@ -101,6 +101,8 @@ Every event carries `session_id`, `transcript_path`, `cwd`, `permission_mode`, `
 | ConfigChange, InstructionsLoaded, FileChanged | InstructionsLoaded skips direct AGENTS.md reads | M (#493) | L |
 | MessageDisplay, PostToolBatch, DirectoryAdded, Setup, Elicitation | MessageDisplay fires on every streamed chunk; PostToolBatch on every step | N | N |
 
+> Edited 2026-11-27: the Stop row gives the wrong fields for each item of `background_tasks` (#1405). Claude Code 2.1.332 sends `id`, `type`, `status` and `description` on every item of `background_tasks`, plus `command` for a shell, `name` for a workflow, `server` and `tool` for a monitor, and `agent_type` for a subagent. Its public types are `subagent`, `workflow`, `shell`, `monitor`, `MCP task`, `teammate`, `cloud session`, `dream`, `auto-mode scan` and `memory save`. keepwarm's Stop reader, `tools/sensor-keepwarm/src/background.rs`, reads this shape. The row itself is left as surveyed on 2026-10-22.
+
 ## Two routes into a skill
 
 A skill reaches the model by one of two routes, and they fire different hooks.
