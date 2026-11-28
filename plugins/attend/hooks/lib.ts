@@ -298,7 +298,22 @@ export type Mod = {
   isCueWaiting: boolean
   /** The keepalive policy's state (ADR-414). */
   ka: Keepalive
+  /** The model's window the last `session.measure` reported, in tokens,
+   *  which the boundary tool's brief takes for the fill. */
+  contextWindow: number | undefined
+  /** What will have started the next main-loop turn, and what started the
+   *  one running: an operator's prompt, or a `/wrap` the operator typed
+   *  without `boundary`. The boundary tool reads `turnStart`.
+   *
+   *  References:
+   *  - ADR-418 §13: no self-compaction while the operator is talking.
+   *  - ADR-418 §14 item 2(b): a `/wrap` the operator types is not judged. */
+  nextTurn: TurnStart
+  turnStart: TurnStart
 }
+
+/** What started a main-loop turn ([`Mod.turnStart`]). */
+export type TurnStart = { isOperator: boolean; isTypedWrap: boolean }
 
 export type Keepalive = {
   /** keepaliveApplies: an interactive session, keepwarm on, the policy
