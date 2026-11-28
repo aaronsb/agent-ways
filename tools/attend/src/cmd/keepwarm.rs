@@ -9,7 +9,8 @@
 
 use crate::cli::{KeepwarmCheckArgs, KeepwarmCmd};
 use crate::util::keepwarm_dir;
-use sensor_keepwarm::policy::{self, Config, Fill, Gate, Handoff, Policy, SessionSkills, Site, WrapOutcome};
+use sensor_keepwarm::policy::armed::{self, Judgement, Sufficiency, Verdict};
+use sensor_keepwarm::policy::{self, Action, Config, Fill, Gate, Handoff, Policy, SessionSkills, Site, WrapOutcome};
 use sensor_keepwarm::{
     card, card_state, check_once, fmt_duration, lock_session, parse_duration, read_arm, read_context, read_ledger, settle, write_arm,
     write_ledger, ArmFile, State, DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
@@ -80,6 +81,51 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 std::process::exit(1);
             }
             println!("keepalive count reset");
+            // The operator is back: an armed exit is disarmed with the
+            // ledger, and the finished mark clears as `attend listen on`
+            // clears it.
+            //
+            // References:
+            // - ADR-418 item 13: an operator prompt disarms the exit.
+            if attend_presence::enrollment::is_finished(sid) {
+                match crate::verbs::listen::on(None) {
+                    Ok(_) => println!("the session is no longer finished"),
+                    Err(e) => {
+                        eprintln!("keepwarm: could not clear the finished mark: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        KeepwarmCmd::Judged { wrap, verdict, handoff, own, reason } => {
+            let parsed = (Verdict::parse(&verdict), Sufficiency::parse(&handoff), Verdict::parse(&own));
+            let (Some(verdict), Some(handoff), Some(own)) = parsed else {
+                eprintln!("keepwarm judged takes --verdict stop|compact|continue|doubt, --handoff sufficient|holds-detail and --own stop|compact|continue");
+                std::process::exit(2);
+            };
+            let j = Judgement { wrap_id: wrap.trim().to_string(), verdict, handoff, own, reason };
+            let file = read_handoff(&ident.origin_path);
+            let _lock = lock_session(&dir, sid).ok();
+            let mut ledger = read_ledger(&dir, sid).unwrap_or_default();
+            if let Err(why) = armed::judged(&mut ledger.policy, j, file.as_ref(), now) {
+                eprintln!("keepwarm judged refused: {why}; nothing recorded");
+                std::process::exit(1);
+            }
+            ledger.updated_at = now;
+            if let Err(e) = write_ledger(&dir, sid, &ledger) {
+                eprintln!("keepwarm: could not write the ledger: {e}");
+                std::process::exit(1);
+            }
+            let id = wrap.trim();
+            if verdict == Verdict::Stop {
+                let stay = match handoff {
+                    Sufficiency::Sufficient => "while something is pending, up to the price of a fresh start",
+                    Sufficiency::HoldsDetail => "up to the price of a cold reload, since the handoff holds detail",
+                };
+                println!("exit armed for wrap {id}: each idle tick pings {stay}, and otherwise lets the cache lapse and marks the session finished");
+            } else {
+                println!("judged wrap {id}: {}, the handoff {}; no exit is armed", verdict.as_str(), handoff.as_str());
+            }
         }
         KeepwarmCmd::Wrapped { outcome, detail, path, save, focus, marker } => {
             let Some(o) = WrapOutcome::parse(&outcome) else {
@@ -105,16 +151,31 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 std::process::exit(1);
             }
         }
-        KeepwarmCmd::Compacted { failed } => {
+        KeepwarmCmd::Compacted { failed, trigger } => {
             let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
-            if !update_policy(&dir, sid, |p| policy::compacted(p, failed, now)) {
+            let mut took = true;
+            let recorded = update_policy(&dir, sid, |p| match trigger {
+                Some(_) => took = policy::boundary_compacted(p, failed, now),
+                None => policy::compacted(p, failed, now),
+            });
+            if !recorded {
                 std::process::exit(1);
             }
+            if !took {
+                eprintln!("keepwarm: a relay wrap waits to be judged, so its compaction is the relay's; the boundary compaction is not recorded");
+            }
         }
-        KeepwarmCmd::Resumed { failed } => {
+        KeepwarmCmd::Resumed { failed, trigger } => {
             let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
+            let boundary = trigger.is_some();
             let recorded = update_policy(&dir, sid, |p| match &failed {
+                // A boundary resume that did not go in counts no relay, and
+                // there is no relay wrap to stop.
+                Some(_) if boundary => {}
                 Some(why) => policy::resume_failed(p, why),
+                None if boundary => {
+                    policy::boundary_resumed(p, now);
+                }
                 // Only a relay wrap that compacted resumes: a report that
                 // lands after the operator's prompt changes nothing.
                 None if p.relay && p.compacted_at.is_some() && p.stopped.is_none() => policy::resumed(p, now),
@@ -300,7 +361,7 @@ fn nothing(reason: &str, next_at: Option<u64>) -> serde_json::Value {
         "wraps_at_hm": null, "wrapped_at_hm": null, "wrap": null, "retry": false, "idle": null,
         "after_count": 0, "after_max": 0, "compacts_at": null, "compacts_at_hm": null, "compacted_at_hm": null,
         "relay": false, "relay_count": 0, "max_relays": 0, "relay_at_tokens": null, "resume": null, "relay_stop": null,
-        "send_handoff": false, "wrap_id": null,
+        "send_handoff": false, "wrap_id": null, "exit": null,
     })
 }
 
@@ -325,9 +386,14 @@ fn site(ident: &attend_presence::session::SessionIdentity) -> Site {
 /// References:
 /// - ADR-417 item 4: the relay compacts with the handoff only when it is fresh.
 fn read_handoff(project: &str) -> Option<Handoff> {
+    let root = ways_core::handoff::repo_root(Path::new(project))?;
+    read_handoff_at(ways_core::handoff::path(&root))
+}
+
+/// The handoff file at `path`, read with no git: an armed exit's tick reads
+/// the file its judgment named.
+fn read_handoff_at(path: PathBuf) -> Option<Handoff> {
     use ways_core::handoff;
-    let root = handoff::repo_root(Path::new(project))?;
-    let path = handoff::path(&root);
     let text = std::fs::read_to_string(&path).ok()?;
     Some(Handoff {
         wrap_id: handoff::wrap_id_of(&text).map(str::to_string),
@@ -477,6 +543,9 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     if let (Some(tokens), Some(window)) = (args.fill, args.window) {
         pcfg.fill = Some(Fill { tokens, window, native_at: args.native_at });
     }
+    if let Some(p) = args.pending {
+        pcfg.pending = p;
+    }
     let Some(reading) = read_context(sid, &ident.origin_path) else {
         let why = "could not read the session transcript through `ways context`";
         if args.json {
@@ -504,10 +573,32 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     if ledger.as_ref().is_some_and(|l| l.policy.wants_handoff()) {
         site.handoff = read_handoff(&ident.origin_path);
     }
+    // An armed exit re-reads its handoff's first line at each tick, and
+    // counts the threads awaiting a reply as pending.
+    //
+    // References:
+    // - ADR-418 item 9: each tick checks the recorded wrap id against the
+    //   handoff.
+    if let Some(e) = ledger.as_ref().and_then(|l| l.policy.exit.as_ref()).filter(|e| e.armed()) {
+        if site.handoff.is_none() {
+            site.handoff = read_handoff_at(e.path.clone());
+        }
+        pcfg.pending.awaiting = crate::verbs::awaiting::count().count as u32;
+    }
     let mut state = State::resume(ledger);
     let arm = read_arm(&dir, sid);
     let (mut out, decision) = policy::step(&mut state, &reading, arm.as_ref(), &pcfg, gate, &site, now);
     state.policy.old_host = pcfg.session_skills == SessionSkills::NotChecked;
+    // The tick that finishes an armed exit marks the session finished in
+    // the same process, so peers see it before the cache has lapsed.
+    //
+    // References:
+    // - ADR-418 item 12: a stopped session is marked finished.
+    if decision.action == Action::Finish {
+        if let Err(e) = crate::verbs::listen::finish() {
+            eprintln!("keepwarm: could not mark the session finished: {e}");
+        }
+    }
     // The cursor and the gate move with every step.
     out.changed = true;
     settle(&dir, sid, &state, arm.as_ref(), &out, now);

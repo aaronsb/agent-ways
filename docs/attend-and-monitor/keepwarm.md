@@ -150,7 +150,7 @@ state       warm, 38m left
 context     182400 tokens
 cold cost   $1.82 to re-write it (warm turn $0.09)
 keepwarm    armed, 5h12m left · wake in 28m
-break-even  up to 20 wakes at the read rate cost one cold write, about 16h40m of idle at one wake per 50m
+rewrite     up to 20 wakes at the read rate cost one cold rewrite of this whole context, about 16h40m of idle at one wake per 50m
 session     1 cold write paid, $1.64
 ```
 
@@ -163,7 +163,8 @@ session     1 cold write paid, $1.64
 | `keepalive` | where the mod has run the idle path: the count of the maximum since your prompt, the next due point, the estimated wrap time and the windows; `off` with why (autocompact on, the policy disabled); `stopped` with why; or `wrapped` with where the reply went, a refused send's target and attend's reason included, then the keepalives after the wrap, the next due point and the estimated compaction, or when it compacted. Where no wrap can run, a line says why. Dropped window entries and an unknown timezone get lines of their own |
 | `relay` | the relay mode: `on` with the relays since your prompt, the most allowed, the fill at which the drain starts, the fill at which the mod wraps mid-work, and `draining` while the drain runs, such as `on · 1 of 5 since your prompt at 14:02 · drains at 75% and wraps mid-work at 85% of the window`; `stopped` with the reason and `your next prompt starts it again`; or `off (handoff mode)` |
 | `cost` | with the policy running: what its keepalives have cost since your prompt, the most still to spend in keepalives before the wrap, and a cold re-write now |
-| `break-even` | how many wakes cost the same as one rewrite, and how much idle time that covers; left out for a model with no price |
+| `exit` | after a boundary judgment: `armed` or `finished`, the wrap id, the judge's verdict and handoff answer, the agent's own call, the rent paid against the purchase price (a fresh start of 171k tokens for a sufficient handoff, a cold reload of the whole context for one that holds detail), and while armed the pings left |
+| `rewrite` | how many wakes cost the same as one cold rewrite of the whole current context, and how much idle time that covers; left out for a model with no price. The `exit` line prices a fresh start instead, which is smaller |
 | `session` | the cold writes this session has paid and their total |
 
 The `keepwarm` line says `armed` and `not armed`, never `on` and `off`: those are the values of the mod's `mods.attend.keepwarm` setting, which says whether the check runs at all, not whether a window is armed now.

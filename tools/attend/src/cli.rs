@@ -762,6 +762,10 @@ pub enum KeepwarmCmd {
         /// Why the compaction failed; absent when it ran
         #[arg(long)]
         failed: Option<String>,
+        /// boundary: the boundary tool started the compaction, and its
+        /// resume counts toward mods.attend.continuity.max_relays
+        #[arg(long, value_parser = ["boundary"])]
+        trigger: Option<String>,
     },
     /// Record that a relay's resume turn went in: the relay count goes up
     /// by one and the keepalive count starts again. The attend mod runs it
@@ -770,6 +774,35 @@ pub enum KeepwarmCmd {
         /// Why the resume did not go in, which stops the relay
         #[arg(long)]
         failed: Option<String>,
+        /// boundary: the resume after a compaction the boundary tool
+        /// started, which counts one relay like any other
+        #[arg(long, value_parser = ["boundary"])]
+        trigger: Option<String>,
+    },
+    /// Record the judge's verdict for a boundary wrap, its answer on the
+    /// handoff and the agent's own call. With --verdict stop it arms the
+    /// exit: each idle tick then pings while something is pending or the
+    /// handoff holds detail, up to the price of what replaces the session,
+    /// and otherwise lets the cache lapse and marks the session finished.
+    /// Refused, changing nothing, when .claude/handoff.wrap.md is missing or
+    /// its first line does not carry wrap=<ID>
+    Judged {
+        /// The boundary wrap's id, as the handoff's first line carries it
+        #[arg(long, value_name = "ID")]
+        wrap: String,
+        /// The judge's verdict
+        #[arg(long, value_parser = ["stop", "compact", "continue", "doubt"])]
+        verdict: String,
+        /// Whether a fresh start from the handoff replaces the session
+        /// (sufficient) or getting it back takes a cold reload (holds-detail)
+        #[arg(long, value_parser = ["sufficient", "holds-detail"])]
+        handoff: String,
+        /// The working agent's own call, recorded beside the judge's
+        #[arg(long, value_parser = ["stop", "compact", "continue"])]
+        own: String,
+        /// The judge's one line of reason
+        #[arg(long)]
+        reason: Option<String>,
     },
     /// Record that relay's drain turn went in, which starts this
     /// generation's drain: no further drain turn is offered until a
@@ -812,7 +845,8 @@ pub struct KeepwarmCheckArgs {
     #[arg(long)]
     pub policy: bool,
     /// Print the decision as one JSON object: action (none, keepalive,
-    /// wrap or compact), text, next_at, count, max, wraps_at and reason
+    /// drain, wrap, compact or finish), text, next_at, count, max,
+    /// wraps_at, reason, and exit for an armed or finished exit
     #[arg(long)]
     pub json: bool,
     /// The autocompact gate as the host read it: on, off or unknown. The
@@ -847,6 +881,11 @@ pub struct KeepwarmCheckArgs {
     /// that is lower
     #[arg(long, requires = "fill")]
     pub native_at: Option<u64>,
+    /// What still runs, as the host counted it: agents=N,shells=N,watchers=N.
+    /// While an exit is armed, these and the threads awaiting a reply keep
+    /// the cache warm up to the price of what replaces the session
+    #[arg(long, requires = "policy", value_name = "COUNTS", value_parser = sensor_keepwarm::policy::armed::Pending::parse)]
+    pub pending: Option<sensor_keepwarm::policy::armed::Pending>,
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.
