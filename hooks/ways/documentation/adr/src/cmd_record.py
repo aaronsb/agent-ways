@@ -93,8 +93,12 @@ def probe_names(adr) -> list:
     return names
 
 # A --via naming an advisor or an unattended run means the answer did not come
-# from the git user, so the default attribution would be wrong (#624).
-_NON_HUMAN_VIA = re.compile(r'advisor|skeptic|subagent|model|/goal', re.IGNORECASE)
+# from the git user, so the default attribution would be wrong (#624). It names
+# an advisor as the consider step does: advisor, skeptic, subagent, a second
+# model, or a model id such as claude-opus-4-7. The bare word "model" is not
+# matched, since an operator's own channel often holds it (#1402).
+_NON_HUMAN_VIA = re.compile(r'advisor|skeptic|subagent|/goal|second[- ]model|\bclaude-(?!code\b)[a-z0-9]',
+                            re.IGNORECASE)
 
 def cmd_consider(args):
     """Append one considered entry: the operator's answer to the Summary
