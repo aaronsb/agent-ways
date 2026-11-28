@@ -311,9 +311,11 @@ The relay-mode record is not edited by this one. When this record is accepted, i
 ### Neutral
 
 - Implementation adds the boundary tool and its verdict handling to the mod, the brief and its request through the relevance judge's interface, a `continuance` judgement profile beside `disclosure` in the judge settings, the `armed` and `finished` states and the judge's fields to attend's ledger, `hard_at_pct` to the settings registry, the resume line and the DECISIONS columns (blocks, lean, reversible) to the wrap skill's handoff, and the Opus 5.5 row to keepwarm's price table.
-- The finished mark is a small change to attend. The enrollment record in attend-presence (`enrollment.rs`) gains a `finished <secs>` line, with `finish()` to set it and `is_finished()` to read it, and `enroll(Listen)` clears it. A new verb, `attend listen finish`, sets the mark, and `attend listen on` and `attend listen beat` clear it. The peer list shows a finished session as `finished`. `send`, `resolve_recipient`, `resolve_project`, `check_channel` and `sender_dest` refuse a finished session with a new `RecipientFinished` error. Item 12 says when the mod sets and clears the mark.
+- The finished mark is a small change to attend. The enrollment record in attend-presence (`enrollment.rs`) gains a `finished <secs>` line, with `finish()` to set it and `is_finished()` to read it, and `enroll(Listen)` clears it. A new verb, `attend listen finish`, sets the mark, and `attend listen on` clears it. `attend listen beat` keeps the mark, because the mod beats on a timer whether or not anyone uses the session. The peer list shows a finished session as `finished`. `send`, `resolve_recipient`, `resolve_project`, `check_channel` and `sender_dest` refuse a finished session with a new `RecipientFinished` error. Item 12 says when the mod sets and clears the mark.
 
 > Edited 2026-11-27: the finished mark's change set was added from the probe of 2026-11-27 (Probe findings).
+
+> Edited 2026-11-27: the finished mark's change set was corrected to the code, where a beat keeps the mark. The sentence read: "A new verb, `attend listen finish`, sets the mark, and `attend listen on` and `attend listen beat` clear it."
 - The PreCompact hook stays as the relay mode defines it, and covers the compaction past the hard line.
 - The design favors the main session as a supervisor of subagents, which keeps its context small and makes its compactions cheap to lose.
 
