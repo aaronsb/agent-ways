@@ -12,7 +12,8 @@
 //!   states, and the handoff as the exit flag.
 
 use super::*;
-use crate::policy::armed::{self as exit, bound, judged, Judgement, Pending, Sufficiency, Verdict};
+use crate::background::Background;
+use crate::policy::armed::{self as exit, bound, judged, Given, Judgement, Pending, Sufficiency, Verdict};
 
 const OPUS: &str = "claude-opus-5-5";
 const WRAP: &str = "20261127T0900Z-3f9a1c2e";
@@ -215,13 +216,60 @@ fn outside_the_keepalive_hours_an_armed_exit_finishes() {
 /// The mod's `--pending agents=N,shells=N,watchers=N`.
 #[test]
 fn pending_parses_the_mod_s_counts() {
-    assert_eq!(Pending::parse("agents=2,shells=0,watchers=1"), Ok(Pending { awaiting: 0, agents: 2, shells: 0, watchers: 1 }));
-    assert_eq!(Pending::parse("shells=3"), Ok(Pending { shells: 3, ..Pending::default() }));
-    assert_eq!(Pending::parse(""), Ok(Pending::default()));
+    let counts = |s: &str| Given::parse(s).map(|g| g.counts);
+    assert_eq!(counts("agents=2,shells=0,watchers=1"), Ok(Pending { awaiting: 0, agents: 2, shells: 0, watchers: 1 }));
+    assert_eq!(counts("shells=3"), Ok(Pending { shells: 3, ..Pending::default() }));
+    assert_eq!(counts(""), Ok(Pending::default()));
     assert!(!Pending::default().any());
     for bad in ["agents", "agents=x", "pets=1", "agents=1,agents=2", "agents=-1"] {
-        assert!(Pending::parse(bad).is_err(), "{bad}");
+        assert!(Given::parse(bad).is_err(), "{bad}");
     }
+}
+
+/// Shells and watchers the host does not name come from the last Stop's
+/// record; a count the host gives wins, zero included.
+#[test]
+fn the_stop_s_record_fills_the_shells_and_watchers_the_host_left_out() {
+    let bg = Background { shells: vec!["cargo test".into()], watchers: vec!["watch CI".into(), "watch logs".into()], workflows: vec!["wave3".into()], at: 1 };
+    let g = Given::parse("agents=2").unwrap();
+    assert_eq!(g.with(Some(&bg)), Pending { awaiting: 0, agents: 2, shells: 1, watchers: 2 }, "the host's agents win over the workflows");
+    assert_eq!(g.with(None), Pending { agents: 2, ..Pending::default() });
+    let g = Given::parse("shells=0").unwrap();
+    assert_eq!(g.with(Some(&bg)), Pending { agents: 1, shells: 0, watchers: 2, ..Pending::default() });
+    assert_eq!(Given::default().with(Some(&bg)), Pending { agents: 1, shells: 1, watchers: 2, ..Pending::default() });
+}
+
+/// A workflow the Stop listed running orchestrates agents: it keeps an
+/// armed exit pinging as an agent does.
+#[test]
+fn a_recorded_workflow_keeps_an_armed_exit_pinging() {
+    let mut c = cfg();
+    let payload = r#"{"background_tasks":[{"id":"w1","type":"workflow","status":"running","description":"build","name":"wave3"}]}"#;
+    c.pending = Given::default().with(crate::background::from_stop_payload(payload, MONDAY).as_ref());
+    let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+    let d = s.check_at(&c, Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+    assert_eq!(d.action, Action::Keepalive, "{d:?}");
+    assert!(d.reason.contains("1 agent"), "{}", d.reason);
+}
+
+/// A Stop that listed a running shell keeps the armed exit pinging with no
+/// `--pending` from the host; one that listed nothing lets it finish.
+#[test]
+fn a_recorded_shell_pings_and_an_empty_record_finishes() {
+    let stop = |payload: &str| {
+        let mut c = cfg();
+        c.pending = Given::default().with(crate::background::from_stop_payload(payload, MONDAY).as_ref());
+        c
+    };
+    let shell = stop(r#"{"background_tasks":[{"id":"b1","type":"shell","status":"running","description":"suite","command":"cargo test"}]}"#);
+    let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+    let d = s.check_at(&shell, Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+    assert_eq!(d.action, Action::Keepalive, "{d:?}");
+    assert!(d.reason.contains("1 shell"), "{}", d.reason);
+    let empty = stop(r#"{"background_tasks":[]}"#);
+    let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+    let d = s.check_at(&empty, Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+    assert_eq!(d.action, Action::Finish, "{d:?}");
 }
 
 /// A compaction the boundary tool starts counts one relay once its resume

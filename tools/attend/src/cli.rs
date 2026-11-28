@@ -714,8 +714,11 @@ pub enum KeepwarmCmd {
     },
     /// Disarm and forget the window
     Off,
-    /// Cache state, context size, cold price, window left, and this session's cold writes
-    Status,
+    /// Cache state, context size, cold price, window left, and this session's cold writes.
+    /// With --json, the stop exit alone, read from the ledger with no
+    /// transcript read: `exit` is its state (armed or finished), wrap id,
+    /// pings, rent and purchase, or null with none
+    Status(JsonArgs),
     /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
     /// one is due, else nothing (exit 0 either way). The attend mod polls
     /// it.
@@ -904,9 +907,10 @@ pub struct KeepwarmCheckArgs {
     pub native_at: Option<u64>,
     /// What still runs, as the host counted it: agents=N,shells=N,watchers=N.
     /// While an exit is armed, these and the threads awaiting a reply keep
-    /// the cache warm up to the price of what replaces the session
-    #[arg(long, requires = "policy", value_name = "COUNTS", value_parser = sensor_keepwarm::policy::armed::Pending::parse)]
-    pub pending: Option<sensor_keepwarm::policy::armed::Pending>,
+    /// the cache warm up to the price of what replaces the session. Shells
+    /// and watchers left out are the ones the last Stop hook listed
+    #[arg(long, requires = "policy", value_name = "COUNTS", value_parser = sensor_keepwarm::policy::armed::Given::parse)]
+    pub pending: Option<sensor_keepwarm::policy::armed::Given>,
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.

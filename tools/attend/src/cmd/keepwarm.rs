@@ -7,7 +7,7 @@
 //! sensor and the check do the judging; these verbs own the arm file, the
 //! policy's marks in the ledger, and render the card.
 
-use crate::cli::{KeepwarmCheckArgs, KeepwarmCmd};
+use crate::cli::{JsonArgs, KeepwarmCheckArgs, KeepwarmCmd};
 use crate::util::keepwarm_dir;
 use sensor_keepwarm::policy::armed::{self, Judgement, Sufficiency, Verdict};
 use sensor_keepwarm::policy::{self, Action, Config, Fill, Gate, Handoff, Policy, SessionSkills, Site, WrapOutcome};
@@ -233,7 +233,17 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             Some(id) => println!("{id}"),
             None => std::process::exit(1),
         },
-        KeepwarmCmd::Status => {
+        // The stop exit alone, for the attend mod: a process that resumes a
+        // session learns of an exit an earlier one recorded, and resets it
+        // at the operator's prompt.
+        //
+        // References:
+        // - ADR-418 item 9: an operator prompt disarms the exit.
+        KeepwarmCmd::Status(JsonArgs { json: true }) => {
+            let state = State::resume(read_ledger(&dir, sid));
+            println!("{}", serde_json::json!({ "exit": armed::view(&state) }));
+        }
+        KeepwarmCmd::Status(_) => {
             let Some(reading) = read_context(sid, &ident.origin_path) else {
                 eprintln!("keepwarm: could not read the session transcript through `ways context`");
                 std::process::exit(1);
@@ -482,15 +492,16 @@ fn settings_stamps(project: &str) -> serde_json::Value {
 /// write before a check removes it.
 const STALE_SECS: u64 = 7 * 24 * 3600;
 
-/// Removes other sessions' kept settings reads whose ledger is gone or has
-/// not been written for [`STALE_SECS`]: nothing else removes them.
+/// Removes other sessions' kept settings reads and Stop records of their
+/// background work whose ledger is gone or has not been written for
+/// [`STALE_SECS`]: nothing else removes them.
 fn prune_stale(dir: &Path, sid: &str, now: u64) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         // Lock files stay: one may be held, and a writer that then locked a
         // new file would hold a second lock beside the first. They are empty.
-        let Some(other) = name.strip_suffix(".settings.json") else { continue };
+        let Some(other) = name.strip_suffix(".settings.json").or_else(|| name.strip_suffix(".background.json")) else { continue };
         if other == sid {
             continue;
         }
@@ -572,9 +583,6 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     if let (Some(tokens), Some(window)) = (args.fill, args.window) {
         pcfg.fill = Some(Fill { tokens, window, native_at: args.native_at });
     }
-    if let Some(p) = args.pending {
-        pcfg.pending = p;
-    }
     let Some(reading) = read_context(sid, &ident.origin_path) else {
         let why = "could not read the session transcript through `ways context`";
         if args.json {
@@ -603,7 +611,9 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         site.handoff = read_handoff(&ident.origin_path);
     }
     // An armed exit re-reads its handoff's first line at each tick, and
-    // counts the threads awaiting a reply as pending.
+    // counts as pending the host's agents, the shells and watchers the last
+    // Stop hook listed where the host named none, and the threads awaiting
+    // a reply.
     //
     // References:
     // - ADR-418 item 9: each tick checks the recorded wrap id against the
@@ -612,6 +622,7 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         if site.handoff.is_none() {
             site.handoff = read_handoff_at(e.path.clone());
         }
+        pcfg.pending = args.pending.unwrap_or_default().with(sensor_keepwarm::background::read(&dir, sid).as_ref());
         pcfg.pending.awaiting = crate::verbs::awaiting::count().count as u32;
     }
     let mut state = State::resume(ledger);

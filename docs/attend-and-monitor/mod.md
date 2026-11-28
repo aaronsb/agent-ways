@@ -78,6 +78,8 @@ In every interactive session with the mod, listening or dormant, the mod runs th
 
 A dormant session does this with no poll, no drain and no listening. With relay off and autocompact on it runs nothing. Where the idle path applies, its timer drives every cache wake the mod makes, the wakes of an armed window included; the poll's plain `attend keepwarm check` runs only where it does not apply (a polling `-p` run, or `continuity.keepalive: false`).
 
+A stop exit, the state a judge's stop verdict arms at a work boundary, makes the policy apply in an interactive session whose settings run none. The mod learns of one from a Bash command that records a stop verdict (`attend keepwarm judged ... --verdict stop`), from a check whose decision reads `armed` or `finished`, from the row a reload finds, or, at activation, from `attend keepwarm status --json`, which reads attend's ledger, so a process that resumes the session knows of an exit an earlier process recorded. While it stands, the check runs at the ticks attend names and passes `--pending agents=N` when agent loops are in flight, and `agents=1` when `$.agent.list()` cannot be read; attend reads the shells, the watchers and the workflows, which it counts as agents, from the Stop hook's `background_tasks`. On `finish` the mod submits nothing and sets no timer, and attend has already marked the session finished. The operator's next prompt runs `attend keepwarm reset`, whatever the gate reads, which disarms the exit and clears the mark. The first check that reports no exit returns such a session to the plain check. The row reads `⟳ exit armed · next 41m`, then `⟳ finished`.
+
 The row gains one segment while the policy runs: `⟳ 2/8 · next 41m · wrap ~21:40`, then `⟳ wrapped 21:40` (with `· handoff refused` when a send was refused) or `⟳ stopped`. In relay mode it reads `⟳ relay 2/5` from the first resume until the operator's next prompt, and after a stop it names the reason, such as `⟳ relay stopped: decision`, `⟳ relay stopped: 5 of 5` at `max_relays`, `⟳ relay stopped: no marker`, `⟳ relay stopped: stale handoff`, `⟳ relay stopped: goal ended` or `⟳ relay stopped: compaction failed`. A dormant session draws the segment alone, in the same slot, from its first keepalive until the operator's next prompt.
 
 ## Configuration
@@ -152,6 +154,7 @@ The mod depends on attend's `listen`, `unread` and `keepwarm check` verbs and on
 - ADR-182: keepwarm's wakes while a window is armed.
 - ADR-414: the continuity policy's idle path, its keepalives and its wrap.
 - ADR-417: relay mode, its row text, and the rename of the keys to `mods.attend.continuity`.
+- ADR-418 item 9: the armed exit, its finish at a tick, and the operator's prompt that disarms it.
 - ADR-512: the mod's settings under `mods.attend`.
 - ADR-416 item 2: the sensor host as the mod's child, its stdout cue, and its respawn after a `/clear` and after an exit of its own.
 - ADR-416: awareness reaches a Claude Code session only through the attend mod, which starts the sensor host.
