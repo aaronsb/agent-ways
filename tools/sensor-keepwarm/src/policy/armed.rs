@@ -174,11 +174,21 @@ pub struct Pending {
     pub watchers: u32,
 }
 
-impl Pending {
+/// `--pending` as the host gave it: the counts, and whether it named shells
+/// and watchers. The mod names agents alone, and the shells and watchers
+/// come from the last Stop's record ([`crate::background`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Given {
+    pub counts: Pending,
+    pub shells: bool,
+    pub watchers: bool,
+}
+
+impl Given {
     /// `agents=N,shells=N,watchers=N`, each key at most once, any left out
-    /// read as zero.
-    pub fn parse(s: &str) -> Result<Pending, String> {
-        let mut p = Pending::default();
+    /// read as zero and as not given.
+    pub fn parse(s: &str) -> Result<Given, String> {
+        let mut g = Given::default();
         let mut seen = Vec::new();
         for part in s.split(',').map(str::trim).filter(|x| !x.is_empty()) {
             let (k, v) = part.split_once('=').ok_or_else(|| format!("{part:?} is not key=N"))?;
@@ -188,16 +198,33 @@ impl Pending {
                 return Err(format!("{k} is given twice"));
             }
             match k {
-                "agents" => p.agents = n,
-                "shells" => p.shells = n,
-                "watchers" => p.watchers = n,
+                "agents" => g.counts.agents = n,
+                "shells" => (g.counts.shells, g.shells) = (n, true),
+                "watchers" => (g.counts.watchers, g.watchers) = (n, true),
                 _ => return Err(format!("{k:?} is not agents, shells or watchers")),
             }
             seen.push(k);
         }
-        Ok(p)
+        Ok(g)
     }
 
+    /// The counts, with the shells and watchers `bg` recorded in place of
+    /// any the host did not name. A count the host gave wins.
+    pub fn with(self, bg: Option<&crate::background::Background>) -> Pending {
+        let mut p = self.counts;
+        if let Some(b) = bg {
+            if !self.shells {
+                p.shells = b.shells.len() as u32;
+            }
+            if !self.watchers {
+                p.watchers = b.watchers.len() as u32;
+            }
+        }
+        p
+    }
+}
+
+impl Pending {
     pub fn any(&self) -> bool {
         self.awaiting + self.agents + self.shells + self.watchers > 0
     }

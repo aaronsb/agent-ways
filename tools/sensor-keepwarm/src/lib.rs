@@ -28,6 +28,7 @@
 //! - ADR-182: the wake, its clock, its verdict and arming.
 //! - ADR-406 item 13: the mod polls the check.
 
+pub mod background;
 pub mod policy;
 pub mod windows;
 

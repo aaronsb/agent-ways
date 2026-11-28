@@ -1024,6 +1024,38 @@ fn a_stop_exit_runs_with_autocompact_on_and_says_when_keepwarm_is_off() {
     );
 }
 
+/// The Stop hook's background work, through the drain: a running shell and
+/// a monitor keep an armed exit pinging with no `--pending` from the host,
+/// a `--pending` that names them wins, and a Stop that lists nothing lets
+/// the exit finish.
+///
+/// References:
+/// - ADR-418 item 5: shells and watchers in flight are pending.
+#[test]
+fn the_stop_hook_s_background_work_keeps_an_armed_exit_pinging() {
+    const RUNNING: &str = r#"{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[{"id":"b1","type":"shell","status":"running","description":"suite","command":"cargo test"},{"id":"m1","type":"monitor","status":"running","description":"watch CI"}]}"#;
+    let id = "20261127T0900Z-3f9a1c2e";
+    let armed = |tag: &str, payload: &str| {
+        let w = Warm::new(tag);
+        handoff_for(&w, Some(id));
+        assert!(judged(&w, id, "stop").status.success());
+        w.f.drain_hook_with(payload);
+        w.reading(&[(50 * MIN, 200_000, 500)]);
+        w
+    };
+    let w = armed("kw-exit-bg-running", RUNNING);
+    let d = policy(&w, "off");
+    assert_eq!(d["action"], "keepalive", "{d}");
+    assert!(d["reason"].as_str().unwrap().contains("1 shell, 1 watcher"), "{d}");
+    let w = armed("kw-exit-bg-named", RUNNING);
+    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "off", "--skills", "wrap", "--pending", "agents=0,shells=0,watchers=0"]);
+    let d: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(d["action"], "finish", "the host's counts win: {d}");
+    let w = armed("kw-exit-bg-empty", r#"{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[]}"#);
+    let d = policy(&w, "off");
+    assert_eq!(d["action"], "finish", "{d}");
+}
+
 /// `compacted --trigger boundary` while a relay wrap waits is refused with
 /// exit 1 and writes nothing.
 #[test]

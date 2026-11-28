@@ -663,7 +663,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 * `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window starts the drain with one drain turn, a fill past mods.attend.continuity.hard_at_pct sends a wrap, and a fill under the drain point ends the drain
 * `--window <WINDOW>` — The model's whole context window, in tokens
 * `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the hard line sits five points of the window under it where that is lower
-* `--pending <COUNTS>` — What still runs, as the host counted it: agents=N,shells=N,watchers=N. While an exit is armed, these and the threads awaiting a reply keep the cache warm up to the price of what replaces the session
+* `--pending <COUNTS>` — What still runs, as the host counted it: agents=N,shells=N,watchers=N. While an exit is armed, these and the threads awaiting a reply keep the cache warm up to the price of what replaces the session. Shells and watchers left out are the ones the last Stop hook listed
 
 
 

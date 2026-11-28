@@ -566,9 +566,6 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     if let (Some(tokens), Some(window)) = (args.fill, args.window) {
         pcfg.fill = Some(Fill { tokens, window, native_at: args.native_at });
     }
-    if let Some(p) = args.pending {
-        pcfg.pending = p;
-    }
     let Some(reading) = read_context(sid, &ident.origin_path) else {
         let why = "could not read the session transcript through `ways context`";
         if args.json {
@@ -597,7 +594,9 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         site.handoff = read_handoff(&ident.origin_path);
     }
     // An armed exit re-reads its handoff's first line at each tick, and
-    // counts the threads awaiting a reply as pending.
+    // counts as pending the host's agents, the shells and watchers the last
+    // Stop hook listed where the host named none, and the threads awaiting
+    // a reply.
     //
     // References:
     // - ADR-418 item 9: each tick checks the recorded wrap id against the
@@ -606,6 +605,7 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         if site.handoff.is_none() {
             site.handoff = read_handoff_at(e.path.clone());
         }
+        pcfg.pending = args.pending.unwrap_or_default().with(sensor_keepwarm::background::read(&dir, sid).as_ref());
         pcfg.pending.awaiting = crate::verbs::awaiting::count().count as u32;
     }
     let mut state = State::resume(ledger);
