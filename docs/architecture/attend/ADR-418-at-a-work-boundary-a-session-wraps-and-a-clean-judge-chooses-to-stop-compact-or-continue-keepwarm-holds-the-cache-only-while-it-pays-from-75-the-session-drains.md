@@ -80,6 +80,12 @@ considered:
   - operator: aaronsb
     said: "yes, everywhere"
     via: "operator in the coordinating session's chat, 2026-11-27, answering decision 5 of issue #1400, whether the boundary tool registers in every session, offering stop and continue only with relay off"
+  - operator: aaronsb
+    said: "1. Yes [the boundary tool registers in interactive sessions only, and not in a claude -p run or an SDK session]"
+    via: the operator in chat with the coordinating session, 2026-11-28, after asking what non-interactive means; relayed verbatim by the coordinator
+  - operator: aaronsb
+    said: "2. Yes [a doubt that comes from no verdict, because the brief failed, the judge fell back or its reply did not parse, arms the exit and sends the handoff but never compacts]"
+    via: the operator in chat with the coordinating session, 2026-11-28, after asking what non-interactive means; relayed verbatim by the coordinator
 status: accepted
 date: 2026-11-27
 deciders:
