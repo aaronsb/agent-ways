@@ -198,11 +198,11 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "gate.profiles.*.judgements.continuance.model",
         path: &["profiles", "*", "judgements", "continuance", "model"],
-        kind: Kind::Text,
+        kind: Kind::ChoiceOf { options: model_ids, multi: false },
         default: DefaultValue::Fn(|b| shipped_field(b, "judgements.continuance.model")),
         check: Some(check_model),
         doc: "The model that judges at a work boundary whether a session stops, compacts or continues.",
-        long: "The continuance judgement is set apart from disclosure: changing it never changes the profile's model, and changing the profile's model never changes it. gate.mode does not govern it. The key takes any model id in the provider's form. The shipped profiles name Claude Haiku 5.5. A profile that changes provider takes that provider's shipped continuance model unless it sets its own. A bad value under judgements falls back alone, and the profile's other settings load as written.",
+        long: "The continuance judgement is set apart from disclosure: changing it never changes the profile's model, and changing the profile's model never changes it. gate.mode does not govern it. The shipped profiles name Claude Haiku 5.5. The key offers the list of the profile's provider, as the model key does. A profile that changes provider takes that provider's shipped continuance model unless it sets its own. A bad value under judgements falls back alone, and the profile's other settings load as written.",
         ..BASE
     },
     KeySpec {
