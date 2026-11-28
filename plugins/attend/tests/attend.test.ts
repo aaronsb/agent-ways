@@ -11,7 +11,7 @@ import {
   DEFAULT_CONFIG,
   RELAY_MARKER,
   agentsInFlight,
-  isJudgedStop,
+  isJudgedArming,
   compactedArgv,
   nativeThresholdFrom,
   drainAtTokens,
@@ -195,14 +195,17 @@ type World = {
   exitStatus?: string
   /** The handoff `$.fs.read` finds at the repository root; absent: no file. */
   handoff?: string
-  /** What `attend keepwarm brief` prints; the default lists nothing in flight. */
-  brief?: string
+  /** What `attend keepwarm brief` prints, or prints given every argv run so
+   *  far; the default lists nothing in flight. */
+  brief?: string | ((argvs: string[][]) => string)
   /** What `ways judge continuance` prints before `--parse`; the default is a job. */
   judge?: string
   /** What `$.model.complete` resolves to; the default answers BOUNDARY_STOP. */
   model?: { isAnswered: boolean; text?: string; reason?: string }
   /** What `attend keepwarm judged` answers; the default records it. */
   judged?: ProcessRunResult
+  /** The route `judged --json` gives a doubt; DOUBT_ROUTE when not given. */
+  doubtRoute?: unknown
   /** The tasks the `TaskList` tool lists. */
   tasks?: { id: string; subject: string; status: string }[]
 }
@@ -215,6 +218,10 @@ const verdictJson = (verdict: string, o: Record<string, unknown> = {}) =>
 const BOUNDARY_STOP = verdictJson('stop')
 /** The job `ways judge continuance --host` prints on claude-code. */
 const JOB = { model: 'haiku', system: 'You decide, at a work boundary.', prompt: 'the brief', max_tokens: 512, timeout_ms: 20_000 }
+/** The route attend gives a doubt's handoff in `judged --json`, its
+ *  handoff line naming the judge's doubt. */
+const DOUBT_HANDOFF = 'handoff: continuation prompt from Chaucer-alpha (agent-ways), wrapped at 09:00 while its operator was away. The relay stopped: the boundary judge said doubt.'
+const DOUBT_ROUTE = { dest: 'transcript', file: '/state/wrap/s1.md', to: 'aaron', after: 'relay', after_keepalives: 0, handoff: DOUBT_HANDOFF }
 /** The brief with nothing in flight, in the shape attend prints. */
 function briefJson(o: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -479,12 +486,14 @@ function host(on: On, world: World) {
       return ok(`${JSON.stringify({ fallback: `invalid_reply: ${answer.reason ?? 'not the verdict object alone'}` })}\n`)
     }
     if (argv[0] === 'ways' && cmd.startsWith('judge continuance')) return ok(`${world.judge ?? JSON.stringify({ job: JOB })}\n`)
-    if (cmd === 'keepwarm brief') return ok(world.brief ?? briefJson())
+    if (cmd === 'keepwarm brief') return ok(typeof world.brief === 'function' ? world.brief(argvs) : (world.brief ?? briefJson()))
+    // `judged --json`: the move arms on stop and doubt, and a doubt carries
+    // the route its handoff goes by, as attend resolves it.
     if (cmd.startsWith('keepwarm judged')) {
       if (world.judged) return world.judged
-      const id = argv[argv.indexOf('--wrap') + 1]
-      const v = argv[argv.indexOf('--verdict') + 1]
-      return ok(v === 'stop' ? `exit armed for wrap ${id}: each idle tick pings while something is pending, up to the price of a fresh start, and otherwise lets the cache lapse and marks the session finished\n` : `judged wrap ${id}: ${v}, the handoff sufficient; no exit is armed\n`)
+      const move = argv[argv.indexOf('--move') + 1]
+      const wrap = move === 'doubt' ? (world.doubtRoute === undefined ? DOUBT_ROUTE : world.doubtRoute) : null
+      return ok(`${JSON.stringify({ recorded: true, armed: move === 'stop' || move === 'doubt', move, wrap })}\n`)
     }
     // The keepalive policy runs only where ways says enabled: true.
     if (argv[0] === 'ways' && world.waysFails) return { ...ok(), exitCode: 1, stderr: 'ways: settings unreadable' }
@@ -3478,24 +3487,37 @@ describe('the armed exit', () => {
     expect(policyArgv('on', { names: [], isPartial: false }, false, undefined, 2).slice(-2)).toEqual(['--pending', 'agents=2'])
     expect(policyArgv('on', { names: [], isPartial: false }, true, undefined, 2)).not.toContain('--pending')
     expect(agentsInFlight([{ status: 'running' }, { status: 'waiting' }, { status: 'pending' }, { status: 'idle' }, { status: 'completed' }, { status: 'killed' }])).toBe(3)
-    expect(isJudgedStop(JUDGED)).toBe(true)
-    expect(isJudgedStop(`cd /p && ~/.local/bin/attend keepwarm judged --wrap ${WRAP_ID} --verdict=stop --handoff holds-detail --own compact`)).toBe(true)
-    expect(isJudgedStop(`attend keepwarm judged --wrap ${WRAP_ID} --verdict compact --handoff sufficient --own stop`)).toBe(false)
-    expect(isJudgedStop('attend keepwarm check --policy --json')).toBe(false)
+    expect(isJudgedArming(JUDGED)).toBe(true)
+    expect(isJudgedArming(`cd /p && ~/.local/bin/attend keepwarm judged --wrap ${WRAP_ID} --verdict=stop --handoff holds-detail --own compact`)).toBe(true)
+    expect(isJudgedArming(`attend keepwarm judged --wrap ${WRAP_ID} --verdict compact --handoff sufficient --own stop`)).toBe(false)
+    expect(isJudgedArming('attend keepwarm check --policy --json')).toBe(false)
     // A command split across lines, and a quoted reason holding ; | & before the verdict.
-    expect(isJudgedStop(`attend keepwarm judged --wrap ${WRAP_ID} \\\n  --verdict stop --handoff sufficient --own stop`)).toBe(true)
-    expect(isJudgedStop(`attend keepwarm judged --wrap ${WRAP_ID} --reason "landed; CI | green & merged" --verdict stop --handoff sufficient --own stop`)).toBe(true)
+    expect(isJudgedArming(`attend keepwarm judged --wrap ${WRAP_ID} \\\n  --verdict stop --handoff sufficient --own stop`)).toBe(true)
+    expect(isJudgedArming(`attend keepwarm judged --wrap ${WRAP_ID} --reason "landed; CI | green & merged" --verdict stop --handoff sufficient --own stop`)).toBe(true)
+    // The move decides: stop and doubt arm, continue and compact never,
+    // whatever the verdict; with no --move, the verdict does.
+    const judged = (flags: string) => `attend keepwarm judged --wrap ${WRAP_ID} ${flags} --handoff sufficient --own stop`
+    expect(isJudgedArming(judged('--verdict compact --move stop'))).toBe(true)
+    expect(isJudgedArming(judged('--verdict continue --move=doubt'))).toBe(true)
+    expect(isJudgedArming(judged('--verdict doubt'))).toBe(true)
+    expect(isJudgedArming(judged('--verdict stop --move continue'))).toBe(false)
+    expect(isJudgedArming(judged('--move compact --verdict stop'))).toBe(false)
+    expect(isJudgedArming(judged('--verdict continue'))).toBe(false)
   })
 })
 
-// The boundary tool (#1397): the agent's `/wrap boundary` ends with it. The
-// mod checks the handoff, refuses before any judge call, gathers the brief,
-// judges, settles the two calls, and records the move with attend, which
-// arms the exit on stop. The pure pieces are tests/boundary.test.ts.
+// The boundary tool (#1397, #1398): the agent's `/wrap boundary` ends with
+// it. The mod checks the handoff, refuses before any judge call, gathers the
+// brief, judges, settles the two calls, and records the judge's verdict and
+// the move with attend, which arms the exit on stop and doubt. A doubt sends
+// the handoff to the operator; with relay on, a compact and a doubt compact
+// once the tool's turn ends. The pure pieces are tests/boundary.test.ts.
 //
 // References:
 // - ADR-418 §10: the judge, its brief and the mod's refusals.
-// - ADR-418 §12: the stop and continue rows.
+// - ADR-418 §11: doubt sends the handoff to the operator over attend.
+// - ADR-418 §12: the stop, compact and continue rows.
+// - ADR-418 §13: self-relays count toward `max_relays`.
 // - ADR-418 §14 item 2(b): a `/wrap` the operator types is not judged.
 describe('the boundary tool', () => {
   const MIN = 60_000
@@ -3512,6 +3534,28 @@ describe('the boundary tool', () => {
   const judgedRuns = (h: ReturnType<typeof host>) => h.argvs.filter(a => a.slice(1, 3).join(' ') === 'keepwarm judged')
   const policyChecks = (h: ReturnType<typeof host>) => h.argvs.filter(a => a.slice(1, 4).join(' ') === 'keepwarm check --policy')
   const stdinOf = (h: ReturnType<typeof host>, f: (argv: string[]) => boolean) => h.stdins.find(s => f(s.argv))?.stdin
+  const sends = (h: ReturnType<typeof host>) => h.argvs.filter(a => a[1] === 'message' && a[2] === 'send')
+  const relayReports = (h: ReturnType<typeof host>) => h.argvs.filter(a => a[1] === 'keepwarm' && (a[2] === 'compacted' || a[2] === 'resumed'))
+  const ARMED = 'Outcome: stop. The exit is armed: idle ticks keep the cache warm while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise let it lapse and mark the session finished.'
+  const COMPACT = { isAnswered: true, text: verdictJson('compact', { reason: 'two tasks remain', turns_left: 8 }) }
+  const DOUBT = { isAnswered: true, text: verdictJson('doubt', { reason: 'the direction is unclear', turns_left: 3 }) }
+  const TWO_TASKS = [{ id: '1', subject: 'write the tool', status: 'pending' }, { id: '2', subject: 'test the cap', status: 'in_progress' }]
+  // A relay session's check: the policy runs, and no relay has run yet.
+  const running = decision({ relay: true, max_relays: 5 })
+  const INSTRUCTIONS = `Summarize this session as the handoff below; keep its TASKS and DO NEXT whole.\n\n${HANDOFF.trimEnd()}`
+  const RESUME = (n: number) =>
+    `relay: the conversation was compacted at a work boundary; this is relay ${n} of 5 since the operator's last prompt. Read ${HANDOFF_PATH}. The task list survived the compaction; work from it and the handoff's TASKS, then start its DO NEXT. The operator is away: ask no questions. At the next boundary, run /wrap boundary.`
+
+  async function endTurn($: Engine, turnId: string) {
+    await $.turn.complete({ turnId, reason: 'answer', answer: 'wrapped', durationMs: 1, isAborted: false } as never)
+  }
+
+  async function rowSegment($: Engine): Promise<string | undefined> {
+    const ui = await $.ui.mount(BAND as never)
+    const found = (await ui.find({ text: /⟳/ } as never)) as unknown as { text?: string } | undefined
+    await ui.unmount()
+    return found?.text
+  }
 
   type Answer = { result: string; isError?: boolean }
 
@@ -3531,7 +3575,7 @@ describe('the boundary tool', () => {
     expect(h.tools).toContain('attend_boundary')
     const d = h.specs.attend_boundary!.description
     expect(d).toContain('With mods.attend.continuity.relay on, the verdicts are stop, compact, continue and doubt.')
-    expect(d).toContain('With relay off, the tool offers stop and continue only: compaction stays with the operator, so a compact verdict is carried out as stop, and doubt stops and leaves the handoff for the operator without compacting.')
+    expect(d).toContain('With relay off, the tool offers stop and continue only: compaction stays with the operator, so a compact verdict is carried out as stop, and doubt stops without compacting and sends the handoff to the operator over attend.')
     expect(Object.keys(h.specs.attend_boundary!.inputSchema.properties)).toEqual(['wrap_id', 'own_call'])
   })
 
@@ -3624,14 +3668,14 @@ describe('the boundary tool', () => {
     expect(stdinOf(h, a => a[0] === 'ways' && !a.includes('--parse'))).toBe(briefJson())
     expect(h.models).toEqual([{ model: 'haiku', system: JOB.system, prompt: JOB.prompt, maxTokens: 512, timeoutMs: 20_000 }])
     expect(judgedRuns(h)).toEqual([
-      ['attend', 'keepwarm', 'judged', '--wrap', WRAP_ID, '--verdict', 'stop', '--handoff', 'sufficient', '--own', 'stop', '--reason', 'the release landed and nothing remains'],
+      ['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'stop', '--handoff', 'sufficient', '--own', 'stop', '--move', 'stop', '--reason', 'the release landed and nothing remains'],
     ])
     expect(r.result.split('\n')).toEqual([
       'Verdict: stop; handoff sufficient; turns left 0.',
       'Reason: the release landed and nothing remains',
       'Next step: pick the next card from the plan',
       'Mode: relay off (stop and continue only; compaction stays with the operator).',
-      `Outcome: stop. exit armed for wrap ${WRAP_ID}: each idle tick pings while something is pending, up to the price of a fresh start, and otherwise lets the cache lapse and marks the session finished`,
+      'Outcome: stop. The exit is armed: idle ticks keep the cache warm while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise let it lapse and mark the session finished.',
       'End the turn and start nothing new. An operator prompt disarms the exit.',
     ])
     // A default session runs the plain check until the exit stands; from here the policy check runs.
@@ -3688,7 +3732,7 @@ describe('the boundary tool', () => {
     const h = host(on, { config: DEFAULT, autocompact: true, handoff: HANDOFF, policy: [finish], model: { isAnswered: true, text: verdictJson('compact', { reason: 'real work remains', turns_left: 9 }) } })
     await $.session.start(INTERACTIVE)
     const r = await boundary($, 'compact')
-    expect(judgedRuns(h)[0]).toEqual(['attend', 'keepwarm', 'judged', '--wrap', WRAP_ID, '--verdict', 'stop', '--handoff', 'sufficient', '--own', 'compact', '--reason', 'the judge said compact; carried out as stop: real work remains'])
+    expect(judgedRuns(h)[0]).toEqual(['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'compact', '--handoff', 'sufficient', '--own', 'compact', '--move', 'stop', '--reason', 'real work remains'])
     expect(r.result).toContain('Relay is off in this session, so compaction stays with the operator: the compact verdict is carried out as stop.')
     expect(r.result).toContain('Outcome: stop.')
     await clock.advance(120 * MIN)
@@ -3696,41 +3740,238 @@ describe('the boundary tool', () => {
     expect(h.commands).not.toContain('compact')
   })
 
-  test('relay off: no judge gives doubt, which stops and leaves the handoff for the operator without compacting', async ($, on) => {
+  test('relay off: no judge gives doubt, which arms the exit and sends the handoff to the operator, and nothing compacts', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: DEFAULT, autocompact: true, handoff: HANDOFF, policy: [finish], judge: JSON.stringify({ fallback: 'no_engine: no judge resolves' }) })
     await $.session.start(INTERACTIVE)
     const r = await boundary($, 'stop')
     expect(h.models).toEqual([])
-    expect(judgedRuns(h)[0]).toEqual(['attend', 'keepwarm', 'judged', '--wrap', WRAP_ID, '--verdict', 'stop', '--handoff', 'holds-detail', '--own', 'stop', '--reason', 'the judge said doubt; carried out as stop: no verdict from the judge: no_engine: no judge resolves'])
-    expect(r.result.split('\n').slice(0, 5)).toEqual([
+    expect(judgedRuns(h)).toEqual([
+      ['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'doubt', '--handoff', 'holds-detail', '--own', 'stop', '--move', 'doubt', '--reason', 'no verdict from the judge: no_engine: no judge resolves'],
+    ])
+    // attend's route and handoff line, then the handoff file's text.
+    expect(sends(h)).toEqual([['attend', 'message', 'send', '--to', 'aaron', '--', `${DOUBT_HANDOFF}\n${HANDOFF}`]])
+    expect(r.result.split('\n')).toEqual([
       'Verdict: doubt; handoff holds-detail; turns left 0.',
       'Reason: no verdict from the judge: no_engine: no judge resolves',
       'Next step: the operator reads the handoff',
       'Mode: relay off (stop and continue only; compaction stays with the operator).',
-      'Relay is off in this session: doubt stops without compacting, and the handoff stays in .claude/handoff.wrap.md for the operator.',
+      'Relay is off in this session: doubt stops without compacting, and the handoff in .claude/handoff.wrap.md goes to the operator over attend.',
+      ARMED,
+      'The handoff went to aaron over attend.',
+      'End the turn and start nothing new. An operator prompt disarms the exit.',
     ])
+    // The exit stands: a default session runs the policy check at the first due point.
+    await clock.advance(51 * MIN)
+    expect(policyChecks(h).length).toBe(1)
     await clock.advance(120 * MIN)
+    expect(h.compacts).toEqual([])
+    expect(h.ran('keepwarm compacted')).toBe(false)
+  })
+
+  test('a doubt attend gives no route for sends nothing, and the result says the handoff stays in its file', async ($, on) => {
+    const h = host(on, { config: DEFAULT, autocompact: true, handoff: HANDOFF, model: DOUBT, doubtRoute: null })
+    await $.session.start(INTERACTIVE)
+    const r = await boundary($, 'stop')
+    expect(sends(h)).toEqual([])
+    expect(r.result.split('\n').slice(-2)).toEqual([
+      'attend gave no route for the handoff, so nothing was sent; it stays in .claude/handoff.wrap.md.',
+      'End the turn and start nothing new. An operator prompt disarms the exit.',
+    ])
+  })
+
+  // The card's test (#1398): a compact with two open tasks compacts between
+  // turns, then resumes, and the relay count goes up by one; at the cap
+  // nothing compacts.
+  test('relay on: compact with two open tasks compacts once the turn ends, resumes, and counts one relay; at the cap nothing compacts', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: true, handoff: HANDOFF, tasks: TWO_TASKS, model: COMPACT, policy: [running] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    const r = await boundary($, 'compact', { end: false })
+    expect(judgedRuns(h)).toEqual([
+      ['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'compact', '--handoff', 'sufficient', '--own', 'compact', '--move', 'compact', '--reason', 'two tasks remain'],
+    ])
+    expect(r.result.split('\n').slice(3)).toEqual([
+      'Mode: relay on (stop, compact, continue and doubt).',
+      'Outcome: compact. Nothing is armed. Once this turn ends, the mod compacts with the handoff as relay 1 of 5, then submits the resume while tasks remain, or arms the exit when none do. A turn that starts first defers the compaction, and an operator prompt cancels it.',
+      'End the turn now and start nothing new: the mod compacts once it ends.',
+    ])
+    // Nothing compacts while the tool's turn runs.
+    await clock.advance(5_000)
+    expect(h.compacts).toEqual([])
+    await endTurn($, 'tb')
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(relayReports(h)).toEqual([
+      ['attend', 'keepwarm', 'compacted', '--trigger', 'boundary'],
+      ['attend', 'keepwarm', 'resumed', '--trigger', 'boundary'],
+    ])
+    expect(h.submitted).toEqual([RESUME(1)])
+    expect(h.origins[0]).toEqual({ kind: 'plugin', name: 'attend' })
+    expect(await rowSegment($)).toMatch(/⟳ relay 1\/5/)
+    expect(judgedRuns(h).length).toBe(1)
+    // At the cap the compact is recorded as a stop, which arms, and nothing compacts.
+    h.world.brief = briefJson({ relays: { n: 5, max: 5 } })
+    const cap = await boundary($, 'compact', { turnId: 't2' })
+    expect(judgedRuns(h)[1]!.slice(-6)).toEqual(['--own', 'compact', '--move', 'stop', '--reason', 'two tasks remain'])
+    expect(cap.result.split('\n').slice(4)).toEqual([
+      "5 of 5 relays have run since the operator's last prompt, the most this session allows: the compact verdict is carried out as stop.",
+      ARMED,
+      'End the turn and start nothing new. An operator prompt disarms the exit.',
+    ])
+    await clock.advance(10_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(h.submitted).toEqual([RESUME(1)])
+  })
+
+  test('after five self-relays with no operator prompt, the sixth boundary does not compact', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    // attend counts a relay for each boundary resume it hears of.
+    const resumes = (argvs: string[][]) => argvs.filter(a => a.slice(1).join(' ') === 'keepwarm resumed --trigger boundary').length
+    const h = host(on, { config: RELAY, autocompact: true, handoff: HANDOFF, tasks: TWO_TASKS, model: COMPACT, brief: argvs => briefJson({ relays: { n: resumes(argvs), max: 5 } }) })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    for (let i = 1; i <= 6; i++) {
+      await boundary($, 'compact', { turnId: `t${i}` })
+      await clock.advance(2_000)
+    }
+    expect(h.compacts.length).toBe(5)
+    expect(h.submitted).toEqual([1, 2, 3, 4, 5].map(RESUME))
+    expect(judgedRuns(h).map(a => a[a.indexOf('--move') + 1])).toEqual(['compact', 'compact', 'compact', 'compact', 'compact', 'stop'])
+    expect(h.prompts).toEqual([])
+  })
+
+  test('relay on: a compaction that leaves no tasks records the same wrap again as a stop, which arms, and submits no resume', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const world: World = { config: RELAY, autocompact: true, handoff: HANDOFF, tasks: TWO_TASKS, model: COMPACT }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await boundary($, 'compact', { end: false })
+    // The last task closes in the tool's turn, before the compaction.
+    world.tasks = [{ id: '1', subject: 'write the tool', status: 'completed' }]
+    await endTurn($, 'tb')
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(judgedRuns(h)).toEqual([
+      ['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'compact', '--handoff', 'sufficient', '--own', 'compact', '--move', 'compact', '--reason', 'two tasks remain'],
+      ['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'compact', '--handoff', 'sufficient', '--own', 'compact', '--move', 'stop', '--reason', 'two tasks remain'],
+    ])
+    expect(relayReports(h)).toEqual([['attend', 'keepwarm', 'compacted', '--trigger', 'boundary']])
+    expect(h.submitted).toEqual([])
+  })
+
+  test('relay on: doubt records the move, which arms, sends the handoff to the operator, then compacts with it and submits no resume', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: true, handoff: HANDOFF, tasks: TWO_TASKS, model: DOUBT, policy: [running] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    const r = await boundary($, 'stop', { end: false })
+    expect(judgedRuns(h)).toEqual([
+      ['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'doubt', '--handoff', 'sufficient', '--own', 'stop', '--move', 'doubt', '--reason', 'the direction is unclear'],
+    ])
+    expect(sends(h)).toEqual([['attend', 'message', 'send', '--to', 'aaron', '--', `${DOUBT_HANDOFF}\n${HANDOFF}`]])
+    expect(r.result.split('\n').slice(3)).toEqual([
+      'Mode: relay on (stop, compact, continue and doubt).',
+      `Outcome: doubt. ${ARMED.replace('Outcome: stop. ', '')} Once this turn ends, the mod compacts with the handoff and submits no resume.`,
+      'The handoff went to aaron over attend.',
+      'End the turn and start nothing new. An operator prompt disarms the exit.',
+    ])
+    expect(await rowSegment($)).toMatch(/⟳ relay stopped: doubt/)
+    await endTurn($, 'tb')
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(relayReports(h)).toEqual([['attend', 'keepwarm', 'compacted', '--trigger', 'boundary']])
+    expect(h.submitted).toEqual([])
+    expect(judgedRuns(h).length).toBe(1)
+    expect(sends(h).length).toBe(1)
+    expect(await rowSegment($)).toMatch(/⟳ relay stopped: doubt/)
+  })
+
+  test('relay on: a doubt in a turn the operator\'s prompt started sends the handoff and compacts nothing', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: true, handoff: HANDOFF, model: DOUBT })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await typed($, 'wrap up at the boundary')
+    const r = await boundary($, 'stop')
+    expect(judgedRuns(h)[0]!.slice(-4)).toEqual(['--move', 'doubt', '--reason', 'the direction is unclear'])
+    expect(r.result).toContain('The operator prompted this turn: doubt stops without compacting, and the handoff in .claude/handoff.wrap.md goes to the operator over attend.')
+    expect(sends(h).length).toBe(1)
+    await clock.advance(10_000)
     expect(h.compacts).toEqual([])
   })
 
-  test('relay on: compact and doubt are carried out as stop for now, and nothing compacts', async ($, on) => {
+  test('an operator prompt after the tool\'s turn cancels the compaction: nothing compacts or resumes', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: RELAY, autocompact: true, handoff: HANDOFF, model: { isAnswered: true, text: verdictJson('compact', { reason: 'real work remains' }) } })
+    const h = host(on, { config: RELAY, autocompact: true, handoff: HANDOFF, tasks: TWO_TASKS, model: COMPACT })
     await $.session.start(INTERACTIVE)
     await clock.advance(5_000)
-    const r = await boundary($, 'compact', { turnId: 't1' })
-    expect(judgedRuns(h)[0]).toContain('--verdict')
-    expect(judgedRuns(h)[0]![judgedRuns(h)[0]!.indexOf('--verdict') + 1]).toBe('stop')
-    expect(r.result).toContain('Mode: relay on (stop, compact, continue and doubt).')
-    expect(r.result).toContain('The mod does not carry out compact through this tool yet: it stops, the more reversible move, and does not compact.')
-    // An answer that is not the verdict object at all: doubt, carried out as stop.
-    h.world.model = { isAnswered: true, text: 'I would compact here.' }
-    const doubt = await boundary($, 'stop', { turnId: 't2' })
-    expect(doubt.result.split('\n')[0]).toBe('Verdict: doubt; handoff holds-detail; turns left 0.')
-    expect(doubt.result).toContain('The mod does not carry out doubt through this tool yet: it stops, the more reversible move, and does not compact.')
-    await clock.advance(120 * MIN)
+    await boundary($, 'compact')
+    await typed($, 'back now')
+    await clock.advance(10_000)
     expect(h.compacts).toEqual([])
+    expect(h.submitted).toEqual([])
+    expect(relayReports(h)).toEqual([])
+    expect(h.logs).toContain("attend: the operator prompted, so the boundary's compaction does not run; the handoff stands as a checkpoint")
+  })
+
+  test('a turn that starts before the compaction defers it to that turn\'s end, which compacts and resumes', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: RELAY, autocompact: true, handoff: HANDOFF, tasks: TWO_TASKS, model: COMPACT })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await boundary($, 'compact')
+    await $.turn.start({ text: framedPluginPrompt('attend', 'a peer message'), turnId: 'tp' } as never)
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([])
+    expect(h.logs).toContain("attend: the boundary's compaction waits for the turn that started before it; it runs once that turn ends")
+    await endTurn($, 'tp')
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(h.submitted).toEqual([RESUME(1)])
+  })
+
+  test('a turn that starts while the compaction runs rejects it, which defers it to that turn\'s end with no failure reported', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    let release = () => {}
+    const world: World = { config: RELAY, autocompact: true, handoff: HANDOFF, tasks: TWO_TASKS, model: COMPACT }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await boundary($, 'compact')
+    world.holdCompact = new Promise<void>(r => (release = r))
+    await clock.advance(1_500)
+    await $.turn.start({ text: framedPluginPrompt('attend', 'a peer message'), turnId: 'tp' } as never)
+    release()
+    world.holdCompact = undefined
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([])
+    expect(relayReports(h)).toEqual([])
+    expect(h.logs).toContain("attend: the boundary's compaction waits for the turn that started: a turn started while it ran; it runs once that turn ends")
+    await endTurn($, 'tp')
+    await clock.advance(2_000)
+    expect(h.compacts).toEqual([INSTRUCTIONS])
+    expect(h.submitted).toEqual([RESUME(1)])
+  })
+
+  test('a boundary recorded by hand arms by its move: stop and doubt arm, continue and compact do not, whatever the verdict', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: DEFAULT, autocompact: true, policy: [finish] })
+    await $.session.start(INTERACTIVE)
+    const byHand = async (turnId: string, flags: string) => {
+      await $.turn.start({ text: 'record the boundary', turnId } as never)
+      await $.tool.call({ tool: 'Bash', command: `attend keepwarm judged --wrap ${WRAP_ID} ${flags} --handoff sufficient --own stop` } as never)
+      await endTurn($, turnId)
+    }
+    await byHand('t1', '--verdict stop --move compact')
+    await byHand('t2', '--verdict stop --move continue')
+    await clock.advance(120 * MIN)
+    expect(policyChecks(h)).toEqual([])
+    await byHand('t3', '--verdict compact --move doubt')
+    await clock.advance(51 * MIN)
+    expect(policyChecks(h).length).toBe(1)
   })
 
   test('the agent\'s continue against the judge\'s stop: the agent fixes the handoff and continues, and nothing is armed', async ($, on) => {
@@ -3738,7 +3979,7 @@ describe('the boundary tool', () => {
     const h = host(on, { config: DEFAULT, autocompact: true, handoff: HANDOFF, policy: [finish] })
     await $.session.start(INTERACTIVE)
     const r = await boundary($, 'continue')
-    expect(judgedRuns(h)[0]).toEqual(['attend', 'keepwarm', 'judged', '--wrap', WRAP_ID, '--verdict', 'continue', '--handoff', 'sufficient', '--own', 'continue', '--reason', 'the judge said stop; carried out as continue: the release landed and nothing remains'])
+    expect(judgedRuns(h)[0]).toEqual(['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'stop', '--handoff', 'sufficient', '--own', 'continue', '--move', 'continue', '--reason', 'the release landed and nothing remains'])
     expect(r.result.split('\n').slice(3)).toEqual([
       'Mode: relay off (stop and continue only; compaction stays with the operator).',
       'The judge said stop and your call was continue: the more reversible move wins, so nothing is armed. The handoff is missing what you see.',
@@ -3755,7 +3996,7 @@ describe('the boundary tool', () => {
     await $.session.start(INTERACTIVE)
     const r = await boundary($, 'compact')
     expect(h.models.length).toBe(1)
-    expect(judgedRuns(h)[0]).toEqual(['attend', 'keepwarm', 'judged', '--wrap', WRAP_ID, '--verdict', 'continue', '--handoff', 'sufficient', '--own', 'compact', '--reason', 'the judge said stop; carried out as continue: the release landed and nothing remains'])
+    expect(judgedRuns(h)[0]).toEqual(['attend', 'keepwarm', 'judged', '--json', '--wrap', WRAP_ID, '--verdict', 'stop', '--handoff', 'sufficient', '--own', 'compact', '--move', 'continue', '--reason', 'the release landed and nothing remains'])
     expect(r.result.split('\n').slice(4)).toEqual([
       'Outcome: nothing is armed, because 1 agent is in flight, and a stop would end them.',
       'Finish the work in flight and collect its reports, then run /wrap boundary again at the next boundary.',
