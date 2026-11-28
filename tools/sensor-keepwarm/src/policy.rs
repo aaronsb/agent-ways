@@ -298,12 +298,16 @@ pub fn reset(p: &mut Policy, now: u64) {
 
 /// A relay's resume went in (`attend keepwarm resumed`): the relay count
 /// goes up by one, the keepalive count starts again, and the wrap is
-/// cleared, so the next generation can wrap again.
+/// cleared, so the next generation can wrap again. The last boundary's
+/// record stays when its move armed nothing, as after a compaction the
+/// boundary tool started, so `attend keepwarm status` still shows it.
 ///
 /// References:
 /// - ADR-417 item 4: a submitted resume counts one relay and restarts the
 ///   keepalive count.
+/// - ADR-418 item 14, item 4: the ledger records each boundary's calls.
 pub fn resumed(p: &mut Policy, now: u64) {
+    let exit = p.exit.take().filter(|e| !e.arms());
     *p = Policy {
         operator_at: p.operator_at,
         stretch_from: p.stretch_from,
@@ -316,6 +320,7 @@ pub fn resumed(p: &mut Policy, now: u64) {
         goal: p.goal.take(),
         relays: p.relays + 1,
         resumed_at: Some(now),
+        exit,
         ..Policy::default()
     };
 }
@@ -1550,6 +1555,24 @@ fn route(cfg: &Config, site: &Site, now: u64) -> WrapRoute {
             cfg.windows.hm(now),
         ),
     }
+}
+
+/// Where a boundary's `doubt` sends the handoff: the relay stop's route,
+/// built as [`hand`] builds it, whose `handoff:` line says the boundary
+/// judge said doubt, followed by the judge's `reason` when one is given.
+///
+/// References:
+/// - ADR-418 item 11: in relay mode, `doubt` becomes `relay: stop doubt`,
+///   and the handoff goes to the operator over attend.
+pub fn doubt_route(cfg: &Config, site: &Site, reason: Option<&str>, now: u64) -> WrapRoute {
+    let reason = reason.map(|r| r.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|r| !r.is_empty());
+    let why = match reason {
+        Some(r) => format!("the boundary judge said doubt, {r}"),
+        None => "the boundary judge said doubt".to_string(),
+    };
+    let mut r = route(cfg, site, now);
+    r.handoff = format!("{} The relay stopped: {why}.", r.handoff);
+    r
 }
 
 /// A wrap id for a wrap the policy sends: the UTC time to the second and

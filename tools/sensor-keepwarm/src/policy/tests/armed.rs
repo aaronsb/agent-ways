@@ -34,7 +34,7 @@ fn carrying(id: Option<&str>) -> Site {
 }
 
 fn judgement(verdict: Verdict, h: Sufficiency) -> Judgement {
-    Judgement { wrap_id: WRAP.into(), verdict, handoff: h, own: Verdict::Stop, reason: Some("the release landed".into()) }
+    Judgement { wrap_id: WRAP.into(), verdict, handoff: h, own: Verdict::Stop, moved: verdict, reason: Some("the release landed".into()) }
 }
 
 /// An Opus 5.5 session at `ctx` tokens whose boundary the judge called.
@@ -153,10 +153,10 @@ fn a_stale_or_missing_handoff_pings_as_today() {
     }
 }
 
-/// A verdict other than `stop` is recorded and arms nothing.
+/// A move of `continue` or `compact` is recorded and arms nothing.
 #[test]
-fn a_verdict_other_than_stop_is_recorded_and_arms_nothing() {
-    for v in [Verdict::Continue, Verdict::Compact, Verdict::Doubt] {
+fn a_move_other_than_stop_or_doubt_is_recorded_and_arms_nothing() {
+    for v in [Verdict::Continue, Verdict::Compact] {
         let mut s = judged_session(350_000, v, Sufficiency::Sufficient);
         let d = s.check_at(&cfg(), Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
         assert_eq!((d.action, d.state, d.count), (Action::Keepalive, "running", 1), "{v:?}: {d:?}");
@@ -326,7 +326,7 @@ fn the_card_shows_the_exit_its_rent_purchase_and_pings_left() {
     s.check_at(&c, Gate::Off, &site, MONDAY + 102 * MIN);
     assert_eq!(
         exit::card_line(&s.state, MONDAY + 102 * MIN).unwrap(),
-        format!("exit        armed · wrap {WRAP}, the judge said stop, the handoff is sufficient, own call stop · 2 pings rent $0.14 paid of $1.37 (a fresh start) · 17 pings left while something is pending, else it finishes at the next tick")
+        format!("exit        armed · wrap {WRAP}, the judge said stop, the handoff is sufficient, own call stop, carried out stop · 2 pings rent $0.14 paid of $1.37 (a fresh start) · 17 pings left while something is pending, else it finishes at the next tick · the judge's reason: the release landed")
     );
     let lines = crate::card(&s.reading(), None, Some(&s.state.ledger(MONDAY + 102 * MIN)), MONDAY + 102 * MIN);
     assert!(lines.iter().any(|l| l.starts_with("exit        armed · ")), "{lines:?}");
@@ -334,7 +334,7 @@ fn the_card_shows_the_exit_its_rent_purchase_and_pings_left() {
     assert_eq!(d.action, Action::Finish);
     assert_eq!(
         exit::card_line(&s.state, MONDAY + 200 * MIN).unwrap(),
-        format!("exit        finished 50m ago · wrap {WRAP}, the judge said stop, the handoff is sufficient, own call stop · 2 pings rent $0.14 paid of $1.37 (a fresh start) · your next prompt clears it")
+        format!("exit        finished 50m ago · wrap {WRAP}, the judge said stop, the handoff is sufficient, own call stop, carried out stop · 2 pings rent $0.14 paid of $1.37 (a fresh start) · your next prompt clears it · the judge's reason: the release landed")
     );
 }
 
@@ -444,4 +444,97 @@ fn something_pending_under_fifty_k_pings_by_the_bound() {
     // Nothing pending and sufficient still finishes.
     let mut s = judged_session(45_000, Verdict::Stop, Sufficiency::Sufficient);
     assert_eq!(s.check_at(&cfg(), Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN).action, Action::Finish);
+}
+
+/// A session at 350k whose boundary the judge called `verdict` and the mod
+/// carried out as `moved`.
+fn moved_session(verdict: Verdict, moved: Verdict) -> Session {
+    let mut s = Session::on(OPUS, MONDAY, 350_000);
+    let j = Judgement { moved, ..judgement(verdict, Sufficiency::Sufficient) };
+    judged(&mut s.state.policy, j, Some(&handoff(WRAP)), MONDAY).unwrap();
+    s
+}
+
+/// The move arms the exit, not the verdict: a judge's `compact` carried
+/// out as `stop`, and a `doubt`, arm it and finish at the first due point;
+/// a judge's `stop` carried out as `continue`, and a `compact`, arm
+/// nothing and leave the tick to ping as today. The record keeps the
+/// verdict beside the move.
+///
+/// References:
+/// - ADR-418 item 12: the stop row arms the exit; compact and continue do
+///   not.
+#[test]
+fn the_move_arms_the_exit_and_the_record_keeps_the_verdict() {
+    let site = carrying(Some(WRAP));
+    for (verdict, moved) in [(Verdict::Compact, Verdict::Stop), (Verdict::Doubt, Verdict::Doubt)] {
+        let mut s = moved_session(verdict, moved);
+        let d = s.check_at(&cfg(), Gate::Off, &site, MONDAY + MIN);
+        let x = d.exit.unwrap();
+        assert_eq!((x.state, x.verdict, x.moved), ("armed", verdict.as_str(), moved.as_str()), "{verdict:?} as {moved:?}");
+        assert_eq!(s.check_at(&cfg(), Gate::Off, &site, MONDAY + 50 * MIN).action, Action::Finish, "{verdict:?} as {moved:?}");
+    }
+    for (verdict, moved) in [(Verdict::Stop, Verdict::Continue), (Verdict::Compact, Verdict::Compact)] {
+        let mut s = moved_session(verdict, moved);
+        assert!(!s.state.policy.exit.as_ref().unwrap().armed());
+        let d = s.check_at(&cfg(), Gate::Off, &site, MONDAY + 50 * MIN);
+        assert_eq!(d.action, Action::Keepalive, "{verdict:?} as {moved:?} arms nothing: {d:?}");
+        let x = d.exit.unwrap();
+        assert_eq!((x.state, x.verdict, x.moved), (moved.as_str(), verdict.as_str(), moved.as_str()));
+    }
+}
+
+/// Recording the same wrap again replaces its record: a `compact` move,
+/// then `stop` once no tasks remain, leaves one record, armed, with the
+/// judge's `compact` kept.
+#[test]
+fn a_second_record_of_the_wrap_replaces_the_first() {
+    let mut s = moved_session(Verdict::Compact, Verdict::Compact);
+    let j = Judgement { moved: Verdict::Stop, reason: Some("no tasks remain".into()), ..judgement(Verdict::Compact, Sufficiency::Sufficient) };
+    judged(&mut s.state.policy, j, Some(&handoff(WRAP)), MONDAY + MIN).unwrap();
+    let b = exit::boundary(&s.state.policy).unwrap();
+    assert_eq!(
+        b,
+        exit::Boundary { wrap: WRAP.into(), verdict: "compact", handoff: "sufficient", own: "stop", moved: "stop", reason: Some("no tasks remain".into()) }
+    );
+    assert!(s.state.policy.exit.as_ref().unwrap().armed());
+}
+
+/// A ledger from before the move was recorded reads its move as the
+/// verdict, and a new record writes the move under `move`.
+#[test]
+fn a_ledger_without_a_move_reads_the_verdict_as_the_move() {
+    let old = format!(r#"{{"wrap_id":"{WRAP}","verdict":"stop","handoff":"sufficient","own":"stop","judged_at":1,"path":"{HANDOFF}"}}"#);
+    let e: exit::Exit = serde_json::from_str(&old).unwrap();
+    assert_eq!((e.moved, e.carried(), e.armed()), (None, Verdict::Stop, true));
+    let s = moved_session(Verdict::Compact, Verdict::Stop);
+    let v = serde_json::to_value(s.state.policy.exit.as_ref().unwrap()).unwrap();
+    assert_eq!((v["verdict"].as_str(), v["move"].as_str()), (Some("compact"), Some("stop")), "{v}");
+}
+
+/// A resume after a boundary compaction keeps the boundary's record, which
+/// armed nothing, and an armed record does not outlive a resume.
+#[test]
+fn a_resume_keeps_a_record_that_armed_nothing() {
+    let mut s = moved_session(Verdict::Compact, Verdict::Compact);
+    assert!(boundary_compacted(&mut s.state.policy, None, MONDAY + MIN));
+    assert!(boundary_resumed(&mut s.state.policy, MONDAY + 2 * MIN));
+    assert_eq!(exit::boundary(&s.state.policy).map(|b| b.moved), Some("compact"));
+    let mut s = moved_session(Verdict::Stop, Verdict::Stop);
+    assert!(boundary_compacted(&mut s.state.policy, None, MONDAY + MIN));
+    assert!(boundary_resumed(&mut s.state.policy, MONDAY + 2 * MIN));
+    assert_eq!(s.state.policy.exit, None);
+}
+
+/// A boundary's `doubt` sends the handoff on the relay stop's route, with
+/// a `handoff:` line that names the boundary judge and its reason.
+#[test]
+fn a_doubt_route_reads_like_the_relay_stop_s() {
+    let site = site();
+    let r = doubt_route(&cfg(), &site, Some("the plan  is unclear"), MONDAY);
+    assert!(r.handoff.starts_with("handoff: continuation prompt from "), "{}", r.handoff);
+    assert!(r.handoff.ends_with(" The relay stopped: the boundary judge said doubt, the plan is unclear."), "{}", r.handoff);
+    assert_eq!(r.to, site.operator, "an empty wrap_to falls back to the operator");
+    let r = doubt_route(&cfg(), &site, None, MONDAY);
+    assert!(r.handoff.ends_with(" The relay stopped: the boundary judge said doubt."), "{}", r.handoff);
 }

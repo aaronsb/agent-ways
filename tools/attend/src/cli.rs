@@ -714,12 +714,14 @@ pub enum KeepwarmCmd {
     },
     /// Disarm and forget the window
     Off,
-    /// Cache state, context size, cold price, window left, and this session's cold writes.
-    /// With --json, the stop exit alone, read from the ledger with no
-    /// transcript read: `exit` is its state (armed or finished, or the
-    /// verdict's name for a judgment other than stop, which arms nothing),
-    /// wrap id, pings, rent and purchase, or null with none
-    Status(JsonArgs),
+    /// Cache state, context size, cold price, window left, this session's
+    /// cold writes, and one line for the last boundary. With --json, the
+    /// ledger's boundary alone, with no transcript read: `exit` is the stop
+    /// exit's state (armed or finished, or the move's name for a move that
+    /// arms nothing), wrap id, verdict, move, pings, rent and purchase, and
+    /// `boundary` is the last boundary's wrap, verdict, handoff, own, move
+    /// and reason; each is null with none
+    Status(KeepwarmStatusArgs),
     /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
     /// one is due, else nothing (exit 0 either way). The attend mod polls
     /// it.
@@ -786,12 +788,14 @@ pub enum KeepwarmCmd {
         trigger: Option<String>,
     },
     /// Record the judge's verdict for a boundary wrap, its answer on the
-    /// handoff and the agent's own call. With --verdict stop it arms the
-    /// exit: each idle tick then pings while something is pending or the
-    /// handoff holds detail, up to the price of what replaces the session,
-    /// and otherwise lets the cache lapse and marks the session finished.
-    /// Refused, changing nothing, when .claude/handoff.wrap.md is missing or
-    /// its first line does not carry wrap=<ID>
+    /// handoff, the agent's own call and the move the mod carries out. A
+    /// move of stop or doubt arms the exit: each idle tick then pings while
+    /// something is pending or the handoff holds detail, up to the price of
+    /// what replaces the session, and otherwise lets the cache lapse and
+    /// marks the session finished. Compact and continue arm nothing.
+    /// Recording the same wrap again replaces its record. Refused, changing
+    /// nothing, when .claude/handoff.wrap.md is missing or its first line
+    /// does not carry wrap=<ID>
     Judged {
         /// The boundary wrap's id, as the handoff's first line carries it
         #[arg(long, value_name = "ID")]
@@ -806,9 +810,19 @@ pub enum KeepwarmCmd {
         /// The working agent's own call, recorded beside the judge's
         #[arg(long, value_parser = ["stop", "compact", "continue"])]
         own: String,
+        /// The move the mod carries out, which can differ from the verdict.
+        /// Without it, the move is the verdict
+        #[arg(long = "move", value_name = "MOVE", value_parser = ["stop", "compact", "continue", "doubt"])]
+        moved: Option<String>,
         /// The judge's one line of reason
         #[arg(long)]
         reason: Option<String>,
+        /// Print one JSON object: recorded, armed, the move, and wrap, the
+        /// route the handoff takes for a doubt (where it goes and the
+        /// handoff: line it opens with), or null for any other move. A
+        /// refusal prints none
+        #[arg(long)]
+        json: bool,
     },
     /// Record that relay's drain turn went in, which starts this
     /// generation's drain: no further drain turn is offered until a
@@ -855,6 +869,17 @@ pub enum KeepwarmCmd {
     /// Stop's. The probes have about 2 s; one that fails or runs past that
     /// prints "unknown". Exits 0
     Brief(KeepwarmBriefArgs),
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub struct KeepwarmStatusArgs {
+    /// Print the ledger's boundary as one JSON object
+    #[arg(long)]
+    pub json: bool,
+    /// The session to read, from any shell; unset, the session this shell
+    /// runs in. Exit 3 when no session record names it
+    #[arg(long, value_name = "ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args, Clone, Debug, Default)]
