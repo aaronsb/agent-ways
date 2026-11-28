@@ -151,6 +151,7 @@ mod tests {
             nickname: name.to_string(),
             instance: None,
             status: "waiting".to_string(),
+            finished: None,
             context_pct: None,
             here: false,
         }

@@ -10,6 +10,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend listen off`↴](#attend-listen-off)
 * [`attend listen status`↴](#attend-listen-status)
 * [`attend listen beat`↴](#attend-listen-beat)
+* [`attend listen finish`↴](#attend-listen-finish)
 * [`attend message`↴](#attend-message)
 * [`attend message send`↴](#attend-message-send)
 * [`attend message reply`↴](#attend-message-reply)
@@ -72,7 +73,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 ###### **Subcommands:**
 
-* `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
+* `listen` — Turn listening on or off for this session without joining a channel, mark it finished, or show it (default: status)
 * `message` — Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 * `channel` — Join, leave, list and manage channels and scenes (default: list)
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
@@ -85,7 +86,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 ## `attend listen`
 
-Turn listening on or off for this session without joining a channel, or show it (default: status)
+Turn listening on or off for this session without joining a channel, mark it finished, or show it (default: status)
 
 **Usage:** `attend listen [OPTIONS] [COMMAND]`
 
@@ -95,6 +96,7 @@ Turn listening on or off for this session without joining a channel, or show it 
 * `off` — Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join or `listen on` listens again
 * `status` — Print `listening` or `not listening` (default)
 * `beat` — Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
+* `finish` — Mark this session finished: peers see it finished, and attend refuses new messages to it. Its queued messages stay queued, and its Claude Code process runs on. `listen on` clears the mark; a beat leaves it
 
 ###### **Options:**
 
@@ -144,6 +146,14 @@ Mark a listening session alive: touch its heartbeat, deliver nothing. After a /c
 ###### **Options:**
 
 * `--mod <VERSION>` — The attend mod's own version. The mod sends it with every beat; attend records it for the session, and the Stop-hook drain compares it with the installed mod to tell a session that loaded an older one. A mod that sends none is compared by its start time
+
+
+
+## `attend listen finish`
+
+Mark this session finished: peers see it finished, and attend refuses new messages to it. Its queued messages stay queued, and its Claude Code process runs on. `listen on` clears the mark; a beat leaves it
+
+**Usage:** `attend listen finish`
 
 
 

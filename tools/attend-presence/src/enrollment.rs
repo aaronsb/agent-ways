@@ -30,12 +30,19 @@
 //! - `since <secs>`, when the session last went from not listening to
 //!   listening, in seconds since the epoch. From then it is a member of
 //!   `#open` (ADR-404 D3a), so its cold start replays what was posted there
-//!   since (D3b).
+//!   since (D3b);
+//! - `finished <secs>`, when the session was marked finished
+//!   (`attend listen finish`), in seconds since the epoch. A finished
+//!   session's Claude Code process still runs, but the session does not
+//!   wake again: peers see it finished, and attend refuses new messages to
+//!   it. Listening again (`enroll` by `listen`) clears the mark, and a
+//!   `/clear` leaves it behind with the earlier id ([`carry`]).
 //!
 //! The session is enrolled while the record holds a way. A record whose
-//! last way goes keeps only its `claude` line, so whether the session has
-//! exited can still be judged ([`process_has_exited`]); a record with no
-//! process to keep is removed. Once that process has exited and no
+//! last way goes keeps only its `claude` and `finished` lines, so whether
+//! the session has exited or finished can still be judged
+//! ([`process_has_exited`], [`is_finished`]); a record with neither is
+//! removed. Once that process has exited and no
 //! invitation or briefing names the session, the sweep removes the record
 //! ([`prune_exited`]). Every edit is a read-modify-write under one
 //! lock (`agent_settings::writer::Lock`), and every file is written
@@ -49,6 +56,7 @@
 //! References:
 //! - ADR-406: the attend mod turns listening on.
 //! - ADR-404 D1: another member's add enrolls the session it adds.
+//! - ADR-418 item 12: a stopped session is marked finished.
 
 use std::fs;
 use std::io;
@@ -111,6 +119,8 @@ struct Record {
     host: Option<HostRecord>,
     claude: Option<String>,
     since: Option<u64>,
+    /// When the session was marked finished, in seconds since the epoch.
+    finished: Option<u64>,
     /// The ids this session had before each `/clear`, oldest first.
     previous: Vec<String>,
 }
@@ -142,6 +152,8 @@ impl Record {
                         r.previous.push(sid.trim().to_string());
                     } else if let Some(secs) = line.strip_prefix("since ") {
                         r.since = secs.trim().parse().ok();
+                    } else if let Some(secs) = line.strip_prefix("finished ") {
+                        r.finished = secs.trim().parse().ok();
                     } else if let Some(rest) = line.strip_prefix("host ") {
                         let mut words = rest.split_whitespace();
                         r.host = words
@@ -169,6 +181,9 @@ impl Record {
         if let Some(secs) = self.since {
             out.push_str(&format!("since {secs}\n"));
         }
+        if let Some(secs) = self.finished {
+            out.push_str(&format!("finished {secs}\n"));
+        }
         for sid in &self.previous {
             out.push_str(&format!("previous {sid}\n"));
         }
@@ -194,19 +209,22 @@ fn read_in(dir: &Path, session_id: &str) -> Option<Record> {
 }
 
 /// Write `record` for `session_id` under `dir`. A record that holds no way
-/// is written as its process alone, or removed when it names none. While
+/// is written as its process and its finished mark alone, or removed when
+/// it holds neither. While
 /// the record holds a way, the process's index entry names `session_id`
 /// afterwards, unless it names an earlier id of the same process that is
 /// still enrolled and was not carried here ([`indexes_another`]).
 fn write_in(dir: &Path, session_id: &str, record: &Record) -> io::Result<()> {
     let p = dir.join(session_id);
     if record.sources.is_empty() {
-        return match &record.claude {
-            Some(key) => agent_settings::writer::write_atomic(&p, Record { claude: Some(key.clone()), ..Record::default() }.render()),
-            None => match fs::remove_file(&p) {
+        let kept = Record { claude: record.claude.clone(), finished: record.finished, ..Record::default() };
+        return if kept == Record::default() {
+            match fs::remove_file(&p) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
                 _ => Ok(()),
-            },
+            }
+        } else {
+            agent_settings::writer::write_atomic(&p, kept.render())
         };
     }
     agent_settings::writer::write_atomic(&p, record.render())?;
@@ -422,10 +440,13 @@ pub fn withdraw_in(dir: &Path, session_id: &str, source: Source) -> io::Result<(
 }
 
 fn enroll_in(dir: &Path, session_id: &str, source: Source, host: Option<Host>, claude: Option<String>) -> io::Result<()> {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let now = now_secs();
     edit_in(dir, session_id, |r| {
         if r.sources.is_empty() {
             r.since = Some(now);
+        }
+        if source == Source::Listen {
+            r.finished = None;
         }
         if !r.sources.contains(&source) {
             r.sources.push(source);
@@ -437,6 +458,37 @@ fn enroll_in(dir: &Path, session_id: &str, source: Source, host: Option<Host>, c
             r.claude = claude;
         }
     })
+}
+
+/// Now, in seconds since the epoch.
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Mark `session_id` finished now. The session keeps its ways and its
+/// queued messages; peers see it finished, and attend refuses new messages
+/// to it, until it listens again ([`enroll`] by [`Source::Listen`]). A
+/// record that names no process records this one, so the sweep can remove
+/// it once the process exits ([`prune_exited`]).
+pub fn finish(session_id: &str) -> io::Result<()> {
+    let (now, claude) = (now_secs(), own_claude_key());
+    edit(session_id, |r| {
+        r.finished = Some(now);
+        if r.claude.is_none() {
+            r.claude = claude;
+        }
+    })
+}
+
+/// Whether `session_id` is marked finished ([`finish`]).
+pub fn is_finished(session_id: &str) -> bool {
+    finished_since(session_id).is_some()
+}
+
+/// When `session_id` was marked finished, while the mark holds.
+pub fn finished_since(session_id: &str) -> Option<std::time::SystemTime> {
+    let secs = read(session_id)?.finished?;
+    Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
 }
 
 /// When `session_id` last started listening, while it is enrolled; `None`
@@ -479,6 +531,8 @@ pub fn opt_out(session_id: &str) -> io::Result<()> {
 /// Move `old`'s enrollment to `new`, for a session whose id changed under
 /// the same process (`/clear`). Keeps any way `new` already had, and records
 /// `old` and the ids before it as `new`'s earlier ids ([`previous_ids`]).
+/// A finished mark stays behind: a `/clear` is the operator at work, and the
+/// new id has not finished.
 pub fn carry(old: &str, new: &str) -> io::Result<()> {
     carry_in(&dir(), old, new)
 }
@@ -935,6 +989,39 @@ mod tests {
             assert_eq!(Record::parse(&read("s").unwrap().render()).host.map(|h| h.host), Some(Host::Mod));
             opt_out("s").unwrap();
             assert_eq!(host("s"), None);
+        });
+    }
+
+    /// A finished mark survives the record's round trip and a join, and
+    /// listening again clears it. A record written before the mark parses
+    /// as unfinished, and so does one whose session never finished.
+    #[test]
+    fn a_finished_mark_round_trips_and_listening_clears_it() {
+        with_cache(|| {
+            fs::create_dir_all(dir()).unwrap();
+            fs::write(dir().join("old"), "listen\nclaude 1-2@h\nsince 5\n").unwrap();
+            assert_eq!(read("old").map(|r| r.finished), Some(None), "a record without the line");
+            assert!(!is_finished("old") && !is_finished("nobody"));
+
+            enroll("s", Source::Listen, None).unwrap();
+            finish("s").unwrap();
+            assert!(is_finished("s"));
+            let r = read("s").unwrap();
+            assert!(r.finished.is_some());
+            assert_eq!(Record::parse(&r.render()), r, "the finished line round-trips");
+            assert!(finished_since("s").is_some());
+
+            enroll("s", Source::Join, None).unwrap();
+            assert!(is_finished("s"), "a join leaves the mark");
+            opt_out("s").unwrap();
+            assert!(is_finished("s"), "so does the opt-out");
+            enroll("s", Source::Listen, None).unwrap();
+            assert!(!is_finished("s"), "listening again clears it");
+            assert_eq!(read("s").map(|r| r.finished), Some(None));
+
+            finish("s").unwrap();
+            carry("s", "t").unwrap();
+            assert!(!is_finished("t") && is_enrolled("t"), "a /clear leaves the mark with the earlier id");
         });
     }
 

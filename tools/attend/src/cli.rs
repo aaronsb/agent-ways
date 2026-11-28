@@ -866,6 +866,11 @@ pub enum ListenCmd {
         #[arg(long = "mod", value_name = "VERSION")]
         mod_version: Option<String>,
     },
+    /// Mark this session finished: peers see it finished, and attend
+    /// refuses new messages to it. Its queued messages stay queued, and its
+    /// Claude Code process runs on. `listen on` clears the mark; a beat
+    /// leaves it
+    Finish,
 }
 
 /// A host `attend listen on --host` records.
