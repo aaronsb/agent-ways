@@ -106,7 +106,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 }
             }
         }
-        KeepwarmCmd::Judged { wrap, verdict, handoff, own, moved, reason, json } => {
+        KeepwarmCmd::Judged { wrap, verdict, handoff, own, moved, reason, operator_turn, json } => {
             let parsed = (
                 Verdict::parse(&verdict),
                 Sufficiency::parse(&handoff),
@@ -122,33 +122,65 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             let moved = moved.unwrap_or(verdict);
             let j = Judgement { wrap_id: wrap.trim().to_string(), verdict, handoff, own, moved, reason: reason.clone() };
             let file = read_handoff(&ident.origin_path);
+            // attend decides whether a compact has room, from the relay
+            // settings and the ledger.
+            let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
+            let cfg = Config::from_settings(settings.as_deref());
             let _lock = lock_session(&dir, sid).ok();
             let mut ledger = read_ledger(&dir, sid).unwrap_or_default();
-            if let Err(why) = armed::judged(&mut ledger.policy, j, file.as_ref(), now) {
-                eprintln!("keepwarm judged refused: {why}; nothing recorded");
-                std::process::exit(1);
-            }
+            let rec = match armed::record(&mut ledger.policy, j, file.as_ref(), &cfg, operator_turn, now) {
+                Ok(rec) => rec,
+                Err(why) => {
+                    eprintln!("keepwarm judged refused: {why}; nothing recorded");
+                    std::process::exit(1);
+                }
+            };
             ledger.updated_at = now;
             if let Err(e) = write_ledger(&dir, sid, &ledger) {
                 eprintln!("keepwarm: could not write the ledger: {e}");
                 std::process::exit(1);
             }
             let id = wrap.trim();
+            let moved = rec.moved;
+            let arms = matches!(moved, Verdict::Stop | Verdict::Doubt);
             // With keepwarm off the check judges nothing, so no tick runs
             // the exit.
-            let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
-            let arms = matches!(moved, Verdict::Stop | Verdict::Doubt);
+            let keepwarm_off = keepwarm_setting_off(settings.as_deref());
             // A doubt sends the handoff to the operator over attend, on the
             // route a relay stop's handoff takes; attend owns that route.
+            // A compact, and a doubt with relay on and the operator away,
+            // compact with the instructions the relay builds; a compact
+            // then resumes with the relay's resume and its escape.
             //
             // References:
+            // - ADR-417 item 4: a relay compaction takes its instructions
+            //   from the handoff.
             // - ADR-418 item 11: in relay mode, `doubt` becomes `relay: stop
             //   doubt`, and the handoff goes to the operator over attend.
             if json {
-                let route = (moved == Verdict::Doubt)
-                    .then(|| policy::doubt_route(&Config::from_settings(settings.as_deref()), &site(&ident), reason.as_deref(), now));
-                crate::cmd::print_json(&serde_json::json!({ "recorded": true, "armed": arms, "move": moved.as_str(), "wrap": route }));
-            } else if arms && keepwarm_setting_off(settings.as_deref()) {
+                let route = (moved == Verdict::Doubt).then(|| policy::doubt_route(&cfg, &site(&ident), reason.as_deref(), operator_turn, now));
+                let compacts = moved == Verdict::Compact || (moved == Verdict::Doubt && cfg.relay && !operator_turn);
+                let instructions = file.as_ref().filter(|_| compacts).map(|h| h.instructions.clone());
+                let resume = file
+                    .as_ref()
+                    .filter(|_| moved == Verdict::Compact)
+                    .map(|h| policy::boundary_resume_text(&h.path, ledger.policy.relays + 1, cfg.max_relays));
+                crate::cmd::print_json(&serde_json::json!({
+                    "recorded": true,
+                    "armed": arms,
+                    "acted_on": arms && !keepwarm_off,
+                    "move": moved.as_str(),
+                    "compact_refused": rec.compact_refused,
+                    "wrap": route,
+                    "instructions": instructions,
+                    "resume": resume,
+                }));
+                return;
+            }
+            if let Some(why) = &rec.compact_refused {
+                println!("compact refused for wrap {id}: {why}; recorded as stop");
+            }
+            if arms && keepwarm_off {
                 println!("exit armed for wrap {id}, but mods.attend.keepwarm is off: no tick runs, so the exit does nothing while it is off");
             } else if arms {
                 let stay = match handoff {
@@ -189,16 +221,22 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
         KeepwarmCmd::Compacted { failed, trigger } => {
             let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
             let took = take_policy(&dir, sid, |p| match trigger {
-                Some(_) => policy::boundary_compacted(p, failed, now),
+                Some(_) => match policy::relay_wrap_on_record(p) {
+                    Some(why) => Err(why),
+                    None => {
+                        policy::boundary_compacted(p, failed, now);
+                        Ok(())
+                    }
+                },
                 None => {
                     policy::compacted(p, failed, now);
-                    true
+                    Ok(())
                 }
             });
             match took {
-                Some(true) => {}
-                Some(false) => {
-                    eprintln!("keepwarm: a relay wrap waits to be judged, so its compaction is the relay's; the boundary compaction is not recorded");
+                Some(Ok(())) => {}
+                Some(Err(why)) => {
+                    eprintln!("keepwarm: {why}, so its compaction is the relay's; the boundary compaction is not recorded");
                     std::process::exit(1);
                 }
                 None => std::process::exit(1),
@@ -356,23 +394,23 @@ fn saved_outcome(o: WrapOutcome, detail: &str, path: &str, sid: &str) -> (String
 fn update_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy)) -> bool {
     take_policy(dir, sid, |p| {
         f(p);
-        true
+        Ok(())
     })
     .is_some()
 }
 
 /// [`update_policy`] for a mark that can be refused: the ledger is written
-/// only when `f` takes the mark. Whether it took it, or `None`, with the
-/// reason on stderr, when the ledger cannot be written.
-fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> bool) -> Option<bool> {
+/// only when `f` takes the mark. Whether it took it or why it refused, or
+/// `None`, with the reason on stderr, when the ledger cannot be written.
+fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> Result<(), String>) -> Option<Result<(), String>> {
     let _lock = lock_session(dir, sid).ok();
     let mut ledger = read_ledger(dir, sid).unwrap_or_default();
-    if !f(&mut ledger.policy) {
-        return Some(false);
+    if let Err(why) = f(&mut ledger.policy) {
+        return Some(Err(why));
     }
     ledger.updated_at = sensor_trait::epoch_secs();
     match write_ledger(dir, sid, &ledger) {
-        Ok(()) => Some(true),
+        Ok(()) => Some(Ok(())),
         Err(e) => {
             eprintln!("keepwarm: could not write the ledger: {e}");
             None

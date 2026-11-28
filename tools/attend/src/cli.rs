@@ -792,10 +792,14 @@ pub enum KeepwarmCmd {
     /// move of stop or doubt arms the exit: each idle tick then pings while
     /// something is pending or the handoff holds detail, up to the price of
     /// what replaces the session, and otherwise lets the cache lapse and
-    /// marks the session finished. Compact and continue arm nothing.
-    /// Recording the same wrap again replaces its record. Refused, changing
-    /// nothing, when .claude/handoff.wrap.md is missing or its first line
-    /// does not carry wrap=<ID>
+    /// marks the session finished. Compact and continue arm nothing. A
+    /// compact is recorded as stop, which arms, when it has no room: relay
+    /// off, the relay stopped, a relay wrap on record, max_relays resumes
+    /// since the operator's prompt, or --operator-turn. A doubt with relay
+    /// on stops the relay until the operator's next prompt. Recording the
+    /// same wrap again replaces its record. Refused, changing nothing, when
+    /// .claude/handoff.wrap.md is missing or its first line does not carry
+    /// wrap=<ID>
     Judged {
         /// The boundary wrap's id, as the handoff's first line carries it
         #[arg(long, value_name = "ID")]
@@ -817,10 +821,18 @@ pub enum KeepwarmCmd {
         /// The judge's one line of reason
         #[arg(long)]
         reason: Option<String>,
-        /// Print one JSON object: recorded, armed, the move, and wrap, the
-        /// route the handoff takes for a doubt (where it goes and the
-        /// handoff: line it opens with), or null for any other move. A
-        /// refusal prints none
+        /// An operator's prompt started this turn: a compact is recorded
+        /// as stop, and a doubt does not compact
+        #[arg(long)]
+        operator_turn: bool,
+        /// Print one JSON object, every field present: recorded; armed;
+        /// acted_on, false where mods.attend.keepwarm is off and otherwise
+        /// armed; the move recorded; compact_refused, why a compact was
+        /// recorded as stop, or null; wrap, the route the handoff takes
+        /// for a doubt (where it goes and the handoff: line it opens
+        /// with), or null; instructions, the compaction's, for a compact
+        /// or a doubt the mod compacts on, or null; and resume, the turn
+        /// after a compact, or null. A refusal prints none
         #[arg(long)]
         json: bool,
     },

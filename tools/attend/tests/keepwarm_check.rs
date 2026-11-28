@@ -1062,7 +1062,7 @@ fn the_stop_hook_s_background_work_keeps_an_armed_exit_pinging() {
 }
 
 /// `compacted --trigger boundary` while a relay wrap waits is refused with
-/// exit 1 and writes nothing.
+/// exit 1, writes nothing, and says why.
 #[test]
 fn a_refused_boundary_compaction_exits_1_and_writes_nothing() {
     let w = Warm::new("kw-boundary-refused");
@@ -1070,7 +1070,10 @@ fn a_refused_boundary_compaction_exits_1_and_writes_nothing() {
     let before = std::fs::read(w.ledger()).unwrap();
     let out = w.run(&["keepwarm", "compacted", "--trigger", "boundary"]);
     assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("the boundary compaction is not recorded"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "keepwarm: a relay wrap is pending, so its compaction is the relay's; the boundary compaction is not recorded\n"
+    );
     assert_eq!(std::fs::read(w.ledger()).unwrap(), before, "the ledger is not written");
     let w = Warm::new("kw-boundary-taken");
     assert!(w.run(&["keepwarm", "compacted", "--trigger", "boundary"]).status.success());
@@ -1189,6 +1192,7 @@ fn a_continue_move_arms_nothing_against_a_stop_verdict() {
 #[test]
 fn recording_the_wrap_again_replaces_its_record() {
     let w = Warm::new("kw-move-again");
+    w.settings(RELAY_ON);
     handoff_for(&w, Some(WRAP));
     judged_move(&w, "compact", Some("compact"), &[]);
     assert_eq!(status_json(&w, &[])["exit"]["state"], "compact");
@@ -1203,10 +1207,13 @@ fn recording_the_wrap_again_replaces_its_record() {
     assert_eq!((exit["verdict"].as_str(), exit["move"].as_str(), exit["pings"].as_u64()), (Some("compact"), Some("stop"), Some(0)), "{exit}");
 }
 
-/// `judged --json` prints one object: whether it recorded and armed, the
-/// move, and for `doubt` the route its handoff takes, the relay stop's,
-/// with a `handoff:` line naming the boundary judge and its reason. A stop
-/// has no route. A refusal prints no JSON.
+/// `judged --json` prints one object with every field present: whether it
+/// recorded, armed and will be acted on, the move recorded, why a compact
+/// was refused, and for `doubt` the route its handoff takes, with a
+/// `handoff:` line naming the boundary judge and its reason. With relay
+/// off the line does not say the relay stopped, and a doubt does not
+/// compact, so it carries no instructions. A stop has no route. A refusal
+/// prints no JSON.
 ///
 /// References:
 /// - ADR-418 item 11: in relay mode, `doubt` becomes `relay: stop doubt`,
@@ -1215,29 +1222,183 @@ fn recording_the_wrap_again_replaces_its_record() {
 fn judged_json_gives_the_doubt_handoff_s_route() {
     let w = Warm::new("kw-judged-json");
     handoff_for(&w, Some(WRAP));
-    let out = judged_move(&w, "doubt", None, &["--json"]);
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!((v["recorded"].as_bool(), v["armed"].as_bool(), v["move"].as_str()), (Some(true), Some(true), Some("doubt")), "{v}");
-    let r = &v["wrap"];
+    let v = judged_json(&w, "doubt", None, &[]);
+    let r = v["wrap"].clone();
     assert_eq!(r["to"], "fixture-human", "an empty wrap_to falls back to the operator: {v}");
     let line = r["handoff"].as_str().unwrap();
     assert!(line.starts_with("handoff: continuation prompt from "), "{line}");
-    assert!(line.ends_with(" The relay stopped: the boundary judge said doubt, the release landed."), "{line}");
+    assert!(line.ends_with(" while its operator was away. The boundary judge said doubt, the release landed."), "{line}");
     for key in ["dest", "file", "after", "after_keepalives", "notes"] {
         assert!(r.get(key).is_some(), "the route carries {key}: {v}");
     }
-    let out = judged_move(&w, "compact", Some("stop"), &["--json"]);
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v, serde_json::json!({ "recorded": true, "armed": true, "move": "stop", "wrap": null }));
-    let out = judged_move(&w, "stop", Some("continue"), &["--json"]);
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v, serde_json::json!({ "recorded": true, "armed": false, "move": "continue", "wrap": null }));
+    assert_eq!(
+        v,
+        serde_json::json!({ "recorded": true, "armed": true, "acted_on": true, "move": "doubt", "compact_refused": null, "wrap": r, "instructions": null, "resume": null })
+    );
+    let v = judged_json(&w, "compact", Some("stop"), &[]);
+    assert_eq!(
+        v,
+        serde_json::json!({ "recorded": true, "armed": true, "acted_on": true, "move": "stop", "compact_refused": null, "wrap": null, "instructions": null, "resume": null })
+    );
+    let v = judged_json(&w, "stop", Some("continue"), &[]);
+    assert_eq!(
+        v,
+        serde_json::json!({ "recorded": true, "armed": false, "acted_on": false, "move": "continue", "compact_refused": null, "wrap": null, "instructions": null, "resume": null })
+    );
+    let v = judged_json(&w, "compact", Some("compact"), &[]);
+    assert_eq!((v["move"].as_str(), v["compact_refused"].as_str(), v["armed"].as_bool()), (Some("stop"), Some("relay is off"), Some(true)), "{v}");
     let w = Warm::new("kw-judged-json-refused");
     handoff_for(&w, None);
     let out = w.run(&["keepwarm", "judged", "--wrap", WRAP, "--verdict", "doubt", "--handoff", "sufficient", "--own", "stop", "--json"]);
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
     assert!(String::from_utf8_lossy(&out.stderr).contains("keepwarm judged refused: no handoff"), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// The settings with keepalive and relay on.
+const RELAY_ON: &str = r#"{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.relay":{"value":"on"}}"#;
+
+/// `judged --json` for [`WRAP`], parsed.
+fn judged_json(w: &Warm, verdict: &str, moved: Option<&str>, extra: &[&str]) -> serde_json::Value {
+    let mut args = vec!["--json"];
+    args.extend(extra);
+    let out = judged_move(w, verdict, moved, &args);
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
+}
+
+/// A handoff for [`WRAP`] over the compaction's cap, with its DO NEXT
+/// last, after a long STATE section.
+fn long_handoff(w: &Warm) -> PathBuf {
+    let handoff = handoff_for(w, None);
+    std::fs::create_dir_all(handoff.parent().unwrap()).unwrap();
+    let state = "- the parser keeps its old grammar for one release, and the tests pin it.\n".repeat(200);
+    let text = format!("2026-11-27 e6bbfbdd wrap={WRAP}\nContinue work on the parser.\n\nTASKS — recreate these.\n#1 [OPEN] port the grammar\n\nSTATE — where it stands.\n{state}\nDO NEXT — start #1 from the grammar file.\n");
+    std::fs::write(&handoff, text).unwrap();
+    handoff
+}
+
+/// With relay on and room, a compact is recorded as compact, arms
+/// nothing, and gives the compaction's instructions, built as the relay
+/// builds them, and the boundary resume. A long handoff keeps its DO NEXT,
+/// and the resume keeps the relay's escape.
+///
+/// References:
+/// - ADR-417 item 4: a relay compaction takes its instructions from the
+///   handoff.
+/// - ADR-418 item 12: the compact row.
+#[test]
+fn a_compact_with_room_gives_the_instructions_and_the_resume() {
+    let w = Warm::new("kw-judged-compact");
+    w.settings(RELAY_ON);
+    let path = long_handoff(&w);
+    let v = judged_json(&w, "compact", Some("compact"), &[]);
+    let (instructions, resume) = (v["instructions"].as_str().unwrap().to_string(), v["resume"].as_str().unwrap().to_string());
+    assert_eq!(
+        v,
+        serde_json::json!({ "recorded": true, "armed": false, "acted_on": false, "move": "compact", "compact_refused": null, "wrap": null, "instructions": instructions, "resume": resume })
+    );
+    assert!(instructions.starts_with("Summarize this session as the handoff below; keep its TASKS and DO NEXT whole.\n\n2026-11-27 e6bbfbdd wrap="), "{instructions}");
+    assert!(instructions.chars().count() <= 10_000, "within the cap: {}", instructions.chars().count());
+    assert!(instructions.contains("#1 [OPEN] port the grammar"), "TASKS kept");
+    assert!(instructions.contains("DO NEXT — start #1 from the grammar file."), "DO NEXT kept: {instructions}");
+    assert!(instructions.ends_with(&format!("(The handoff continues in {}; read it there.)", path.display())), "{instructions}");
+    assert!(resume.starts_with("relay: the conversation was compacted at a work boundary; this is relay 1 of 5 since the operator's last prompt."), "{resume}");
+    assert!(resume.contains("relay: stop decision or relay: stop doubt"), "{resume}");
+    assert!(resume.ends_with("run /wrap boundary."), "{resume}");
+}
+
+/// With no room a compact is recorded as stop, which arms, and the JSON
+/// says why: the relay stopped on `decision`, a relay wrap pending,
+/// `max_relays` reached, the operator in the turn. No instructions or
+/// resume go with it.
+///
+/// References:
+/// - ADR-418 item 10: the `max_relays` cap ends the chain.
+/// - ADR-418 item 13: no self-compaction while the operator is talking.
+#[test]
+fn a_compact_without_room_is_recorded_as_stop_with_the_reason() {
+    let refused = |w: &Warm, extra: &[&str]| {
+        let v = judged_json(w, "compact", Some("compact"), extra);
+        assert_eq!((v["move"].as_str(), v["armed"].as_bool(), v["acted_on"].as_bool()), (Some("stop"), Some(true), Some(true)), "{v}");
+        assert_eq!((v["instructions"].clone(), v["resume"].clone(), v["wrap"].clone()), (serde_json::Value::Null, serde_json::Value::Null, serde_json::Value::Null), "{v}");
+        assert_eq!(status_json(w, &[])["boundary"]["move"], "stop");
+        v["compact_refused"].as_str().unwrap().to_string()
+    };
+    // One boundary relay, then its resumed turn's `relay: stop decision`.
+    let w = Warm::new("kw-judged-stopped");
+    w.settings(RELAY_ON);
+    handoff_for(&w, Some(WRAP));
+    let v = judged_json(&w, "compact", Some("compact"), &[]);
+    assert_eq!(v["compact_refused"], serde_json::Value::Null, "{v}");
+    assert!(w.run(&["keepwarm", "compacted", "--trigger", "boundary"]).status.success());
+    assert!(w.run(&["keepwarm", "resumed", "--trigger", "boundary"]).status.success());
+    assert!(w.run(&["keepwarm", "stopped", "decision", "--detail", "which database"]).status.success());
+    assert_eq!(refused(&w, &[]), "the relay stopped: decision");
+    // A relay wrap waits for its answer.
+    let w = Warm::new("kw-judged-pending");
+    let (id, _) = relay_wrap_judged(&w, "continue");
+    let out = w.run(&["keepwarm", "judged", "--json", "--wrap", &id, "--verdict", "compact", "--handoff", "sufficient", "--own", "compact", "--move", "compact"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((v["move"].as_str(), v["compact_refused"].as_str()), (Some("stop"), Some("a relay wrap is pending")), "{v}");
+    // max_relays of 1, after one boundary relay.
+    let w = Warm::new("kw-judged-max");
+    w.settings(r#"{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.relay":{"value":"on"},"mods.attend.continuity.max_relays":{"value":1}}"#);
+    handoff_for(&w, Some(WRAP));
+    assert!(w.run(&["keepwarm", "compacted", "--trigger", "boundary"]).status.success());
+    assert!(w.run(&["keepwarm", "resumed", "--trigger", "boundary"]).status.success());
+    assert_eq!(refused(&w, &[]), "max_relays reached");
+    // The operator's prompt started this turn.
+    let w = Warm::new("kw-judged-operator");
+    w.settings(RELAY_ON);
+    handoff_for(&w, Some(WRAP));
+    assert_eq!(refused(&w, &["--operator-turn"]), "the operator is in this turn");
+}
+
+/// A doubt with relay on stops the relay, so a later compact in the same
+/// absence is refused. Its JSON carries the instructions the mod compacts
+/// with, no resume, and a `handoff:` line that says the relay stopped. In
+/// a turn the operator's prompt started, the doubt does not compact, and
+/// the line does not say the operator was away.
+///
+/// References:
+/// - ADR-418 item 11: in relay mode, `doubt` becomes `relay: stop doubt`.
+#[test]
+fn a_doubt_with_relay_on_stops_the_relay() {
+    let w = Warm::new("kw-judged-doubt-relay");
+    w.settings(RELAY_ON);
+    handoff_for(&w, Some(WRAP));
+    let v = judged_json(&w, "doubt", Some("doubt"), &[]);
+    let (r, instructions) = (v["wrap"].clone(), v["instructions"].as_str().unwrap().to_string());
+    assert_eq!(
+        v,
+        serde_json::json!({ "recorded": true, "armed": true, "acted_on": true, "move": "doubt", "compact_refused": null, "wrap": r, "instructions": instructions, "resume": null })
+    );
+    assert!(instructions.ends_with("DO NEXT — start."), "{instructions}");
+    assert!(r["handoff"].as_str().unwrap().ends_with(" while its operator was away. The relay stopped: the boundary judge said doubt, the release landed."), "{r}");
+    w.reading(&[(5 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["relay_stop"].as_str(), d["send_handoff"].as_bool()), (Some("doubt"), Some(false)), "the mod sent the doubt's handoff already: {d}");
+    let v = judged_json(&w, "compact", Some("compact"), &[]);
+    assert_eq!((v["move"].as_str(), v["compact_refused"].as_str()), (Some("stop"), Some("the relay stopped: doubt")), "{v}");
+    let w = Warm::new("kw-judged-doubt-operator");
+    w.settings(RELAY_ON);
+    handoff_for(&w, Some(WRAP));
+    let v = judged_json(&w, "doubt", Some("doubt"), &["--operator-turn"]);
+    assert_eq!((v["armed"].as_bool(), v["instructions"].clone(), v["resume"].clone()), (Some(true), serde_json::Value::Null, serde_json::Value::Null), "{v}");
+    let line = v["wrap"]["handoff"].as_str().unwrap();
+    assert!(line.ends_with(" The relay stopped: the boundary judge said doubt, the release landed."), "{line}");
+    assert!(!line.contains("away"), "{line}");
+}
+
+/// With keepwarm off no tick runs, so an armed exit is not acted on:
+/// `acted_on` is false while `armed` is true.
+#[test]
+fn judged_json_says_an_armed_exit_is_not_acted_on_with_keepwarm_off() {
+    let w = Warm::new("kw-judged-acted-on");
+    w.settings(r#"{"mods.attend.keepwarm":{"value":"off"}}"#);
+    handoff_for(&w, Some(WRAP));
+    let v = judged_json(&w, "stop", Some("stop"), &[]);
+    assert_eq!((v["armed"].as_bool(), v["acted_on"].as_bool()), (Some(true), Some(false)), "{v}");
 }
 
 /// `status --session <id>` reads the named session's ledger from a shell
