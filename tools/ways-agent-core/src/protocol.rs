@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::continuance;
 use crate::cost::{JudgeCall, Usage};
 use crate::judge::{Candidate, Turn};
 use crate::profile::{Mode, Provider};
@@ -31,6 +32,10 @@ pub struct Envelope {
 pub enum Request {
     /// Judge every candidate against the turns.
     Judge(JudgeRequest),
+    /// Judge whether a session stops, compacts or continues (ADR-418 §10).
+    /// An agent built before it answers [`Reply::Error`], which the caller
+    /// takes as a fallback.
+    Continuance(Box<ContinuanceRequest>),
     Status,
     Shutdown,
 }
@@ -65,6 +70,24 @@ pub struct JudgeRequest {
     pub deadline_ms: Option<u64>,
 }
 
+/// A continuance request for a key engine. The agent renders the brief
+/// with [`continuance::render_prompt`], makes the call with the engine's
+/// continuance model, and answers [`Reply::Continued`] or a fallback.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContinuanceRequest {
+    pub session: String,
+    /// The engine the session resolved to, whose profile's continuance
+    /// judgement the agent reads.
+    pub engine: String,
+    /// The handoff's text, which the brief quotes as data.
+    pub handoff: String,
+    pub conditions: continuance::Conditions,
+    /// The milliseconds this request may take, in place of the judgement's
+    /// `timeout_ms`. `None` leaves the judgement's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_ms: Option<u64>,
+}
+
 /// Which agent answered: its version, the version of this shared crate it was
 /// built with, and the binary it runs from. A client built against a
 /// different shared crate retires the agent after it answers (ADR-502 §4).
@@ -90,6 +113,8 @@ pub struct ReplyEnvelope {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reply {
     Judged(Judged),
+    /// The answer to a [`Request::Continuance`].
+    Continued(Continued),
     /// The gate did not judge; the hook keeps the matcher's decision.
     /// `call` is set when a provider call was made, since it may be billed.
     Fallback {
@@ -114,6 +139,18 @@ pub struct Judged {
     pub latency_ms: u64,
     /// The provider call behind the verdicts. An agent older than #741
     /// sends none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<JudgeCall>,
+}
+
+/// A continuance verdict, with the call behind it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Continued {
+    pub engine: String,
+    pub provider: Provider,
+    pub model: String,
+    pub verdict: continuance::Verdict,
+    pub latency_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<JudgeCall>,
 }
@@ -303,6 +340,37 @@ mod tests {
         let line = serde_json::to_string(&reply).unwrap();
         assert!(line.contains("\"kind\":\"fallback\"") && line.contains("\"exe\":\"/x/ways-agent\""));
         assert_eq!(serde_json::from_str::<ReplyEnvelope>(&line).unwrap(), reply);
+    }
+
+    #[test]
+    fn a_continuance_request_and_its_reply_round_trip() {
+        let conditions: continuance::Conditions = serde_json::from_str(include_str!("../tests/fixtures/conditions.json")).unwrap();
+        let req = Envelope {
+            protocol: PROTOCOL,
+            request: Request::Continuance(Box::new(ContinuanceRequest {
+                session: "s".into(),
+                engine: "anthropic".into(),
+                handoff: "Continue work on x.".into(),
+                conditions,
+                deadline_ms: Some(30_000),
+            })),
+        };
+        let line = serde_json::to_string(&req).unwrap();
+        assert!(line.contains(r#""op":"continuance""#), "{line}");
+        assert_eq!(serde_json::from_str::<Envelope>(&line).unwrap(), req);
+        let verdict =
+            continuance::parse_reply(r#"{"verdict":"compact","handoff":"holds-detail","reason":"r","turns_left":4,"next_step":"n"}"#).unwrap();
+        let reply = Reply::Continued(Continued {
+            engine: "anthropic".into(),
+            provider: Provider::Anthropic,
+            model: "claude-haiku-5-5".into(),
+            verdict,
+            latency_ms: 900,
+            call: None,
+        });
+        let line = serde_json::to_string(&reply).unwrap();
+        assert!(line.contains(r#""kind":"continued""#) && line.contains(r#""handoff":"holds-detail""#), "{line}");
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap(), reply);
     }
 
     #[test]

@@ -23,10 +23,12 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{bail, Context, Result};
 
+use crate::continuance;
 use crate::cost::JudgeCall;
+use crate::engine::{Continuance, Resolution, EXPLICIT};
 use crate::judge::{self, Candidate};
-use crate::profile::{self, Mode, Provider, Settings};
-use crate::protocol::{self, Envelope, JudgeRequest, Judged, Reply, Request, Status, Verdict};
+use crate::profile::{self, Mode, Profile, Provider, Settings};
+use crate::protocol::{self, ContinuanceRequest, Continued, Envelope, JudgeRequest, Judged, Reply, Request, Status, Verdict};
 use crate::{keys, net};
 
 /// The longest request line the agent reads.
@@ -149,10 +151,11 @@ fn handle(stream: UnixStream, state: &State) -> bool {
             false,
         ),
         Ok(env) => match env.request {
-            Request::Judge(_) if state.draining.load(Ordering::SeqCst) => {
+            Request::Judge(_) | Request::Continuance(_) if state.draining.load(Ordering::SeqCst) => {
                 (Reply::Fallback { reason: "agent_stopping".into(), latency_ms: 0, call: None }, false)
             }
             Request::Judge(req) => (state.judge(req), false),
+            Request::Continuance(req) => (state.continuance(&req, &profile::user_layer_path()), false),
             Request::Status => (Reply::Status(state.status()), false),
             Request::Shutdown => {
                 state.draining.store(true, Ordering::SeqCst);
@@ -375,6 +378,50 @@ impl State {
         Ok(Prepared { req, settings, key, prompt, remaining, _slot })
     }
 
+    /// Answers a continuance request (ADR-418 §10) with the continuance
+    /// judgement of the engine the session resolved to, read from the layer
+    /// at `path`. `gate.mode` governs disclosure only, so it does not stop
+    /// this call. The disclosure statistics do not count it: its deadline is
+    /// tens of seconds, and its latency would swamp theirs.
+    fn continuance(&self, req: &ContinuanceRequest, path: &Path) -> Reply {
+        let begun = Instant::now();
+        let outcome = self.prepare_continuance(req, path, begun).map_err(|reason| (reason, None)).and_then(|p| p.call(self));
+        let latency_ms = begun.elapsed().as_millis() as u64;
+        match outcome {
+            Ok(continued) => Reply::Continued(Continued { latency_ms, ..continued }),
+            Err((reason, call)) => Reply::Fallback { reason, latency_ms, call },
+        }
+    }
+
+    /// Everything before the continuance call: the judgement, the key, a
+    /// slot and the deadline. The `claude-code` engine is refused before any
+    /// key is read, as [`State::prepare_with`] refuses it.
+    fn prepare_continuance(&self, req: &ContinuanceRequest, path: &Path, begun: Instant) -> Result<PreparedContinuance<'_>, String> {
+        let profiles = continuance::layer_profiles(path)?;
+        let held = Resolution { engine: Some(req.engine.clone()), reason: EXPLICIT.to_string() };
+        let (Some(judgement), Some(p)) = (Continuance::of(&held, &profiles), profiles.get(&req.engine)) else {
+            return Err(format!("{}: {}", crate::engine::CONFIG, profile::names_no_profile(&req.engine)));
+        };
+        if p.provider == Provider::ClaudeCode {
+            return Err(format!("{NOT_AGENT_ENGINE}: {}", net::NOT_CALLED));
+        }
+        let Some((key, source)) = keys::read(p.provider).map_err(|e| format!("key: {e:#}"))? else {
+            return Err("no_key".to_string());
+        };
+        // The key's approval is its check against the profile's disclosure
+        // model: one record per provider, which a check against the
+        // continuance model would overwrite.
+        self.verified(p.provider, &key, &source, &p.model)?;
+        let deadline = Duration::from_millis(req.deadline_ms.unwrap_or(judgement.timeout_ms).min(profile::MAX_JUDGEMENT_TIMEOUT_MS));
+        let _slot = self.acquire(p.concurrency, deadline.saturating_sub(begun.elapsed()))?;
+        let remaining = deadline.saturating_sub(begun.elapsed());
+        if remaining.is_zero() {
+            return Err("deadline: before call".to_string());
+        }
+        let prompt = continuance::render_prompt(&req.handoff, &req.conditions);
+        Ok(PreparedContinuance { profile: p.clone(), judgement, key, prompt, remaining, _slot })
+    }
+
     /// A working key is the operator's approval to gate (ADR-196 §6): judge
     /// only with a key whose last recorded check passed. A key never checked,
     /// or replaced since, is checked in the background, and requests fall
@@ -507,6 +554,38 @@ impl Prepared<'_> {
     }
 }
 
+/// A continuance request ready for its provider call, holding its slot.
+struct PreparedContinuance<'r> {
+    profile: Profile,
+    judgement: Continuance,
+    key: String,
+    prompt: String,
+    remaining: Duration,
+    _slot: Slot<'r>,
+}
+
+impl PreparedContinuance<'_> {
+    /// Makes the call with no tools and parses the reply. Every outcome past
+    /// this point was a call the provider may bill, so each carries a
+    /// [`JudgeCall`] priced for the continuance model.
+    fn call(self, state: &State) -> Result<Continued, (String, Option<Box<JudgeCall>>)> {
+        let j = &self.judgement;
+        let priced = |usage| Box::new(continuance::priced_call(j, &self.profile, usage));
+        let (text, usage) =
+            net::complete(&state.http, j.provider, &self.key, &j.model, continuance::SYSTEM, &self.prompt, j.max_tokens, self.remaining)
+                .map_err(|f| (f.reason, Some(priced(f.usage))))?;
+        let verdict = continuance::parse_reply(&text).map_err(|e| (e.reason(), Some(priced(usage.clone()))))?;
+        Ok(Continued {
+            engine: j.engine.clone(),
+            provider: j.provider,
+            model: j.model.clone(),
+            verdict,
+            latency_ms: 0,
+            call: Some(*priced(usage)),
+        })
+    }
+}
+
 /// A held provider slot, released on drop.
 struct Slot<'a>(&'a State);
 
@@ -607,6 +686,37 @@ mod tests {
         let unnamed = State::settings_at(&path, None, anthropic_key).unwrap().unwrap();
         let reason = state.prepare_with(&req, unnamed, Instant::now()).err().expect("refused");
         assert!(reason.starts_with(NOT_AGENT_ENGINE), "{reason}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn continuance_request(engine: &str) -> ContinuanceRequest {
+        ContinuanceRequest {
+            session: "s".into(),
+            engine: engine.into(),
+            handoff: "Continue work on x.".into(),
+            conditions: serde_json::from_str(include_str!("../../ways-agent-core/tests/fixtures/conditions.json")).unwrap(),
+            deadline_ms: None,
+        }
+    }
+
+    #[test]
+    fn a_continuance_request_on_claude_code_or_no_profile_falls_back_and_sends_nothing() {
+        let dir = std::env::temp_dir().join(format!("ways-agent-continuance-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent.yaml");
+        // gate.mode governs disclosure only: off does not stop a continuance call.
+        std::fs::write(&path, "engine: claude-code\nmode: off\n").unwrap();
+        let state = State::new();
+        let Reply::Fallback { reason, call, .. } = state.continuance(&continuance_request("claude-code"), &path) else { panic!("not a fallback") };
+        assert_eq!((reason, call), (format!("not_agent_engine: {}", net::NOT_CALLED), None));
+        let Reply::Fallback { reason, .. } = state.continuance(&continuance_request("nosuch"), &path) else { panic!("not a fallback") };
+        assert_eq!(reason, "config: engine 'nosuch' names no profile");
+        std::fs::write(&path, "engine: [x\n").unwrap();
+        let Reply::Fallback { reason, .. } = state.continuance(&continuance_request("anthropic"), &path) else { panic!("not a fallback") };
+        assert!(reason.starts_with("config: "), "{reason}");
+        // No slot taken and no key check started.
+        assert_eq!(state.in_flight(), 0);
+        assert!(!state.checking.load(Ordering::SeqCst));
         std::fs::remove_dir_all(&dir).ok();
     }
 

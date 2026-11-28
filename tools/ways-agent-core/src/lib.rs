@@ -9,6 +9,7 @@
 //! TLS; the provider clients and the server live in `ways-agent`.
 
 pub mod client;
+pub mod continuance;
 pub mod cost;
 pub mod engine;
 pub mod judge;

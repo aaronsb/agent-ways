@@ -339,6 +339,92 @@ pub fn judge(
     Ok((p_yes, usage))
 }
 
+/// The URL and body of a completion with no tools: `system` and one user
+/// turn, `prompt`.
+fn complete_request(api: Api, model: &str, system: &str, prompt: &str, max_tokens: u64) -> (String, Value) {
+    let (url, mut body) = match api {
+        Api::Anthropic => (
+            format!("{ANTHROPIC}/v1/messages"),
+            serde_json::json!({
+                "model": model,
+                "max_tokens": max_tokens,
+                "system": system,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+        ),
+        Api::Openrouter => (
+            format!("{OPENROUTER}/chat/completions"),
+            serde_json::json!({
+                "model": model,
+                "max_tokens": max_tokens,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+            }),
+        ),
+    };
+    if crate::profile::accepts_sampling(model) {
+        body["temperature"] = serde_json::json!(0);
+    }
+    (url, body)
+}
+
+/// One text completion with no tools: the continuance judge's call
+/// (ADR-418 §10). Returns the reply's text, its text blocks joined, with the
+/// usage the provider reported. A failure carries the usage as
+/// [`judge`]'s does.
+#[allow(clippy::too_many_arguments)]
+pub fn complete(
+    http: &ureq::Agent,
+    provider: Provider,
+    key: &str,
+    model: &str,
+    system: &str,
+    prompt: &str,
+    max_tokens: u64,
+    timeout: Duration,
+) -> std::result::Result<(String, Option<Usage>), JudgeFailure> {
+    let Some(api) = Api::of(provider) else { return Err(JudgeFailure::bare(NOT_CALLED.to_string())) };
+    let (url, body) = complete_request(api, model, system, prompt, max_tokens);
+    let mut req = http.post(&url).config().timeout_global(Some(timeout)).build();
+    req = match api {
+        Api::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
+        Api::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
+    };
+    let mut resp = req.send_json(&body).map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
+    let status = resp.status().as_u16();
+    let text = resp.body_mut().read_to_string().map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
+    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if status != 200 {
+        // As for a judge call: a 4xx refusal is not billed, anything else may be.
+        let refused = (400..500).contains(&status) && status != 408;
+        let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
+        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
+    }
+    let usage = usage(api, &reply);
+    reply_text(api, &reply).map(|t| (t, usage.clone())).ok_or_else(|| JudgeFailure {
+        reason: format!("answer: no text (stop_reason {})", reply.get("stop_reason").or_else(|| reply.pointer("/choices/0/finish_reason")).unwrap_or(&Value::Null)),
+        usage,
+    })
+}
+
+/// The text of a 200 reply: Anthropic's text blocks joined, thinking left
+/// out, or OpenRouter's message content. `None` when it holds no text.
+fn reply_text(api: Api, reply: &Value) -> Option<String> {
+    let text = match api {
+        Api::Anthropic => reply
+            .get("content")?
+            .as_array()?
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<String>(),
+        Api::Openrouter => reply.pointer("/choices/0/message/content")?.as_str()?.to_string(),
+    };
+    (!text.trim().is_empty()).then_some(text)
+}
+
 /// The JSON of an OpenRouter tool call's `arguments`. Some upstream providers
 /// encode the object twice, so a value that parses to a string is parsed once more.
 fn decode_arguments(args: &str) -> std::result::Result<Value, serde_json::Error> {
@@ -458,6 +544,27 @@ mod tests {
         assert_eq!(f, JudgeFailure { reason: NOT_CALLED.to_string(), usage: None });
         assert_eq!(check(Provider::ClaudeCode, "", "claude-haiku-4-5"), Check::Failed(0, NOT_CALLED.to_string()));
         assert!(models(Provider::ClaudeCode, None).is_err());
+    }
+
+    #[test]
+    fn a_completion_sends_no_tools_and_reads_only_the_text() {
+        for api in [Api::Anthropic, Api::Openrouter] {
+            let (_, body) = complete_request(api, "claude-haiku-5-5", "sys", "the brief", 4096);
+            assert!(body.get("tools").is_none() && body.get("tool_choice").is_none(), "{api:?}: {body}");
+            assert_eq!(body["max_tokens"], 4096);
+            assert!(body.get("temperature").is_none(), "Haiku 5.5 takes no sampling parameter");
+            assert!(body.to_string().contains("the brief"));
+        }
+        let (_, legacy) = complete_request(Api::Anthropic, "claude-haiku-4-5", "s", "p", 10);
+        assert_eq!(legacy["temperature"], 0);
+        let anthropic = json!({"content": [{"type": "thinking", "thinking": "hmm"}, {"type": "text", "text": "{\"a\":"}, {"type": "text", "text": "1}"}]});
+        assert_eq!(reply_text(Api::Anthropic, &anthropic).as_deref(), Some("{\"a\":1}"));
+        assert_eq!(reply_text(Api::Anthropic, &json!({"content": [{"type": "thinking", "thinking": "x"}]})), None);
+        let openrouter = json!({"choices": [{"message": {"content": "{}"}}]});
+        assert_eq!(reply_text(Api::Openrouter, &openrouter).as_deref(), Some("{}"));
+        let http = agent(Duration::from_millis(1));
+        let f = complete(&http, Provider::ClaudeCode, "", "m", "s", "p", 10, Duration::from_millis(1)).unwrap_err();
+        assert_eq!(f.reason, NOT_CALLED);
     }
 
     #[test]
