@@ -716,8 +716,9 @@ pub enum KeepwarmCmd {
     Off,
     /// Cache state, context size, cold price, window left, and this session's cold writes.
     /// With --json, the stop exit alone, read from the ledger with no
-    /// transcript read: `exit` is its state (armed or finished), wrap id,
-    /// pings, rent and purchase, or null with none
+    /// transcript read: `exit` is its state (armed or finished, or the
+    /// verdict's name for a judgment other than stop, which arms nothing),
+    /// wrap id, pings, rent and purchase, or null with none
     Status(JsonArgs),
     /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
     /// one is due, else nothing (exit 0 either way). The attend mod polls
@@ -843,11 +844,16 @@ pub enum KeepwarmCmd {
     /// as one JSON object: the fill and the price of a ping, the minutes
     /// since the operator's prompt and the relay count, the messages
     /// awaiting a reply, git status, the commits and merges since the
-    /// handoff's head, and the branch's open PRs with their checks. The mod
-    /// passes what only it sees as a JSON object on stdin: agents_in_flight,
-    /// tasks_open, tasks_in_progress and tasks_closed_since_wrap as lists of
-    /// lines, and window in tokens. The probes have about 2 s; one that
-    /// fails or runs past that prints "unknown". Exits 0
+    /// handoff's head, the branch's open PRs with their checks, and the
+    /// agents, shells and watchers the last Stop hook listed in flight. The
+    /// mod passes what only it sees as a JSON object on stdin:
+    /// agents_in_flight, shells_in_flight, watchers_in_flight, tasks_open,
+    /// tasks_in_progress and tasks_closed_since_wrap as lists of lines,
+    /// window in tokens, and operator_prompt_at, the operator's last prompt
+    /// in epoch seconds, which wins over the ledger's. The mod's shells and
+    /// watchers win over the Stop's, and its agents are listed with the
+    /// Stop's. The probes have about 2 s; one that fails or runs past that
+    /// prints "unknown". Exits 0
     Brief(KeepwarmBriefArgs),
 }
 
@@ -907,8 +913,10 @@ pub struct KeepwarmCheckArgs {
     pub native_at: Option<u64>,
     /// What still runs, as the host counted it: agents=N,shells=N,watchers=N.
     /// While an exit is armed, these and the threads awaiting a reply keep
-    /// the cache warm up to the price of what replaces the session. Shells
-    /// and watchers left out are the ones the last Stop hook listed
+    /// the cache warm up to the price of what replaces the session. A count
+    /// left out is the last Stop hook's: its subagents, teammates, cloud
+    /// sessions and workflows as agents, its shells, and its monitors and
+    /// MCP tasks as watchers
     #[arg(long, requires = "policy", value_name = "COUNTS", value_parser = sensor_keepwarm::policy::armed::Given::parse)]
     pub pending: Option<sensor_keepwarm::policy::armed::Given>,
 }

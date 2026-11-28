@@ -226,13 +226,13 @@ fn pending_parses_the_mod_s_counts() {
     }
 }
 
-/// Shells and watchers the host does not name come from the last Stop's
-/// record; a count the host gives wins, zero included.
+/// Agents, shells and watchers the host does not name come from the last
+/// Stop's record; a count the host gives wins, zero included.
 #[test]
 fn the_stop_s_record_fills_the_shells_and_watchers_the_host_left_out() {
-    let bg = Background { shells: vec!["cargo test".into()], watchers: vec!["watch CI".into(), "watch logs".into()], workflows: vec!["wave3".into()], at: 1 };
+    let bg = Background { shells: vec!["cargo test".into()], watchers: vec!["watch CI".into(), "watch logs".into()], agents: vec!["workflow: wave3".into()], at: 1 };
     let g = Given::parse("agents=2").unwrap();
-    assert_eq!(g.with(Some(&bg)), Pending { awaiting: 0, agents: 2, shells: 1, watchers: 2 }, "the host's agents win over the workflows");
+    assert_eq!(g.with(Some(&bg)), Pending { awaiting: 0, agents: 2, shells: 1, watchers: 2 }, "the host's agents win over the recorded ones");
     assert_eq!(g.with(None), Pending { agents: 2, ..Pending::default() });
     let g = Given::parse("shells=0").unwrap();
     assert_eq!(g.with(Some(&bg)), Pending { agents: 1, shells: 0, watchers: 2, ..Pending::default() });
@@ -250,6 +250,26 @@ fn a_recorded_workflow_keeps_an_armed_exit_pinging() {
     let d = s.check_at(&c, Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
     assert_eq!(d.action, Action::Keepalive, "{d:?}");
     assert!(d.reason.contains("1 agent"), "{}", d.reason);
+}
+
+/// Where the host names no agents (its list could not be read), the
+/// subagents, teammates and cloud sessions the Stop listed are agents in
+/// flight; a count the host names still wins.
+#[test]
+fn recorded_subagents_teammates_and_cloud_sessions_count_where_the_host_names_no_agents() {
+    let payload = r#"{"background_tasks":[
+        {"type":"subagent","status":"running","description":"review"},
+        {"type":"teammate","status":"running","description":"scout@crew"},
+        {"type":"cloud session","status":"running","description":"port"}]}"#;
+    let bg = crate::background::from_stop_payload(payload, MONDAY);
+    assert_eq!(Given::default().with(bg.as_ref()).agents, 3);
+    assert_eq!(Given::parse("agents=0").unwrap().with(bg.as_ref()).agents, 0, "the host's count wins");
+    let mut c = cfg();
+    c.pending = Given::default().with(bg.as_ref());
+    let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+    let d = s.check_at(&c, Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+    assert_eq!(d.action, Action::Keepalive, "{d:?}");
+    assert!(d.reason.contains("3 agents"), "{}", d.reason);
 }
 
 /// A Stop that listed a running shell keeps the armed exit pinging with no

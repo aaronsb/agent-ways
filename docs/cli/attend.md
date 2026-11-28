@@ -600,7 +600,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 
 * `on` — Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
 * `off` — Disarm and forget the window
-* `status` — Cache state, context size, cold price, window left, and this session's cold writes. With --json, the stop exit alone, read from the ledger with no transcript read: `exit` is its state (armed or finished), wrap id, pings, rent and purchase, or null with none
+* `status` — Cache state, context size, cold price, window left, and this session's cold writes. With --json, the stop exit alone, read from the ledger with no transcript read: `exit` is its state (armed or finished, or the verdict's name for a judgment other than stop, which arms nothing), wrap id, pings, rent and purchase, or null with none
 * `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). The attend mod polls it
 * `reset` — The operator prompted: the keepalive and relay counts start again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
@@ -611,7 +611,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `goal` — Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended
 * `stopped` — Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt
 * `wrap-id` — Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh
-* `brief` — Print the conditions the continuance judge reads at a work boundary, as one JSON object: the fill and the price of a ping, the minutes since the operator's prompt and the relay count, the messages awaiting a reply, git status, the commits and merges since the handoff's head, and the branch's open PRs with their checks. The mod passes what only it sees as a JSON object on stdin: agents_in_flight, tasks_open, tasks_in_progress and tasks_closed_since_wrap as lists of lines, and window in tokens. The probes have about 2 s; one that fails or runs past that prints "unknown". Exits 0
+* `brief` — Print the conditions the continuance judge reads at a work boundary, as one JSON object: the fill and the price of a ping, the minutes since the operator's prompt and the relay count, the messages awaiting a reply, git status, the commits and merges since the handoff's head, the branch's open PRs with their checks, and the agents, shells and watchers the last Stop hook listed in flight. The mod passes what only it sees as a JSON object on stdin: agents_in_flight, shells_in_flight, watchers_in_flight, tasks_open, tasks_in_progress and tasks_closed_since_wrap as lists of lines, window in tokens, and operator_prompt_at, the operator's last prompt in epoch seconds, which wins over the ledger's. The mod's shells and watchers win over the Stop's, and its agents are listed with the Stop's. The probes have about 2 s; one that fails or runs past that prints "unknown". Exits 0
 
 
 
@@ -637,7 +637,7 @@ Disarm and forget the window
 
 ## `attend keepwarm status`
 
-Cache state, context size, cold price, window left, and this session's cold writes. With --json, the stop exit alone, read from the ledger with no transcript read: `exit` is its state (armed or finished), wrap id, pings, rent and purchase, or null with none
+Cache state, context size, cold price, window left, and this session's cold writes. With --json, the stop exit alone, read from the ledger with no transcript read: `exit` is its state (armed or finished, or the verdict's name for a judgment other than stop, which arms nothing), wrap id, pings, rent and purchase, or null with none
 
 **Usage:** `attend keepwarm status [OPTIONS]`
 
@@ -669,7 +669,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 * `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window starts the drain with one drain turn, a fill past mods.attend.continuity.hard_at_pct sends a wrap, and a fill under the drain point ends the drain
 * `--window <WINDOW>` — The model's whole context window, in tokens
 * `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the hard line sits five points of the window under it where that is lower
-* `--pending <COUNTS>` — What still runs, as the host counted it: agents=N,shells=N,watchers=N. While an exit is armed, these and the threads awaiting a reply keep the cache warm up to the price of what replaces the session. Shells and watchers left out are the ones the last Stop hook listed
+* `--pending <COUNTS>` — What still runs, as the host counted it: agents=N,shells=N,watchers=N. While an exit is armed, these and the threads awaiting a reply keep the cache warm up to the price of what replaces the session. A count left out is the last Stop hook's: its subagents, teammates, cloud sessions and workflows as agents, its shells, and its monitors and MCP tasks as watchers
 
 
 
@@ -822,7 +822,7 @@ Print the id of this session's last recorded wrap, or nothing and exit 1 when no
 
 ## `attend keepwarm brief`
 
-Print the conditions the continuance judge reads at a work boundary, as one JSON object: the fill and the price of a ping, the minutes since the operator's prompt and the relay count, the messages awaiting a reply, git status, the commits and merges since the handoff's head, and the branch's open PRs with their checks. The mod passes what only it sees as a JSON object on stdin: agents_in_flight, tasks_open, tasks_in_progress and tasks_closed_since_wrap as lists of lines, and window in tokens. The probes have about 2 s; one that fails or runs past that prints "unknown". Exits 0
+Print the conditions the continuance judge reads at a work boundary, as one JSON object: the fill and the price of a ping, the minutes since the operator's prompt and the relay count, the messages awaiting a reply, git status, the commits and merges since the handoff's head, the branch's open PRs with their checks, and the agents, shells and watchers the last Stop hook listed in flight. The mod passes what only it sees as a JSON object on stdin: agents_in_flight, shells_in_flight, watchers_in_flight, tasks_open, tasks_in_progress and tasks_closed_since_wrap as lists of lines, window in tokens, and operator_prompt_at, the operator's last prompt in epoch seconds, which wins over the ledger's. The mod's shells and watchers win over the Stop's, and its agents are listed with the Stop's. The probes have about 2 s; one that fails or runs past that prints "unknown". Exits 0
 
 **Usage:** `attend keepwarm brief [OPTIONS]`
 

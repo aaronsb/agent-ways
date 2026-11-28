@@ -980,15 +980,14 @@ function setExit(mod: Mod, exit: Exit | undefined): boolean {
   return ka.applies && !didApply
 }
 
-/** The agent loops in flight, for `--pending`. A list that cannot be read
- *  counts as one: an unknown count keeps an armed exit warm, up to the
- *  price of a replacement, rather than finishing a session whose agents
- *  may still run. */
-async function agentsRunning($: $): Promise<number> {
+/** The agent loops in flight, for `--pending`; undefined where the list
+ *  cannot be read, so `--pending` names no agents and attend counts the
+ *  subagents, teammates and workflows the last Stop hook listed. */
+async function agentsRunning($: $): Promise<number | undefined> {
   try {
     return agentsInFlight(await $.agent.list())
   } catch {
-    return 1
+    return undefined
   }
 }
 
@@ -1001,6 +1000,9 @@ async function checkKeepalive($: $, mod: Mod) {
   const ka = mod.ka
   if (!ka.applies || mod.running.size > 0 || mod.config.keepwarm !== 'on') return
   const epoch = ka.epoch
+  // An operator prompt while attend judges disarmed the exit: this
+  // decision is older than it.
+  const operatorThen = ka.operatorEpoch
   await serialize(ka, async () => {
     const gate = await readGate($, ka)
     const isListening = await isOn($, mod)
@@ -1041,10 +1043,16 @@ async function checkKeepalive($: $, mod: Mod) {
     // attend's word on the stop exit, `policy` false or not. A finish has
     // submitted nothing and attend has marked the session finished.
     //
+    // An operator prompt that came while attend judged has reset the exit
+    // and the row; a decision from before it neither sets them again.
+    //
     // References:
     // - ADR-418 item 12: a stopped session is marked finished.
-    setExit(mod, stopExitOf(d))
-    await setKeepaliveRow($, k => keepaliveRowOf(d, k))
+    // - ADR-418 item 9: an operator prompt disarms the exit.
+    if (ka.operatorEpoch === operatorThen) {
+      setExit(mod, stopExitOf(d))
+      await setKeepaliveRow($, k => keepaliveRowOf(d, k))
+    }
     // A relay that stopped hands the reply to the operator, once.
     if (d.sendHandoff && d.wrap) await sendRelayHandoff($, ka, d.wrap, d.text)
     // With relay off, a /wrap's marker was only recorded: nothing waits on it.
@@ -1413,6 +1421,7 @@ export const register: Register = on => {
       isRelayPending: false,
       relayReply: undefined,
       operatorEpoch: 0,
+      operatorPromptAtMs: undefined,
       relay: false,
       exit: undefined,
     },
@@ -1425,7 +1434,16 @@ export const register: Register = on => {
     if (!mod.config.install) return next(e)
     mod.canPoll = e.isInteractive || mod.config.headlessPoll
     mod.isInteractive = e.isInteractive
-    mod.ka.applies = keepaliveApplies(mod.config, e.isInteractive)
+    // A process that resumes a session learns of a stop exit an earlier one
+    // recorded, from attend's ledger, so the operator's prompt resets it,
+    // dormant or not; activate's read then finds it known.
+    //
+    // References:
+    // - ADR-418 item 9: an operator prompt disarms the exit.
+    if (mod.ka.exit === undefined && e.isInteractive && mod.config.keepwarm === 'on') {
+      mod.ka.exit = stopExitOfStatus((await run($, KEEPWARM_EXIT_ARGV)).stdout)
+    }
+    mod.ka.applies = keepaliveApplies(mod.config, e.isInteractive, mod.ka.exit !== undefined)
     mod.ka.relay = mod.config.relay
     // The first check reads where the transcript stands (a resumed session
     // may be warm) and records the gate for the status card.
@@ -1564,7 +1582,12 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const done = await next(e)
     const command = (e as { command?: unknown }).command
-    if (mod.isStarted && mod.ka.exit === undefined && typeof command === 'string' && isJudgedStop(command)) setExit(mod, 'judged')
+    if (mod.isStarted && mod.ka.exit === undefined && typeof command === 'string' && isJudgedStop(command)) {
+      setExit(mod, 'judged')
+      // No main-loop turn runs, a subagent's call say, so no turn's end
+      // sets the timer: it is set here.
+      if (mod.running.size === 0) await armKeepalive($, mod, (await $.clock.now()) + firstCheckMs(mod.config))
+    }
     return done
   })
 
@@ -1578,6 +1601,7 @@ export const register: Register = on => {
     // starts the count again.
     mod.ka.epoch += 1
     if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    mod.ka.operatorPromptAtMs = await $.clock.now()
     await keepaliveOperator($, mod)
     const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold
     if (mod.heldNote === undefined && !isHeldCold) return next(e)
