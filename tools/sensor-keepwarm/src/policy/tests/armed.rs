@@ -230,13 +230,26 @@ fn pending_parses_the_mod_s_counts() {
 /// record; a count the host gives wins, zero included.
 #[test]
 fn the_stop_s_record_fills_the_shells_and_watchers_the_host_left_out() {
-    let bg = Background { shells: vec!["cargo test".into()], watchers: vec!["watch CI".into(), "watch logs".into()], at: 1 };
-    let g = Given::parse("agents=1").unwrap();
-    assert_eq!(g.with(Some(&bg)), Pending { awaiting: 0, agents: 1, shells: 1, watchers: 2 });
-    assert_eq!(g.with(None), Pending { agents: 1, ..Pending::default() });
+    let bg = Background { shells: vec!["cargo test".into()], watchers: vec!["watch CI".into(), "watch logs".into()], workflows: vec!["wave3".into()], at: 1 };
+    let g = Given::parse("agents=2").unwrap();
+    assert_eq!(g.with(Some(&bg)), Pending { awaiting: 0, agents: 2, shells: 1, watchers: 2 }, "the host's agents win over the workflows");
+    assert_eq!(g.with(None), Pending { agents: 2, ..Pending::default() });
     let g = Given::parse("shells=0").unwrap();
-    assert_eq!(g.with(Some(&bg)), Pending { shells: 0, watchers: 2, ..Pending::default() });
-    assert_eq!(Given::default().with(Some(&bg)), Pending { shells: 1, watchers: 2, ..Pending::default() });
+    assert_eq!(g.with(Some(&bg)), Pending { agents: 1, shells: 0, watchers: 2, ..Pending::default() });
+    assert_eq!(Given::default().with(Some(&bg)), Pending { agents: 1, shells: 1, watchers: 2, ..Pending::default() });
+}
+
+/// A workflow the Stop listed running orchestrates agents: it keeps an
+/// armed exit pinging as an agent does.
+#[test]
+fn a_recorded_workflow_keeps_an_armed_exit_pinging() {
+    let mut c = cfg();
+    let payload = r#"{"background_tasks":[{"id":"w1","type":"workflow","status":"running","description":"build","name":"wave3"}]}"#;
+    c.pending = Given::default().with(crate::background::from_stop_payload(payload, MONDAY).as_ref());
+    let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+    let d = s.check_at(&c, Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+    assert_eq!(d.action, Action::Keepalive, "{d:?}");
+    assert!(d.reason.contains("1 agent"), "{}", d.reason);
 }
 
 /// A Stop that listed a running shell keeps the armed exit pinging with no

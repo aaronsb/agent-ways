@@ -52,6 +52,7 @@ import {
   DRAIN_ARGV,
   DRAINED_ARGV,
   KEEPWARM_CHECK_ARGV,
+  KEEPWARM_EXIT_ARGV,
   LISTEN_OFF_ARGV,
   LISTEN_ON_ARGV,
   PEERS_ARGV,
@@ -97,6 +98,7 @@ import {
   joinArgv,
   agentsInFlight,
   stopExitOf,
+  stopExitOfStatus,
   isJudgedStop,
   keepaliveApplies,
   keepaliveRowOf,
@@ -277,6 +279,14 @@ async function activate($: $, mod: Mod, id: string, isAsked = false): Promise<Pr
   try {
     mod.config = await readConfig($, mod.cwd)
     mod.canPoll = mod.canPoll || mod.config.headlessPoll
+    // A process that resumes a session learns of a stop exit an earlier one
+    // recorded, from attend's ledger, so the operator's prompt resets it.
+    //
+    // References:
+    // - ADR-418 item 9: an operator prompt disarms the exit.
+    if (mod.ka.exit === undefined && mod.isInteractive && mod.config.keepwarm === 'on') {
+      mod.ka.exit = stopExitOfStatus((await run($, KEEPWARM_EXIT_ARGV)).stdout)
+    }
     // The config read again may change whether the policy applies: one judge
     // per ledger, the policy's timer or the poll's plain check.
     const didApply = mod.ka.applies
@@ -970,13 +980,15 @@ function setExit(mod: Mod, exit: Exit | undefined): boolean {
   return ka.applies && !didApply
 }
 
-/** The agent loops in flight, for `--pending`; none where the list cannot
- *  be read. */
+/** The agent loops in flight, for `--pending`. A list that cannot be read
+ *  counts as one: an unknown count keeps an armed exit warm, up to the
+ *  price of a replacement, rather than finishing a session whose agents
+ *  may still run. */
 async function agentsRunning($: $): Promise<number> {
   try {
     return agentsInFlight(await $.agent.list())
   } catch {
-    return 0
+    return 1
   }
 }
 

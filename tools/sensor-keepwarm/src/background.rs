@@ -21,14 +21,18 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// What one Stop listed in flight: a one-line description of each shell
-/// and each watcher, and when it was recorded, in epoch seconds.
+/// What one Stop listed in flight: a one-line description of each shell,
+/// each watcher and each workflow, and when it was recorded, in epoch
+/// seconds. A workflow orchestrates agents, so the check counts it as an
+/// agent in flight.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Background {
     #[serde(default)]
     pub shells: Vec<String>,
     #[serde(default)]
     pub watchers: Vec<String>,
+    #[serde(default)]
+    pub workflows: Vec<String>,
     #[serde(default)]
     pub at: u64,
 }
@@ -59,7 +63,7 @@ pub fn read(dir: &Path, session_id: &str) -> Option<Background> {
 /// array, so a payload of another shape records nothing. A task of an
 /// unknown type or one no longer running is left out. Shells are the
 /// `shell` tasks, by their command line; watchers are the `monitor` tasks,
-/// by their description.
+/// by their description; workflows are the `workflow` tasks, by their name.
 pub fn from_stop_payload(payload: &str, now: u64) -> Option<Background> {
     let doc: serde_json::Value = serde_json::from_str(payload).ok()?;
     let tasks = doc.get("background_tasks")?.as_array()?;
@@ -72,6 +76,7 @@ pub fn from_stop_payload(payload: &str, now: u64) -> Option<Background> {
         let (list, text) = match field("type") {
             Some("shell") => (&mut b.shells, field("command").or(field("description"))),
             Some("monitor") => (&mut b.watchers, field("description").or(field("tool"))),
+            Some("workflow") => (&mut b.workflows, field("name").or(field("description"))),
             _ => continue,
         };
         list.push(one_line(text.unwrap_or("(no description)")));
@@ -99,10 +104,12 @@ mod tests {
             {"id":"b1","type":"shell","status":"running","description":"run the suite","command":"cargo test\n--all"},
             {"id":"m1","type":"monitor","status":"running","description":"watch CI on #1403","server":"gh","tool":"watch"},
             {"id":"a1","type":"subagent","status":"running","description":"review","agent_type":"Explore"},
+            {"id":"w1","type":"workflow","status":"running","description":"build the wave","name":"wave3"},
             {"id":"b2","type":"shell","status":"completed","description":"done","command":"true"}]}"#;
         let b = from_stop_payload(payload, 42).unwrap();
         assert_eq!(b.shells, vec!["cargo test".to_string()]);
         assert_eq!(b.watchers, vec!["watch CI on #1403".to_string()]);
+        assert_eq!(b.workflows, vec!["wave3".to_string()]);
         assert_eq!(b.at, 42);
         let dir = std::env::temp_dir().join(format!("kw-bg-{}", std::process::id()));
         record(&dir, "s1", &b).unwrap();
@@ -114,7 +121,7 @@ mod tests {
     #[test]
     fn an_empty_list_records_nothing_in_flight() {
         let b = from_stop_payload(r#"{"background_tasks":[]}"#, 7).unwrap();
-        assert_eq!(b, Background { shells: vec![], watchers: vec![], at: 7 });
+        assert_eq!(b, Background { at: 7, ..Background::default() });
     }
 
     #[test]

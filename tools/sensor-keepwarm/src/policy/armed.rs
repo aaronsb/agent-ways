@@ -174,12 +174,13 @@ pub struct Pending {
     pub watchers: u32,
 }
 
-/// `--pending` as the host gave it: the counts, and whether it named shells
-/// and watchers. The mod names agents alone, and the shells and watchers
-/// come from the last Stop's record ([`crate::background`]).
+/// `--pending` as the host gave it: the counts, and which of them it named.
+/// The mod names agents alone, and only while some run; the rest come from
+/// the last Stop's record ([`crate::background`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Given {
     pub counts: Pending,
+    pub agents: bool,
     pub shells: bool,
     pub watchers: bool,
 }
@@ -198,7 +199,7 @@ impl Given {
                 return Err(format!("{k} is given twice"));
             }
             match k {
-                "agents" => g.counts.agents = n,
+                "agents" => (g.counts.agents, g.agents) = (n, true),
                 "shells" => (g.counts.shells, g.shells) = (n, true),
                 "watchers" => (g.counts.watchers, g.watchers) = (n, true),
                 _ => return Err(format!("{k:?} is not agents, shells or watchers")),
@@ -208,11 +209,15 @@ impl Given {
         Ok(g)
     }
 
-    /// The counts, with the shells and watchers `bg` recorded in place of
-    /// any the host did not name. A count the host gave wins.
+    /// The counts, with what `bg` recorded in place of any the host did not
+    /// name: its workflows as agents, since a workflow orchestrates agents,
+    /// its shells and its watchers. A count the host gave wins.
     pub fn with(self, bg: Option<&crate::background::Background>) -> Pending {
         let mut p = self.counts;
         if let Some(b) = bg {
+            if !self.agents {
+                p.agents = b.workflows.len() as u32;
+            }
             if !self.shells {
                 p.shells = b.shells.len() as u32;
             }

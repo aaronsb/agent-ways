@@ -714,8 +714,11 @@ pub enum KeepwarmCmd {
     },
     /// Disarm and forget the window
     Off,
-    /// Cache state, context size, cold price, window left, and this session's cold writes
-    Status,
+    /// Cache state, context size, cold price, window left, and this session's cold writes.
+    /// With --json, the stop exit alone, read from the ledger with no
+    /// transcript read: `exit` is its state (armed or finished), wrap id,
+    /// pings, rent and purchase, or null with none
+    Status(JsonArgs),
     /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
     /// one is due, else nothing (exit 0 either way). The attend mod polls
     /// it.

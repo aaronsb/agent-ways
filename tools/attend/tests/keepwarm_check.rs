@@ -757,7 +757,7 @@ fn a_check_prunes_other_sessions_stale_files() {
     w.reading(&[(30 * MIN, 200_000, 500)]);
     let dir = w.f.cache().join("keepwarm");
     std::fs::create_dir_all(&dir).unwrap();
-    for f in ["gone.settings.json", "gone.lock", "live.settings.json", "live.lock", "live.ledger.json"] {
+    for f in ["gone.settings.json", "gone.background.json", "gone.lock", "live.settings.json", "live.background.json", "live.lock", "live.ledger.json"] {
         std::fs::write(dir.join(f), "{}").unwrap();
     }
     // A lock another process holds is never pruned, ledger or not.
@@ -765,8 +765,9 @@ fn a_check_prunes_other_sessions_stale_files() {
     held.lock().unwrap();
     policy(&w, "off");
     assert!(!dir.join("gone.settings.json").exists());
+    assert!(!dir.join("gone.background.json").exists(), "a stale Stop record goes with the settings read");
     assert!(dir.join("gone.lock").exists(), "a lock file is never pruned");
-    assert!(dir.join("live.settings.json").exists() && dir.join("live.lock").exists());
+    assert!(dir.join("live.settings.json").exists() && dir.join("live.background.json").exists() && dir.join("live.lock").exists());
     drop(held);
 }
 
@@ -970,9 +971,13 @@ fn an_armed_exit_finishes_the_session_and_reset_clears_it() {
     let status = w.run(&["keepwarm", "status"]);
     let card = String::from_utf8_lossy(&status.stdout);
     assert!(card.lines().any(|l| l.starts_with("exit        finished ")), "{card}");
+    // The mod's read of the exit, for a process that resumes the session.
+    let exit = || -> serde_json::Value { serde_json::from_slice::<serde_json::Value>(&w.run(&["keepwarm", "status", "--json"]).stdout).unwrap()["exit"].clone() };
+    assert_eq!((exit()["state"].as_str(), exit()["wrap_id"].as_str()), (Some("finished"), Some(id)), "{}", exit());
     let out = w.run(&["keepwarm", "reset"]);
     assert_eq!(String::from_utf8_lossy(&out.stdout), "keepalive count reset\nthe session is no longer finished\n");
     assert!(!finished(), "reset clears the mark");
+    assert!(exit().is_null(), "reset clears the exit: {}", exit());
     let d = policy(&w, "off");
     assert!(d["exit"].is_null(), "reset clears the exit: {d}");
     assert_eq!(d["action"], "keepalive", "the next due point pings as today: {d}");

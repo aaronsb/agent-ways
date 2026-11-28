@@ -599,7 +599,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 
 * `on` — Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
 * `off` — Disarm and forget the window
-* `status` — Cache state, context size, cold price, window left, and this session's cold writes
+* `status` — Cache state, context size, cold price, window left, and this session's cold writes. With --json, the stop exit alone, read from the ledger with no transcript read: `exit` is its state (armed or finished), wrap id, pings, rent and purchase, or null with none
 * `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). The attend mod polls it
 * `reset` — The operator prompted: the keepalive and relay counts start again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
@@ -635,9 +635,13 @@ Disarm and forget the window
 
 ## `attend keepwarm status`
 
-Cache state, context size, cold price, window left, and this session's cold writes
+Cache state, context size, cold price, window left, and this session's cold writes. With --json, the stop exit alone, read from the ledger with no transcript read: `exit` is its state (armed or finished), wrap id, pings, rent and purchase, or null with none
 
-**Usage:** `attend keepwarm status`
+**Usage:** `attend keepwarm status [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Print the result as one JSON document
 
 
 

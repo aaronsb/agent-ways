@@ -74,6 +74,8 @@ export const BEAT_ARGV = [ATTEND, 'listen', 'beat', '--mod', MOD_VERSION] as con
 export const PLAIN_BEAT_ARGV = [ATTEND, 'listen', 'beat'] as const
 export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
+/** The stop exit attend's ledger records, read with no transcript read. */
+export const KEEPWARM_EXIT_ARGV = [ATTEND, 'keepwarm', 'status', '--json'] as const
 /** The drain turn went in: attend records that this generation's drain
  *  has started, and offers the turn again until it hears so.
  *
@@ -886,6 +888,19 @@ export function compactFocus(reply: string): string {
  *  the policy runs; undefined with none. */
 export function stopExitOf(d: Decision): Exit | undefined {
   return d.state === 'armed' || d.state === 'finished' ? d.state : undefined
+}
+
+/** The stop exit attend's ledger records for the session, from
+ *  `attend keepwarm status --json`: `armed`, `finished`, or undefined with
+ *  none or where the output is not the document (an attend without the
+ *  flag). */
+export function stopExitOfStatus(stdout: string): Exit | undefined {
+  try {
+    const state = (JSON.parse(stdout) as { exit?: { state?: unknown } | null } | null)?.exit?.state
+    return state === 'armed' || state === 'finished' ? state : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** The row's segment after a decision; null where neither the policy nor a

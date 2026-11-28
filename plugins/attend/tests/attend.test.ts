@@ -189,6 +189,10 @@ type World = {
   holdRead?: Promise<void>
   /** The agent loops `$.agent.list()` answers with, by their status. */
   agents?: string[]
+  /** `$.agent.list()` fails. */
+  agentsFail?: boolean
+  /** What `attend keepwarm status --json` answers; no exit when not given. */
+  exitStatus?: string
 }
 
 /** One `attend sensor host` the mod spawned, as the fake beneath runs it:
@@ -379,7 +383,10 @@ function host(on: On, world: World) {
     const fill = world.contextTokens === undefined ? {} : { tokens: world.contextTokens }
     return { value: { startedAt: T0, context: { breakdown, ...fill }, rateLimits: [] } } as never
   })
-  on('agent.list', () => ({ value: (world.agents ?? []).map((status, i) => ({ id: `a${i}`, description: 'task', type: 'general-purpose', status, kind: 'local_agent' })) }) as never)
+  on('agent.list', () => {
+    if (world.agentsFail) throw new Error('the agent list is unavailable')
+    return { value: (world.agents ?? []).map((status, i) => ({ id: `a${i}`, description: 'task', type: 'general-purpose', status, kind: 'local_agent' })) } as never
+  })
   // The Bash tool's core: the command is recorded with the rest, and runs nothing.
   on('tool.call', { tool: 'Bash' }, ($, e) => {
     argvs.push(['bash', '-c', (e as { command?: string }).command ?? ''])
@@ -429,6 +436,7 @@ function host(on: On, world: World) {
     if (cmd === 'message lapse --events' && world.lapseFails) return { ...ok(), exitCode: 127, stderr: 'attend: aborted' }
     if (cmd.startsWith('message send') && world.sendRefused) return { ...ok(), exitCode: 1, stderr: world.sendRefused }
     if (cmd === 'keepwarm check') return ok(world.keepwarm ?? '')
+    if (cmd === 'keepwarm status --json') return ok(world.exitStatus ?? '{"exit":null}')
     if (cmd.startsWith('message inbox --drain')) return ok(world.drains?.shift() ?? DRAIN_EMPTY)
     return ok('[attend] sent\n')
   }
@@ -3248,6 +3256,30 @@ describe('the armed exit', () => {
     expect(policyChecks(h)[0]).toEqual(['attend', 'keepwarm', 'check', '--policy', '--json', '--autocompact', 'on', '--skills=', '--pending', 'agents=1'])
     expect(h.submitted).toEqual([PING])
     expect((await row($))?.text).toMatch(/⟳ exit armed/)
+  })
+
+  test('an agent list that cannot be read counts as one agent in flight, so the armed ping still goes in', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const ping = armed({ action: 'keepalive', text: PING, reason: 'armed: 1 agent; ping 1 of 19', next_at: S + 110 * MIN })
+    const h = host(on, { config: DEFAULT, autocompact: true, policy: [ping, finish], agentsFail: true })
+    await $.session.start(INTERACTIVE)
+    await armByHand($)
+    await clock.advance(51 * 60_000)
+    expect(policyChecks(h)[0]?.slice(-2)).toEqual(['--pending', 'agents=1'])
+    expect(h.submitted).toEqual([PING])
+  })
+
+  test('a resumed session learns a finished exit from attend, and the operator\'s prompt resets it', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    // A new process: no row in $.state, and attend's ledger holds a finished exit.
+    const exitStatus = JSON.stringify({ exit: { state: 'finished', wrap_id: WRAP_ID, verdict: 'stop', handoff: 'sufficient', own: 'stop', pings: 0, finished_at: S - 3600 } })
+    const h = host(on, { config: DEFAULT, autocompact: true, exitStatus, policy: [decision({ policy: false, state: 'finished', reason: 'finished at 06:00' })] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    expect(h.ran('keepwarm status --json')).toBe(true)
+    expect(h.ran('keepwarm reset')).toBe(false)
+    await typed($)
+    expect(h.ran('keepwarm reset')).toBe(true)
   })
 
   test('with no agent running, the check passes no --pending: attend counts shells and watchers from the Stop hook', async ($, on) => {
