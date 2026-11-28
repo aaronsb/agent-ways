@@ -220,6 +220,53 @@ pub fn resolve_now(path: &Path, has_key: impl Fn(Provider) -> bool, host: bool) 
     resolve_reading(&read_gate(path, &has_key, false), host, &has_key).resolution
 }
 
+/// The continuance judgement a session runs: the engine it resolved to, that
+/// engine's provider, and the profile's continuance model, deadline and
+/// output budget.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Continuance {
+    pub engine: String,
+    pub provider: Provider,
+    pub model: String,
+    pub timeout_ms: u64,
+    pub max_tokens: u64,
+}
+
+impl Continuance {
+    /// The continuance judgement of the engine `resolution` names, from
+    /// `profiles`; `None` when it names none, or a profile `profiles` lacks.
+    pub fn of(resolution: &Resolution, profiles: &BTreeMap<String, Profile>) -> Option<Continuance> {
+        let engine = resolution.engine.as_ref()?;
+        let p = profiles.get(engine)?;
+        let j = &p.judgements.continuance;
+        Some(Continuance {
+            engine: engine.clone(),
+            provider: p.provider,
+            model: j.model.clone(),
+            timeout_ms: j.timeout_ms,
+            max_tokens: j.max_tokens,
+        })
+    }
+}
+
+/// The continuance judgement a session resolves to now, from the layer at
+/// `path`, the key files `has_key` reports and whether a host registered.
+/// The engine resolves as [`resolve_session`] resolves it for disclosure.
+/// `gate.mode` governs disclosure only, so neither `mode: off` nor a bad
+/// mode stops it. A file that does not parse, or an engine that names a
+/// profile that does not build, is a [`CONFIG`] reason; a session with no
+/// engine gives the resolution's reason.
+pub fn continuance_now(path: &Path, has_key: impl Fn(Provider) -> bool, host: bool) -> Result<Continuance, String> {
+    let (user, findings) = UserLayer::load_with_findings(path).map_err(|e| format!("{CONFIG}: {e:#}"))?;
+    if let Some(f) = findings.iter().find(|f| f.is_parse_failure()) {
+        return Err(format!("{CONFIG}: {f}"));
+    }
+    profile::resolve(&user, &has_key).map_err(|e| format!("{CONFIG}: {e:#}"))?;
+    let profiles = profile::profiles(&user);
+    let resolution = resolve_session(user.engine.as_deref(), &profiles, host, &has_key);
+    Continuance::of(&resolution, &profiles).ok_or(resolution.reason)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +409,34 @@ mod tests {
         let p = layer("half", Some("engine: half\nprofiles:\n  half:\n    provider: openrouter\n"));
         let r = resolve_now(&p, |_| true, true);
         assert!(r.reason.starts_with("config: engine 'half' names a profile that does not build"), "{}", r.reason);
+    }
+
+    #[test]
+    fn continuance_resolves_with_the_sessions_engine_whatever_the_mode() {
+        let key = only(Provider::Anthropic);
+        let cont = |e: &str, p: Provider, m: &str| {
+            Ok(Continuance { engine: e.into(), provider: p, model: m.into(), timeout_ms: 30_000, max_tokens: 4096 })
+        };
+        let p = layer("cont-cc", Some("engine: claude-code\n"));
+        assert_eq!(continuance_now(&p, &key, true), cont("claude-code", Provider::ClaudeCode, "claude-haiku-5-5"));
+        assert_eq!(continuance_now(&p, &key, false), cont("anthropic", Provider::Anthropic, "claude-haiku-5-5"));
+        // gate.mode governs disclosure only: off, or a mode that fails the schema.
+        for mode in ["off", "of"] {
+            let p = layer("cont-off", Some(&format!("mode: {mode}\nengine: openrouter\n")));
+            assert_eq!(continuance_now(&p, |_| true, false), cont("openrouter", Provider::Openrouter, "anthropic/claude-haiku-5.5"), "{mode}");
+        }
+        // The user's continuance model, and nothing of disclosure's.
+        let p = layer(
+            "cont-set",
+            Some("engine: claude-code\nprofiles:\n  claude-code:\n    model: claude-sonnet-5-5\n    judgements:\n      continuance:\n        model: claude-haiku-4-5\n"),
+        );
+        assert_eq!(continuance_now(&p, &key, true), cont("claude-code", Provider::ClaudeCode, "claude-haiku-4-5"));
+        // No engine, a broken file, an engine that does not build: the reason.
+        assert_eq!(continuance_now(&layer("cont-none", None), |_| false, true), Err(NO_KEY.to_string()));
+        let r = continuance_now(&layer("cont-broken", Some("engine: [x\n")), &key, true).unwrap_err();
+        assert!(r.starts_with("config: "), "{r}");
+        let r = continuance_now(&layer("cont-half", Some("engine: half\nprofiles:\n  half:\n    provider: openrouter\n")), &key, true);
+        assert!(r.unwrap_err().starts_with("config: engine 'half' names a profile that does not build"));
     }
 
     #[test]

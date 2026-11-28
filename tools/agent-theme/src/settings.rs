@@ -25,7 +25,7 @@ pub const SECTION: SectionSpec = SectionSpec {
     name: "theme",
     file: FILE,
     top: &["theme"],
-    per_entry: false,
+    per_entry: false, units: &[],
     entry: None,
     repair: None,
     columns: None,

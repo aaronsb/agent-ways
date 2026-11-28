@@ -36,10 +36,12 @@ pub struct ProfileFields {}
 pub fn all(path: &Path, has_key: impl Fn(Provider) -> bool) -> Vec<Entry<ProfileFields>> {
     let (user, findings) = UserLayer::load_with_findings(path).unwrap_or_default();
     let closed = profile::fails_closed(&findings).map(|f| format!("{f}; the gate is off until it is fixed"));
-    // The first finding of each `gate.profiles.<name>` unit that fell out.
+    // The first finding of each `gate.profiles.<name>` unit that fell out. A
+    // profile's `judgements` unit falls back alone, and the profile still runs.
     let mut refused: BTreeMap<&str, String> = BTreeMap::new();
     for f in &findings {
-        if let Some(name) = f.unit.as_deref().and_then(|u| u.strip_prefix("gate.profiles.")) {
+        let profile_unit = f.unit.as_deref().filter(|u| !u.ends_with(".judgements"));
+        if let Some(name) = profile_unit.and_then(|u| u.strip_prefix("gate.profiles.")) {
             refused.entry(name).or_insert_with(|| f.to_string());
         }
     }
@@ -148,6 +150,16 @@ mod tests {
         let a = get(&all, "anthropic");
         assert_eq!((a.origin, a.state), (Origin::Builtin, ProfileState::Active.into()));
         assert!(a.detail.as_deref().is_some_and(|d| d.contains("dropped") && d.contains("threshold")), "{:?}", a.detail);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_bad_continuance_patch_names_no_profile_and_leaves_its_profile_running() {
+        let text = "engine: claude-code\nprofiles:\n  claude-code:\n    judgements:\n      continuance:\n        max_tokens: lots\n";
+        let (all, d) = listed("judgements", text);
+        assert_eq!(all.iter().map(|e| e.item.name.as_str()).collect::<Vec<_>>(), ["anthropic", "claude-code", "openrouter"]);
+        let cc = get(&all, "claude-code");
+        assert_eq!((cc.state, cc.detail), (ProfileState::Active.into(), None));
         let _ = std::fs::remove_dir_all(&d);
     }
 

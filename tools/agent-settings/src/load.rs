@@ -330,19 +330,48 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
                         false if ek.is_string() => refused.push(format!("{}.{entry}", sec.name)),
                         false => {}
                     }
+                    // Each of the section's units below an entry is checked on
+                    // its own: a bad one falls back alone, and a good one
+                    // stays when the rest of the entry falls back.
+                    let (rest, units) = split_units(sec.units, ev);
+                    let mut good: Vec<(Vec<String>, Value)> = Vec::new();
+                    let mut unit_failed = false;
                     if errs.is_empty() {
-                        check_tree(&keys, scope, &mut path.clone(), ev, &mut errs);
-                    }
-                    if !errs.is_empty() {
-                        out.fail(sec, format!("{}.{entry}", sec.name), errs);
-                        match (named, closed(&keys, scope, &path, ev)) {
-                            (true, Some(c)) => {
-                                kept.insert(ek.clone(), c);
+                        check_tree(&keys, scope, &mut path.clone(), &rest, &mut errs);
+                        for (at, v) in units {
+                            let full: Vec<String> = path.iter().chain(&at).cloned().collect();
+                            let mut unit_errs = Vec::new();
+                            check_tree(&keys, scope, &mut full.clone(), &v, &mut unit_errs);
+                            if unit_errs.is_empty() {
+                                good.push((at, v));
+                                continue;
                             }
-                            _ => {
-                                kept.remove(ek);
+                            unit_failed = true;
+                            out.fail(sec, format!("{}.{entry}.{}", sec.name, at.join(".")), unit_errs);
+                            if let Some(c) = closed(&keys, scope, &full, &v) {
+                                good.push((at, c));
                             }
                         }
+                    }
+                    let entry_failed = !errs.is_empty();
+                    if entry_failed {
+                        out.fail(sec, format!("{}.{entry}", sec.name), errs);
+                    }
+                    if entry_failed || unit_failed {
+                        let mut v = match (named, entry_failed) {
+                            (false, _) => None,
+                            (true, true) => closed(&keys, scope, &path, &rest),
+                            (true, false) => Some(rest),
+                        };
+                        for (at, u) in good.into_iter().filter(|_| named) {
+                            if let Some(m) = v.get_or_insert_with(|| Value::Mapping(Mapping::new())).as_mapping_mut() {
+                                set_in(m, &at, u);
+                            }
+                        }
+                        match v {
+                            Some(v) => kept.insert(ek.clone(), v),
+                            None => kept.remove(ek),
+                        };
                     }
                 }
                 // A refused name fails the section closed in this file (the
@@ -451,6 +480,21 @@ fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &
         }
         other => errs.push((path.clone(), format!("expected a mapping, found {}", crate::schema::show(other)))),
     }
+}
+
+/// An entry's value with each of `units` taken out, and those taken out
+/// with their paths below the entry ([`SectionSpec::units`]).
+fn split_units(units: &[&[&str]], entry: &Value) -> (Value, Vec<(Vec<String>, Value)>) {
+    let mut rest = entry.clone();
+    let mut out = Vec::new();
+    for unit in units {
+        let Some((last, between)) = unit.split_last() else { continue };
+        let parent = between.iter().try_fold(&mut rest, |cur, seg| cur.as_mapping_mut()?.get_mut(*seg));
+        if let Some(v) = parent.and_then(Value::as_mapping_mut).and_then(|m| m.remove(*last)) {
+            out.push((unit.iter().map(|s| s.to_string()).collect(), v));
+        }
+    }
+    (rest, out)
 }
 
 /// Set `v` at `path` under `root`, making the mappings between.
@@ -758,9 +802,9 @@ mod tests {
     use crate::schema::*;
 
     const SECTIONS: &[SectionSpec] = &[
-        SectionSpec { per_entry: false, entry: None, repair: None, name: "general", file: "cfg", top: &["language"], columns: None, doc: "" },
-        SectionSpec { per_entry: false, entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], columns: None, doc: "" },
-        SectionSpec { per_entry: true, entry: None, repair: None, name: "toggles", file: "cfg", top: &["ways"], columns: None, doc: "" },
+        SectionSpec { per_entry: false, units: &[], entry: None, repair: None, name: "general", file: "cfg", top: &["language"], columns: None, doc: "" },
+        SectionSpec { per_entry: false, units: &[], entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], columns: None, doc: "" },
+        SectionSpec { per_entry: true, units: &[], entry: None, repair: None, name: "toggles", file: "cfg", top: &["ways"], columns: None, doc: "" },
     ];
     const BASE: KeySpec = KeySpec {
         name: "general.language",
@@ -902,6 +946,44 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_below_an_entry_falls_back_alone() {
+        static SECTIONS: &[SectionSpec] = &[SectionSpec {
+            per_entry: true,
+            units: &[&["judgements"]],
+            entry: None,
+            repair: None,
+            name: "gate.profiles",
+            file: "cfg",
+            top: &["profiles"],
+            columns: None,
+            doc: "",
+        }];
+        const P: KeySpec = KeySpec { name: "gate.profiles.*.threshold", section: "gate.profiles", path: &["profiles", "*", "threshold"], kind: Kind::Float { min: 0.0, max: 1.0 }, ..BASE };
+        static KEYS: &[KeySpec] = &[P, KeySpec { name: "gate.profiles.*.judgements.continuance.max_tokens", path: &["profiles", "*", "judgements", "continuance", "max_tokens"], kind: Kind::Int { min: 1, max: 9 }, ..P }];
+        static S: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[], explain: None }], sections: SECTIONS, keys: KEYS };
+        let read = |text: &str| Layer::from_text(&S, "user", "cfg", LayerScope::User, None, text);
+        let at = |l: &Layer, p: &[&str]| l.get(&p.iter().map(|s| s.to_string()).collect::<Vec<_>>()).cloned();
+        let max = ["profiles", "a", "judgements", "continuance", "max_tokens"];
+        // A bad unit: its finding names the unit, and the entry's other keys load.
+        let l = read("profiles:\n  a:\n    threshold: 0.4\n    judgements:\n      continuance:\n        max_tokens: lots\n");
+        let f: Vec<_> = l.findings.iter().map(|f| (f.unit.as_deref(), f.fallback, f.line)).collect();
+        assert_eq!(f, [(Some("gate.profiles.a.judgements"), true, Some(6))]);
+        assert_eq!((at(&l, &["profiles", "a", "threshold"]), at(&l, &max)), (Some(Value::from(0.4)), None));
+        // An unknown key in the unit is the unit's too.
+        let l = read("profiles:\n  a:\n    threshold: 0.4\n    judgements:\n      kontinuance: 1\n");
+        assert_eq!(l.findings[0].unit.as_deref(), Some("gate.profiles.a.judgements"));
+        assert_eq!(at(&l, &["profiles", "a", "threshold"]), Some(Value::from(0.4)));
+        // A bad entry: the entry falls back, and its good unit loads.
+        let l = read("profiles:\n  a:\n    threshold: 7\n    judgements:\n      continuance:\n        max_tokens: 3\n");
+        assert_eq!(l.findings.iter().map(|f| f.unit.as_deref()).collect::<Vec<_>>(), [Some("gate.profiles.a")]);
+        assert_eq!((at(&l, &["profiles", "a", "threshold"]), at(&l, &max)), (None, Some(Value::from(3))));
+        // Both good: the entry loads as written.
+        let l = read("profiles:\n  a:\n    threshold: 0.4\n    judgements:\n      continuance:\n        max_tokens: 3\n");
+        assert!(l.findings.is_empty());
+        assert_eq!(at(&l, &max), Some(Value::from(3)));
+    }
+
+    #[test]
     fn a_project_only_key_in_the_user_file_is_a_finding() {
         let l = layer("user", LayerScope::User, "ways:\n  a/b: false\n");
         assert!(l.get(&["ways".into(), "a/b".into()]).is_none());
@@ -1027,8 +1109,8 @@ mod tests {
         }
 
         const SECTIONS: &[SectionSpec] = &[
-            SectionSpec { per_entry: true, entry: Some(plain_name), repair: None, name: "sensors", file: "cfg", top: &["sensors"], columns: None, doc: "" },
-            SectionSpec { per_entry: false, entry: None, repair: None, name: "cleanup", file: "cfg", top: &["cleanup"], columns: None, doc: "" },
+            SectionSpec { per_entry: true, units: &[], entry: Some(plain_name), repair: None, name: "sensors", file: "cfg", top: &["sensors"], columns: None, doc: "" },
+            SectionSpec { per_entry: false, units: &[], entry: None, repair: None, name: "cleanup", file: "cfg", top: &["cleanup"], columns: None, doc: "" },
         ];
         const KEYS: &[KeySpec] = &[
             KeySpec { name: "sensors.*.enabled", section: "sensors", path: &["sensors", "*", "enabled"], kind: Kind::Bool, default: DefaultValue::Yaml("true"), fail_closed: Some(closed_off), instances: &["a", "b"], ..BASE },

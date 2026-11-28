@@ -55,13 +55,23 @@ impl Registry {
     }
 
     /// A key by its concrete dotted name. Fixed names win over patterns.
+    /// Among patterns, the one whose wildcards bind the fewest segments
+    /// wins, and the first in the schema's order breaks a tie. An instance
+    /// name may hold dots, so `gate.profiles.a.judgements.continuance.model`
+    /// matches `gate.profiles.*.model` too, with `*` bound to
+    /// `a.judgements.continuance`; the longer pattern names the key meant.
     pub fn lookup(&self, name: &str) -> Option<Bound> {
         if let Some((schema, spec)) = self.keys().find(|(_, k)| !k.is_pattern() && k.name == name) {
             return Some(Bound { schema, spec, bound: vec![] });
         }
+        let segments = |b: &Bound| b.bound.iter().map(|s| s.split('.').count()).sum::<usize>();
         self.keys()
             .filter(|(_, k)| k.is_pattern())
-            .find_map(|(schema, spec)| spec.match_name(name).map(|bound| Bound { schema, spec, bound }))
+            .filter_map(|(schema, spec)| spec.match_name(name).map(|bound| Bound { schema, spec, bound }))
+            .fold(None, |best: Option<Bound>, b| match best {
+                Some(x) if segments(&x) <= segments(&b) => Some(x),
+                _ => Some(b),
+            })
     }
 
     /// A key by the file kind and key path it is stored at.
@@ -163,8 +173,8 @@ mod tests {
         component: "t",
         files: &[FileSpec { id: "cfg", retired: &[], explain: None }, FileSpec { id: "agent", retired: &[], explain: None }],
         sections: &[
-            SectionSpec { per_entry: false, entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], columns: None, doc: "" },
-            SectionSpec { per_entry: false, entry: None, repair: None, name: "gate", file: "agent", top: &["mode"], columns: None, doc: "" },
+            SectionSpec { per_entry: false, units: &[], entry: None, repair: None, name: "matching", file: "cfg", top: &["prob", "presets"], columns: None, doc: "" },
+            SectionSpec { per_entry: false, units: &[], entry: None, repair: None, name: "gate", file: "agent", top: &["mode"], columns: None, doc: "" },
         ],
         keys: &[
             BASE,
@@ -176,6 +186,28 @@ mod tests {
 
     fn preset(b: &[String]) -> Option<Value> {
         Some(serde_yaml::from_str(if b[0] == "normal" { "0.15" } else { "0.4" }).unwrap())
+    }
+
+    #[test]
+    fn a_name_two_patterns_match_binds_the_pattern_with_the_shorter_wildcard() {
+        const MODEL: KeySpec = KeySpec { name: "gate.profiles.*.model", section: "gate", file: "agent", path: &["profiles", "*", "model"], ..BASE };
+        const NESTED: KeySpec = KeySpec {
+            name: "gate.profiles.*.judgements.continuance.model",
+            section: "gate",
+            file: "agent",
+            path: &["profiles", "*", "judgements", "continuance", "model"],
+            ..BASE
+        };
+        static SHORT_FIRST: Schema = Schema { keys: &[MODEL, NESTED], ..SCHEMA };
+        static LONG_FIRST: Schema = Schema { keys: &[NESTED, MODEL], ..SCHEMA };
+        for schema in [&SHORT_FIRST, &LONG_FIRST] {
+            let r = Registry::new(vec![schema]);
+            let b = r.lookup("gate.profiles.a.judgements.continuance.model").unwrap();
+            assert_eq!((b.spec.name, b.bound.clone()), (NESTED.name, vec!["a".to_string()]));
+            // A dotted instance still binds where only one pattern matches.
+            let b = r.lookup("gate.profiles.my.fast.model").unwrap();
+            assert_eq!((b.spec.name, b.bound.clone()), (MODEL.name, vec!["my.fast".to_string()]));
+        }
     }
 
     #[test]
