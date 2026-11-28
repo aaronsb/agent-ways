@@ -710,7 +710,7 @@ Record the compaction after the wrap, for the status card and so nothing more fo
 ###### **Options:**
 
 * `--failed <FAILED>` — Why the compaction failed; absent when it ran
-* `--trigger <TRIGGER>` — boundary: the boundary tool started the compaction, and its resume counts toward mods.attend.continuity.max_relays
+* `--trigger <TRIGGER>` — boundary: the boundary tool started the compaction, and its resume counts toward mods.attend.continuity.max_relays. Refused with exit 1, recording nothing, while a relay wrap waits to be judged
 
   Possible values: `boundary`
 
