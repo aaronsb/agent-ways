@@ -498,7 +498,7 @@ fn resolve_named(me: &Session, to: &str) -> Result<Dest, SendError> {
 fn resolve_project(me: &Session, path: &str) -> Result<Dest, SendError> {
     let resolved = attend_presence::session::canonical_dir(path);
     let peers = list_peers();
-    let here: Vec<&(String, String, String, String, f64)> = peers.iter().filter(|(_, cwd, ..)| attend_presence::session::same_dir(cwd, &resolved)).collect();
+    let here: Vec<&(String, String, String, String, Option<f64>)> = peers.iter().filter(|(_, cwd, ..)| attend_presence::session::same_dir(cwd, &resolved)).collect();
     let (finished, waking): (Vec<_>, Vec<_>) = here.into_iter().partition(|(id, ..)| enrollment::is_finished(id));
     // The tray is named by the path the sessions recorded, which is where
     // they read; the caller may have named the directory by another route.
@@ -860,12 +860,12 @@ fn is_member_id(id: &str) -> bool {
 }
 
 #[cfg(feature = "sensor-peers")]
-fn list_peers() -> Vec<(String, String, String, String, f64)> {
+fn list_peers() -> Vec<(String, String, String, String, Option<f64>)> {
     crate::sensors::PeerSensor::new().list_peers()
 }
 
 #[cfg(not(feature = "sensor-peers"))]
-fn list_peers() -> Vec<(String, String, String, String, f64)> {
+fn list_peers() -> Vec<(String, String, String, String, Option<f64>)> {
     Vec::new()
 }
 
