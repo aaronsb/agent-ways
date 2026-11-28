@@ -106,6 +106,7 @@ pub fn cli_main() {
             Some(MessageCmd::Reply(a)) => reply(a),
             Some(MessageCmd::Inbox(a)) => inbox(a),
             Some(MessageCmd::Unread(a)) => cmd::listen::cmd_unread(a.json),
+            Some(MessageCmd::Awaiting(a)) => cmd::inbox::cmd_awaiting(a.json),
             Some(MessageCmd::Lapse(_)) => cmd::inbox::cmd_lapse_events(),
             Some(MessageCmd::Cleanup(a)) => cmd::cleanup::cmd_cleanup(a.dry_run, a.all),
             Some(MessageCmd::Delete(a)) => cmd::delete::cmd_delete(a),
