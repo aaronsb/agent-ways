@@ -640,6 +640,16 @@ impl WrapSkill {
             _ => format!("Run the {} skill with the arguments {}", self.name, self.args),
         }
     }
+
+    /// `Run the wrap skill with the argument boundary`: the skill's boundary
+    /// mode, which ends with the attend mod's boundary tool, whatever
+    /// arguments the wrap turn takes.
+    ///
+    /// References:
+    /// - ADR-418 item 14: the agent's own wrap calls the boundary tool.
+    fn ask_boundary(&self) -> String {
+        format!("Run the {} skill with the argument boundary", self.name)
+    }
 }
 
 /// The autocompact gate as the mod read it (ADR-414 item 2). Unknown counts
@@ -1586,16 +1596,19 @@ fn send_wrap(state: &mut State, cfg: &Config, site: &Site, cause: Cause, reason:
 }
 
 /// The `drain:` turn's text: its first line says how full the context is.
+/// It names the boundary tool the wrap ends with, which refuses `continue`
+/// from here.
 ///
 /// References:
 /// - ADR-418 item 2: during the drain the session starts nothing new,
 ///   finishes the work in flight, and wraps at the next boundary.
+/// - ADR-418 item 14: the mod refuses `continue` during the drain.
 fn drain_text(cfg: &Config, t: u64, l: &Lines) -> String {
     format!(
-        "drain: {}, past the drain point of {}%.\nThe drain has started: start nothing new, finish the work in flight and collect your agents' reports. {} at the next boundary, where a piece of work lands. The mod wraps mid-work at {}.",
+        "drain: {}, past the drain point of {}%.\nThe drain has started: start nothing new, finish the work in flight and collect your agents' reports. {} at the next boundary, where a piece of work lands; the wrap ends with the attend_boundary tool, which refuses continue while the session drains. The mod wraps mid-work at {}.",
         fill_text(t, l),
         l.pct(l.drain_at),
-        cfg.wrap_skill.ask(),
+        cfg.wrap_skill.ask_boundary(),
         l.hard_line(),
     )
 }
