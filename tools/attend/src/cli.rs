@@ -760,6 +760,11 @@ pub enum KeepwarmCmd {
         #[arg(long)]
         failed: Option<String>,
     },
+    /// Record that relay's drain turn went in, which starts this
+    /// generation's drain: no further drain turn is offered until a
+    /// compaction, a resume or a fill under the drain point ends it. The
+    /// attend mod runs it once the drain turn has entered
+    Drained,
     /// Record a `/goal` the attend mod saw typed: active, or none for
     /// `/goal clear`. The relay stops once a goal that was active has ended
     Goal {

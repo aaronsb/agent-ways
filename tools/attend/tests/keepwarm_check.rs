@@ -794,6 +794,14 @@ fn a_relay_wraps_on_fill_compacts_with_the_handoff_and_resumes() {
     };
     let d = fill("700000");
     assert_eq!((d["action"].as_str(), d["relay"].as_bool(), d["relay_at_tokens"].as_u64()), (Some("none"), Some(true), Some(750_000)), "{d}");
+    // The drain is offered until the mod reports its turn went in.
+    for tokens in ["760000", "770000"] {
+        let d = fill(tokens);
+        assert_eq!((d["action"].as_str(), d["draining"].as_bool()), (Some("drain"), Some(true)), "{d}");
+    }
+    assert!(w.run(&["keepwarm", "drained"]).status.success());
+    let d = fill("780000");
+    assert_eq!((d["action"].as_str(), d["draining"].as_bool()), (Some("none"), Some(true)), "{d}");
     let d = fill("860000");
     assert_eq!(d["action"], "wrap", "{d}");
     let id = d["wrap_id"].as_str().unwrap().to_string();

@@ -2770,6 +2770,7 @@ describe('relay mode', () => {
   const compact = relayed({ action: 'compact', text: INSTRUCTIONS, resume: RESUME, state: 'compacted', wrap: route() })
   const waiting = relayed({ state: 'wrapped', reason: "waiting for the wrap's answer" })
   const policyChecks = (h: ReturnType<typeof host>) => h.argvs.filter(a => a.slice(1, 4).join(' ') === 'keepwarm check --policy')
+  const drainedRuns = (h: ReturnType<typeof host>) => h.argvs.filter(a => a.slice(1).join(' ') === 'keepwarm drained').length
 
   async function turn($: Engine, id: string, text: string, answer: string) {
     await $.turn.start({ text, turnId: id } as never)
@@ -2818,6 +2819,7 @@ describe('relay mode', () => {
     expect(policyChecks(h)[1]?.slice(-4)).toEqual(['--fill', '152000', '--window', '200000'])
     expect(h.submitted).toEqual([DRAIN_TURN])
     expect(h.origins[0]).toEqual({ kind: 'plugin', name: 'attend' })
+    expect(drainedRuns(h)).toBe(1)
     expect(await rowSegment($)).toMatch(/⟳ draining\b/)
     await turn($, 't2', framedPluginPrompt('attend', DRAIN_TURN), 'finishing the work in flight')
     await measured($, 160_000)
@@ -2830,10 +2832,10 @@ describe('relay mode', () => {
     expect(h.submitted).toEqual([DRAIN_TURN, WRAP])
   })
 
-  test('a drain turn a prompt overtakes is not submitted', async ($, on) => {
+  test('a drain turn a prompt overtakes is not submitted or reported, and the next turn\'s end offers it again', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drain = relayed({ action: 'drain', text: DRAIN_TURN, draining: true })
-    const world: World = { config: RELAY, autocompact: false, policy: [decision({ relay: true }), drain] }
+    const world: World = { config: RELAY, autocompact: false, policy: [decision({ relay: true }), drain, drain] }
     const h = host(on, world)
     await started($, clock)
     await turn($, 't1', 'do the work', 'done')
@@ -2847,6 +2849,12 @@ describe('relay mode', () => {
     await clock.advance(2_000)
     expect(policyChecks(h)[1]?.slice(-4)).toEqual(['--fill', '152000', '--window', '200000'])
     expect(h.submitted).toEqual([])
+    expect(drainedRuns(h)).toBe(0)
+    await turn($, 't2', 'hello', 'hi')
+    await measured($, 154_000)
+    await clock.advance(2_000)
+    expect(h.submitted).toEqual([DRAIN_TURN])
+    expect(drainedRuns(h)).toBe(1)
   })
 
   test('once the context falls under the drain point while draining, attend hears the fill once', async ($, on) => {

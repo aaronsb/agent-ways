@@ -50,6 +50,7 @@ import {
   BEAT_ARGV,
   PLAIN_BEAT_ARGV,
   DRAIN_ARGV,
+  DRAINED_ARGV,
   KEEPWARM_CHECK_ARGV,
   LISTEN_OFF_ARGV,
   LISTEN_ON_ARGV,
@@ -1045,6 +1046,9 @@ async function checkKeepalive($: $, mod: Mod) {
         ka.wrap = undefined
         await run($, wrappedArgv('unfinished', 'the wrap prompt did not enter'))
       }
+      // A drain turn that did not go in is not reported, so attend offers
+      // it again at the next check.
+      if (isEntered && plan.submit.kind === 'drain') await run($, DRAINED_ARGV)
     }
     if (plan.armAtMs !== null) await armKeepalive($, mod, plan.armAtMs)
   })

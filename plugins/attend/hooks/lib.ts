@@ -74,6 +74,13 @@ export const BEAT_ARGV = [ATTEND, 'listen', 'beat', '--mod', MOD_VERSION] as con
 export const PLAIN_BEAT_ARGV = [ATTEND, 'listen', 'beat'] as const
 export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
+/** The drain turn went in: attend records that this generation's drain
+ *  has started, and offers the turn again until it hears so.
+ *
+ *  References:
+ *  - ADR-418 item 14: at the drain point the mod tells the agent that the
+ *    drain has started. */
+export const DRAINED_ARGV = [ATTEND, 'keepwarm', 'drained'] as const
 /** The operator prompted at `atS` (epoch seconds): the keepalive count
  *  starts again (ADR-414 item 4). */
 export function resetArgv(atS: number): string[] {

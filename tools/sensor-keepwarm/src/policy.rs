@@ -233,7 +233,8 @@ pub struct Policy {
     /// marker reported it: `active` or `none`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<String>,
-    /// When this generation's drain started. An operator prompt keeps it; a
+    /// When this generation's drain started: the mod reported that the
+    /// drain turn went in. An operator prompt keeps it; a
     /// compaction, a resume, or a fill under the drain point clears it.
     ///
     /// References:
@@ -1537,15 +1538,26 @@ fn drain_text(cfg: &Config, t: u64, l: &Lines) -> String {
     )
 }
 
-/// Starts the drain: records it and returns the decision that submits its
-/// turn.
-fn send_drain(state: &mut State, cfg: &Config, t: u64, l: &Lines, now: u64) -> Decision {
-    state.policy.drained_at = Some(now);
+/// Offers the drain: the decision that submits its turn. The drain is
+/// recorded once the mod reports that the turn went in ([`drained`]), so a
+/// turn a prompt overtook is offered again at the next check.
+fn offer_drain(state: &State, cfg: &Config, t: u64, l: &Lines) -> Decision {
     let state_name = if state.policy.resumed_at.is_some() { "resumed" } else { "running" };
     let mut d = Decision::new(cfg, &state.policy, true, state_name, "the context reached the drain point");
     d.action = Action::Drain;
     d.text = Some(drain_text(cfg, t, l));
+    d.draining = true;
     d
+}
+
+/// `attend keepwarm drained`: the drain turn went in, so this generation's
+/// drain has started.
+///
+/// References:
+/// - ADR-418 item 14: at the drain point the mod tells the agent that the
+///   drain has started.
+pub fn drained(p: &mut Policy, now: u64) {
+    p.drained_at.get_or_insert(now);
 }
 
 /// The relay's judgment of a wrap that ran in relay mode, once the mod
@@ -1784,7 +1796,7 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
         } else if f.tokens >= l.hard_at {
             Some(send_wrap(state, cfg, site, Cause::Fill { tokens: f.tokens, lines: l }, "the context reached the hard line", now))
         } else if f.tokens >= l.drain_at && p.drained_at.is_none() {
-            Some(send_drain(state, cfg, f.tokens, &l, now))
+            Some(offer_drain(state, cfg, f.tokens, &l))
         } else {
             None
         };
