@@ -82,12 +82,13 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             }
             println!("keepalive count reset");
             // The operator is back: an armed exit is disarmed with the
-            // ledger, and the finished mark clears as `attend listen on`
-            // clears it.
+            // ledger, and the finished mark the check set on a listening
+            // session clears as `attend listen on` clears it. A session
+            // that is not listening stays so.
             //
             // References:
             // - ADR-418 item 13: an operator prompt disarms the exit.
-            if attend_presence::enrollment::is_finished(sid) {
+            if attend_presence::enrollment::is_finished(sid) && crate::verbs::listen::status().listening {
                 match crate::verbs::listen::on(None) {
                     Ok(_) => println!("the session is no longer finished"),
                     Err(e) => {
@@ -117,7 +118,12 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 std::process::exit(1);
             }
             let id = wrap.trim();
-            if verdict == Verdict::Stop {
+            // With keepwarm off the check judges nothing, so no tick runs
+            // the exit.
+            let settings = policy_settings(&dir, sid, &ident.origin_path, now);
+            if verdict == Verdict::Stop && keepwarm_setting_off(settings.as_deref()) {
+                println!("exit armed for wrap {id}, but mods.attend.keepwarm is off: no tick runs, so the exit does nothing while it is off");
+            } else if verdict == Verdict::Stop {
                 let stay = match handoff {
                     Sufficiency::Sufficient => "while something is pending, up to the price of a fresh start",
                     Sufficiency::HoldsDetail => "up to the price of a cold reload, since the handoff holds detail",
@@ -153,16 +159,20 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
         }
         KeepwarmCmd::Compacted { failed, trigger } => {
             let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
-            let mut took = true;
-            let recorded = update_policy(&dir, sid, |p| match trigger {
-                Some(_) => took = policy::boundary_compacted(p, failed, now),
-                None => policy::compacted(p, failed, now),
+            let took = take_policy(&dir, sid, |p| match trigger {
+                Some(_) => policy::boundary_compacted(p, failed, now),
+                None => {
+                    policy::compacted(p, failed, now);
+                    true
+                }
             });
-            if !recorded {
-                std::process::exit(1);
-            }
-            if !took {
-                eprintln!("keepwarm: a relay wrap waits to be judged, so its compaction is the relay's; the boundary compaction is not recorded");
+            match took {
+                Some(true) => {}
+                Some(false) => {
+                    eprintln!("keepwarm: a relay wrap waits to be judged, so its compaction is the relay's; the boundary compaction is not recorded");
+                    std::process::exit(1);
+                }
+                None => std::process::exit(1),
             }
         }
         KeepwarmCmd::Resumed { failed, trigger } => {
@@ -277,15 +287,28 @@ fn saved_outcome(o: WrapOutcome, detail: &str, path: &str, sid: &str) -> (String
 /// there is none, under the session's lock. False, with the reason on
 /// stderr, when it cannot be written.
 fn update_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy)) -> bool {
+    take_policy(dir, sid, |p| {
+        f(p);
+        true
+    })
+    .is_some()
+}
+
+/// [`update_policy`] for a mark that can be refused: the ledger is written
+/// only when `f` takes the mark. Whether it took it, or `None`, with the
+/// reason on stderr, when the ledger cannot be written.
+fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> bool) -> Option<bool> {
     let _lock = lock_session(dir, sid).ok();
     let mut ledger = read_ledger(dir, sid).unwrap_or_default();
-    f(&mut ledger.policy);
+    if !f(&mut ledger.policy) {
+        return Some(false);
+    }
     ledger.updated_at = sensor_trait::epoch_secs();
     match write_ledger(dir, sid, &ledger) {
-        Ok(()) => true,
+        Ok(()) => Some(true),
         Err(e) => {
             eprintln!("keepwarm: could not write the ledger: {e}");
-            false
+            None
         }
     }
 }
@@ -589,12 +612,14 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     let arm = read_arm(&dir, sid);
     let (mut out, decision) = policy::step(&mut state, &reading, arm.as_ref(), &pcfg, gate, &site, now);
     state.policy.old_host = pcfg.session_skills == SessionSkills::NotChecked;
-    // The tick that finishes an armed exit marks the session finished in
-    // the same process, so peers see it before the cache has lapsed.
+    // The tick that finishes an armed exit marks a listening session
+    // finished in the same process, so peers see it before the cache has
+    // lapsed. A session that is not listening gets no mark, so the
+    // operator's prompt has none to clear by listening.
     //
     // References:
     // - ADR-418 item 12: a stopped session is marked finished.
-    if decision.action == Action::Finish {
+    if decision.action == Action::Finish && crate::verbs::listen::status().listening {
         if let Err(e) = crate::verbs::listen::finish() {
             eprintln!("keepwarm: could not mark the session finished: {e}");
         }

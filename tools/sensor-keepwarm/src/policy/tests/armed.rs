@@ -286,3 +286,94 @@ fn a_boundary_compaction_during_a_pending_relay_wrap_is_not_a_lost_resume() {
     assert_ne!(d.relay_stop.as_deref(), Some("resume lost"), "{d:?}");
     assert_eq!((d.action, d.state), (Action::None, "wrapped"), "{d:?}");
 }
+
+/// A stop exit on record keeps relay's fill path shut: pings on a session
+/// stopped at a boundary grow its context, and no fill opens a wrap at the
+/// hard line, or a drain past the drain point, over the judge's stop.
+#[test]
+fn an_armed_exit_opens_no_wrap_or_drain_on_fill() {
+    use super::relay::{filled, relay};
+    for tokens in [850_000, 900_000, 760_000, 849_999] {
+        let mut s = judged_session(700_000, Verdict::Stop, Sufficiency::Sufficient);
+        let d = s.check_at(&filled(relay(), tokens), Gate::Off, &carrying(Some(WRAP)), MONDAY + MIN);
+        assert_eq!((d.action, d.state), (Action::None, "armed"), "{tokens}: {d:?}");
+        assert_eq!((s.state.policy.wrapped_at, s.state.policy.trigger.as_deref()), (None, None), "{tokens}");
+        // The tick still finishes by the bound.
+        let d = s.check_at(&filled(relay(), tokens), Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+        assert_eq!(d.action, Action::Finish, "{tokens}: {d:?}");
+    }
+    // With no exit the same fills drain and wrap, as before.
+    let mut s = Session::on(OPUS, MONDAY, 700_000);
+    assert_eq!(s.check_at(&filled(relay(), 760_000), Gate::Off, &site(), MONDAY + MIN).action, Action::Drain);
+    let mut s = Session::on(OPUS, MONDAY, 700_000);
+    assert_eq!(s.check_at(&filled(relay(), 860_000), Gate::Off, &site(), MONDAY + MIN).action, Action::Wrap);
+}
+
+/// With relay off and autocompact on, the default, the policy's idle path
+/// does not run, and a stop exit still decides its ticks: nothing pending
+/// and a sufficient handoff finish at the due point. A session with no exit
+/// is off, as before. With keepwarm off the exit does nothing.
+#[test]
+fn a_stop_exit_runs_with_relay_off_and_autocompact_on() {
+    for gate in [Gate::On, Gate::Unknown] {
+        let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+        let site = carrying(Some(WRAP));
+        let d = s.check_at(&cfg(), gate, &site, MONDAY + MIN);
+        assert_eq!((d.action, d.state, d.next_at), (Action::None, "armed", Some(MONDAY + 50 * MIN)), "{gate:?}: {d:?}");
+        let d = s.check_at(&cfg(), gate, &site, MONDAY + 50 * MIN);
+        assert_eq!((d.action, d.state), (Action::Finish, "finished"), "{gate:?}: {d:?}");
+        assert_eq!(s.state.pinged_at, None, "no ping went out");
+        assert_eq!(d.exit.map(|x| x.state), Some("finished"));
+    }
+    // With keepalive false as well, the exit runs.
+    let mut c = cfg();
+    c.enabled = false;
+    let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+    assert_eq!(s.check_at(&c, Gate::On, &carrying(Some(WRAP)), MONDAY + 50 * MIN).action, Action::Finish);
+    // No exit: the policy is off, and the check is the plain one's.
+    let mut s = Session::on(OPUS, MONDAY, 350_000);
+    for at in [MIN, 50 * MIN, 51 * MIN] {
+        let d = s.check_at(&cfg(), Gate::On, &carrying(Some(WRAP)), MONDAY + at);
+        assert_eq!((d.action, d.state, d.policy, d.next_at), (Action::None, "off", false, Some(MONDAY + at + MIN)), "{d:?}");
+        assert_eq!(d.exit, None);
+    }
+    // Keepwarm off: the exit does nothing.
+    let mut c = cfg();
+    c.keepwarm_on = false;
+    let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+    let d = s.check_at(&c, Gate::On, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+    assert_eq!((d.action, d.state), (Action::None, "off"), "{d:?}");
+    assert_eq!(d.exit.map(|x| x.state), Some("armed"));
+}
+
+/// With relay off and autocompact on, an exit with something pending pings
+/// by the bound as the plain check's wakes do (`policy: false`), and each
+/// ping's turn settles.
+#[test]
+fn a_stop_exit_with_relay_off_pings_while_something_is_pending() {
+    let mut s = judged_session(350_000, Verdict::Stop, Sufficiency::Sufficient);
+    let site = carrying(Some(WRAP));
+    let c = awaiting(1);
+    for (n, at) in [(1, 50), (2, 100)] {
+        let d = s.check_at(&c, Gate::On, &site, MONDAY + at * MIN);
+        assert_eq!((d.action, d.state, d.policy), (Action::Keepalive, "armed", false), "{d:?}");
+        assert_eq!(d.exit.as_ref().map(|x| x.pings), Some(n));
+        s.turn(MONDAY + at * MIN);
+        let d = s.check_at(&c, Gate::On, &site, MONDAY + at * MIN + 2 * MIN);
+        assert_eq!((d.action, d.next_at), (Action::None, Some(MONDAY + (at + 50) * MIN)), "the ping's turn landed: {d:?}");
+    }
+    assert!(!s.state.policy.pending);
+}
+
+/// With something pending, a context under the plain check's 50k floor is
+/// no reason to finish: the bound decides, and a cache read of 45k is cheap.
+#[test]
+fn something_pending_under_fifty_k_pings_by_the_bound() {
+    let mut s = judged_session(45_000, Verdict::Stop, Sufficiency::Sufficient);
+    let d = s.check_at(&awaiting(1), Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+    assert_eq!((d.action, d.state), (Action::Keepalive, "armed"), "{d:?}");
+    assert!(d.reason.contains("1 thread awaiting a reply"), "{}", d.reason);
+    // Nothing pending and sufficient still finishes.
+    let mut s = judged_session(45_000, Verdict::Stop, Sufficiency::Sufficient);
+    assert_eq!(s.check_at(&cfg(), Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN).action, Action::Finish);
+}

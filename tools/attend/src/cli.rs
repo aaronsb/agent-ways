@@ -763,7 +763,9 @@ pub enum KeepwarmCmd {
         #[arg(long)]
         failed: Option<String>,
         /// boundary: the boundary tool started the compaction, and its
-        /// resume counts toward mods.attend.continuity.max_relays
+        /// resume counts toward mods.attend.continuity.max_relays. Refused
+        /// with exit 1, recording nothing, while a relay wrap waits to be
+        /// judged
         #[arg(long, value_parser = ["boundary"])]
         trigger: Option<String>,
     },

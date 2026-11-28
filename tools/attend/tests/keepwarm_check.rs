@@ -978,6 +978,68 @@ fn an_armed_exit_finishes_the_session_and_reset_clears_it() {
     assert_eq!(d["action"], "keepalive", "the next due point pings as today: {d}");
 }
 
+/// A session that is not listening finishes with no finished mark, and the
+/// operator's prompt leaves it not listening: only `attend listen on`
+/// starts listening.
+#[test]
+fn a_session_not_listening_finishes_unmarked_and_reset_does_not_listen() {
+    let w = Warm::new("kw-exit-unlistened");
+    let id = "20261127T0900Z-3f9a1c2e";
+    handoff_for(&w, Some(id));
+    let listen = || -> serde_json::Value { serde_json::from_slice(&w.run(&["listen", "status", "--json"]).stdout).unwrap() };
+    assert_eq!(listen()["listening"], false);
+    assert!(judged(&w, id, "stop").status.success());
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("finish"), Some("finished")), "{d}");
+    assert!(listen()["finished"].is_null(), "no mark on a session that is not listening: {}", listen());
+    let out = w.run(&["keepwarm", "reset"]);
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "keepalive count reset\n");
+    assert_eq!((listen()["listening"].as_bool(), listen()["finished"].is_null()), (Some(false), true), "{}", listen());
+}
+
+/// With relay off and autocompact on, the default, the exit still finishes
+/// at its due point; with keepwarm off it does nothing, and `judged` says so.
+///
+/// References:
+/// - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
+///   armed exit.
+#[test]
+fn a_stop_exit_runs_with_autocompact_on_and_says_when_keepwarm_is_off() {
+    let w = Warm::new("kw-exit-autocompact");
+    let id = "20261127T0900Z-3f9a1c2e";
+    handoff_for(&w, Some(id));
+    assert!(judged(&w, id, "stop").status.success());
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "on");
+    assert_eq!((d["action"].as_str(), d["state"].as_str(), d["policy"].as_bool()), (Some("finish"), Some("finished"), Some(false)), "{d}");
+    let w = Warm::new("kw-exit-keepwarm-off");
+    w.settings(r#"{"mods.attend.keepwarm":{"value":"off"}}"#);
+    handoff_for(&w, Some(id));
+    let out = judged(&w, id, "stop");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("exit armed for wrap {id}, but mods.attend.keepwarm is off: no tick runs, so the exit does nothing while it is off\n")
+    );
+}
+
+/// `compacted --trigger boundary` while a relay wrap waits is refused with
+/// exit 1 and writes nothing.
+#[test]
+fn a_refused_boundary_compaction_exits_1_and_writes_nothing() {
+    let w = Warm::new("kw-boundary-refused");
+    relay_wrap_judged(&w, "continue");
+    let before = std::fs::read(w.ledger()).unwrap();
+    let out = w.run(&["keepwarm", "compacted", "--trigger", "boundary"]);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("the boundary compaction is not recorded"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read(w.ledger()).unwrap(), before, "the ledger is not written");
+    let w = Warm::new("kw-boundary-taken");
+    assert!(w.run(&["keepwarm", "compacted", "--trigger", "boundary"]).status.success());
+    assert!(w.run(&["keepwarm", "resumed", "--trigger", "boundary"]).status.success());
+}
+
 /// A verdict other than stop is recorded and arms nothing; a malformed
 /// `--pending` is refused by the parser.
 #[test]
