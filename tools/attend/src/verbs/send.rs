@@ -871,12 +871,12 @@ fn list_peers() -> Vec<(String, String, String, String, f64)> {
 }
 
 #[cfg(feature = "sensor-peers")]
-fn live_session_ids() -> std::collections::HashSet<String> {
+pub(crate) fn live_session_ids() -> std::collections::HashSet<String> {
     crate::sensors::PeerSensor::new().live_session_ids()
 }
 
 #[cfg(not(feature = "sensor-peers"))]
-fn live_session_ids() -> std::collections::HashSet<String> {
+pub(crate) fn live_session_ids() -> std::collections::HashSet<String> {
     std::collections::HashSet::new()
 }
 

@@ -12,6 +12,11 @@
 //! it. A post to `#open` or to a named channel never waits, even one
 //! addressed to someone.
 //!
+//! A session that has exited, or that carries the finished mark, never
+//! answers, so a message to it does not wait. A session counts as live as
+//! the send path judges it. A message to a person always waits until they
+//! answer.
+//!
 //! A message waits only while it lives on the bus: its file is still there,
 //! and no delete or tombstone has marked it. An answer counts while its file
 //! is there, marked or not, so a delete that clears read mail does not reopen
@@ -129,12 +134,23 @@ fn waiting_for_session() -> Vec<Waiting> {
     let answer_dirs: Vec<PathBuf> = groups_for(&me).receive_dirs(&me.origin_path).into_iter().map(|d| d.path).collect();
     let base = signals_base();
     let marks = Marks::load(&base);
-    scan(&base, &ids, &answer_dirs, &marks)
+    let live = crate::verbs::send::live_session_ids();
+    let can_answer = |id: &str| answerable(id, &live, &attend_presence::enrollment::is_finished);
+    scan(&base, &ids, &answer_dirs, &marks, &can_answer)
+}
+
+/// Whether session `id` can still answer: it is live by the send path's
+/// test against the running sessions `live`, and `finished` does not hold
+/// for it.
+fn answerable(id: &str, live: &std::collections::HashSet<String>, finished: &dyn Fn(&str) -> bool) -> bool {
+    attend_presence::alive(id, live) && !finished(id)
 }
 
 /// The direct messages under `base` that a sender reading as `ids` sent and
-/// no recipient answered in `answer_dirs`, oldest first.
-fn scan(base: &Path, ids: &[&str], answer_dirs: &[PathBuf], marks: &Marks) -> Vec<Waiting> {
+/// no recipient answered in `answer_dirs`, oldest first. A session
+/// recipient counts only while `can_answer` holds for it; a person always
+/// counts.
+fn scan(base: &Path, ids: &[&str], answer_dirs: &[PathBuf], marks: &Marks, can_answer: &dyn Fn(&str) -> bool) -> Vec<Waiting> {
     let mut sent: Vec<(Order, Waiting)> = Vec::new();
     for (dir, operator) in direct_dirs(base) {
         for (name, mtime, content) in signals(&dir) {
@@ -149,7 +165,11 @@ fn scan(base: &Path, ids: &[&str], answer_dirs: &[PathBuf], marks: &Marks) -> Ve
             // A record with no `to` was sent to a project by an older
             // writer, and names no recipient to wait for.
             let Some(to) = sig.to else { continue };
-            let to: Vec<String> = to.split(',').filter(|t| !t.is_empty() && !ids.contains(t)).map(str::to_string).collect();
+            let to: Vec<String> = to
+                .split(',')
+                .filter(|t| !t.is_empty() && !ids.contains(t) && (operator || can_answer(t)))
+                .map(str::to_string)
+                .collect();
             if to.is_empty() {
                 continue;
             }
@@ -321,7 +341,11 @@ mod tests {
         }
 
         fn count(&self) -> Count {
-            tally(&scan(&self.base, &[ME], &[self.my_tray(), self.open()], &Marks::load(&self.base)))
+            self.count_while(&|_| true)
+        }
+
+        fn count_while(&self, can_answer: &dyn Fn(&str) -> bool) -> Count {
+            tally(&scan(&self.base, &[ME], &[self.my_tray(), self.open()], &Marks::load(&self.base), can_answer))
         }
     }
 
@@ -395,6 +419,29 @@ mod tests {
         s.put(&s.peer_tray(), ME, PEER, None, "before the tombstone");
         attend_groups::tombstones::mark_session(&s.base, ME).unwrap();
         assert_eq!(s.count(), Count { count: 0, operator: 0 });
+    }
+
+    /// A message to a session that exited or finished does not wait, since
+    /// no answer can come. A message to a person waits whatever the session
+    /// check says.
+    #[test]
+    fn a_session_that_cannot_answer_leaves_nothing_waiting() {
+        let s = Store::new("gone");
+        s.put(&s.peer_tray(), ME, PEER, None, "still there?");
+        s.put(&s.person("aaron"), ME, "aaron", None, "may I merge it?");
+        let running: std::collections::HashSet<String> = [PEER.to_string()].into();
+        let none = std::collections::HashSet::new();
+        let finished_peer = |id: &str| id == PEER;
+        let nobody_finished = |_: &str| false;
+
+        let live = |id: &str| answerable(id, &running, &nobody_finished);
+        assert_eq!(s.count_while(&live), Count { count: 2, operator: 1 });
+
+        let exited = |id: &str| answerable(id, &none, &nobody_finished);
+        assert_eq!(s.count_while(&exited), Count { count: 1, operator: 1 });
+
+        let finished = |id: &str| answerable(id, &running, &finished_peer);
+        assert_eq!(s.count_while(&finished), Count { count: 1, operator: 1 });
     }
 
     #[test]

@@ -276,7 +276,7 @@ Count this session's unread messages by room, marking none of them read
 
 List the direct messages this session sent that no recipient has answered yet, marking nothing read
 
-A message waits when it went to a peer session or to a person's member id and no later message from a recipient threads under it or is addressed to this session. Posts to #open and to named channels never wait. Each line gives the handle, the recipient, the age and the first words, and marks a message to a person as the operator's. --json prints {count, operator, items}.
+A message waits when it went to a peer session or to a person's member id and no later message from a recipient threads under it or is addressed to this session. Posts to #open and to named channels never wait, and nor does a message to a session that has exited or finished. Each line gives the handle, the recipient, the age and the first words, and marks a message to a person as the operator's. --json prints {count, operator, items}.
 
 **Usage:** `attend message awaiting [OPTIONS]`
 
