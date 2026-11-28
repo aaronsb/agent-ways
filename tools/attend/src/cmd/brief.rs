@@ -89,10 +89,12 @@ struct Conditions {
 }
 
 /// What the mod passes on stdin: a JSON object whose `agents_in_flight`,
-/// `tasks_open`, `tasks_in_progress` and `tasks_closed_since_wrap` are lists
-/// of lines, and whose `window` is the model's whole window in tokens. A
+/// `shells_in_flight`, `watchers_in_flight`, `tasks_open`,
+/// `tasks_in_progress` and `tasks_closed_since_wrap` are lists of lines,
+/// whose `window` is the model's whole window in tokens, and whose
+/// `operator_prompt_at` is the operator's last prompt in epoch seconds. A
 /// key attend measures itself is not read from it, and a key missing or of
-/// another shape is unknown.
+/// another shape is not given.
 #[derive(Default)]
 struct FromMod {
     doc: Value,
@@ -106,6 +108,10 @@ impl FromMod {
 
     fn window(&self) -> Option<u64> {
         self.doc.get("window").and_then(Value::as_u64)
+    }
+
+    fn operator_prompt_at(&self) -> Option<u64> {
+        self.doc.get("operator_prompt_at").and_then(Value::as_u64)
     }
 }
 
@@ -149,15 +155,18 @@ pub(crate) fn cmd_brief(ident: &attend_presence::session::SessionIdentity, args:
         .filter(|cfg| cfg.settings_ok)
         .map(|cfg| cfg.max_relays);
     let reading = take(reading, deadline);
-    let kw = sensor_keepwarm::brief::measure(reading.as_ref(), from_mod.window(), ledger.as_ref(), max_relays, now);
+    let kw = sensor_keepwarm::brief::measure(reading.as_ref(), from_mod.window(), ledger.as_ref(), from_mod.operator_prompt_at(), max_relays, now);
     let awaiting = take(awaiting, deadline);
     let (commits, merges) = take(since, deadline).unzip();
-    let (shells, watchers) = background();
+    // No record is a last Stop with nothing in flight; with no session
+    // there is no record to read.
+    let recorded = session.as_deref().map(|sid| sensor_keepwarm::background::read(&keepwarm_dir(), sid).unwrap_or_default());
+    let InFlight { agents, shells, watchers } = in_flight(&from_mod, recorded);
     let conditions = Conditions {
         fill_pct: M(kw.fill_pct),
         fill_tokens: M(kw.fill_tokens),
         price_per_ping_usd: M(kw.price_per_ping_usd),
-        agents_in_flight: from_mod.lines("agents_in_flight"),
+        agents_in_flight: agents,
         shells_in_flight: shells,
         watchers_in_flight: watchers,
         threads_awaiting_reply: M(awaiting.map(|a| (a.count - a.operator) as u64)),
@@ -175,10 +184,37 @@ pub(crate) fn cmd_brief(ident: &attend_presence::session::SessionIdentity, args:
     super::print_json(&conditions);
 }
 
-/// The background shells and the CI watchers still running. Unknown until
-/// attend records the Stop hook's `background_tasks`.
-fn background() -> (M<Vec<String>>, M<Vec<String>>) {
-    (M(None), M(None))
+struct InFlight {
+    agents: M<Vec<String>>,
+    shells: M<Vec<String>>,
+    watchers: M<Vec<String>>,
+}
+
+/// The work in flight, by the check's rule: a list the mod gives of shells
+/// or watchers wins over `recorded`, the last Stop's record, and the agents
+/// the mod lists are merged with the ones the Stop recorded (`workflow:
+/// <name>`, `subagent: …` and so on), the mod's first. A list is unknown
+/// only where the mod gives none and there is no record to read.
+///
+/// References:
+/// - ADR-418 item 5: agents, shells and watchers in flight are pending.
+fn in_flight(from_mod: &FromMod, recorded: Option<sensor_keepwarm::background::Background>) -> InFlight {
+    let (mod_agents, mod_shells, mod_watchers) =
+        (from_mod.lines("agents_in_flight").0, from_mod.lines("shells_in_flight").0, from_mod.lines("watchers_in_flight").0);
+    let Some(recorded) = recorded else {
+        return InFlight { agents: M(mod_agents), shells: M(mod_shells), watchers: M(mod_watchers) };
+    };
+    let mut agents = mod_agents.unwrap_or_default();
+    for a in recorded.agents {
+        if !agents.contains(&a) {
+            agents.push(a);
+        }
+    }
+    InFlight {
+        agents: M(Some(agents)),
+        shells: M(Some(mod_shells.unwrap_or(recorded.shells))),
+        watchers: M(Some(mod_watchers.unwrap_or(recorded.watchers))),
+    }
 }
 
 /// The time left before `deadline`.
@@ -360,6 +396,22 @@ mod tests {
         assert_eq!(handoff_head("e6bbfbdd 2026-11-27 wrap=x"), None);
         assert_eq!(handoff_head("<!-- wrap=w1 head=abc -->"), None);
         assert_eq!(handoff_head(""), None);
+    }
+
+    /// With no session there is no record to read: what the mod gives
+    /// stands, and what it leaves out is unknown, not empty.
+    #[test]
+    fn without_a_record_to_read_the_work_the_mod_leaves_out_is_unknown() {
+        let json = |m: &M<Vec<String>>| serde_json::to_value(m).unwrap();
+        let from_mod = FromMod { doc: serde_json::json!({"shells_in_flight": ["cargo test"]}) };
+        let f = in_flight(&from_mod, None);
+        assert_eq!((json(&f.agents), json(&f.shells), json(&f.watchers)), ("unknown".into(), serde_json::json!(["cargo test"]), "unknown".into()));
+        let recorded = sensor_keepwarm::background::Background { agents: vec!["workflow: wave3".into()], watchers: vec!["watch CI".into()], ..Default::default() };
+        let f = in_flight(&from_mod, Some(recorded));
+        assert_eq!(
+            (json(&f.agents), json(&f.shells), json(&f.watchers)),
+            (serde_json::json!(["workflow: wave3"]), serde_json::json!(["cargo test"]), serde_json::json!(["watch CI"]))
+        );
     }
 
     #[test]

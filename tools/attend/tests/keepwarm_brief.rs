@@ -361,8 +361,12 @@ mod measured {
             assert_eq!(v[key], "unknown", "{key}: {v}");
         }
         // The mod's own measures are unknown when it passes none.
-        for key in ["agents_in_flight", "shells_in_flight", "watchers_in_flight", "tasks_open", "tasks_in_progress", "tasks_closed_since_wrap"] {
+        for key in ["tasks_open", "tasks_in_progress", "tasks_closed_since_wrap"] {
             assert_eq!(v[key], "unknown", "{key}: {v}");
+        }
+        // No Stop record is a last Stop with nothing in flight.
+        for key in ["agents_in_flight", "shells_in_flight", "watchers_in_flight"] {
+            assert_eq!(v[key], serde_json::json!([]), "{key}: {v}");
         }
         assert_eq!(v["fill_tokens"], 250_000);
     }
@@ -382,14 +386,75 @@ mod measured {
         assert_eq!(v["tasks_open"], serde_json::json!(["[gh#1396] the brief"]));
         assert_eq!(v["tasks_in_progress"], serde_json::json!([]));
         assert_eq!(v["tasks_closed_since_wrap"], "unknown");
-        assert_eq!(v["shells_in_flight"], "unknown");
+        // A list of another shape is not the mod's: the Stop record, empty here, stands.
+        assert_eq!(v["shells_in_flight"], serde_json::json!([]));
         assert_ne!(v["git_status"], "from the mod");
         assert_eq!(v["fill_tokens"], 250_000);
         assert_eq!(v["threads_awaiting_reply"], 0);
-        // Input that is not JSON leaves the mod's measures unknown.
+        // Input that is not JSON leaves the mod's measures unknown, and the
+        // work in flight to the Stop record, empty here.
         let (out, took) = r.brief_with(&[], Some("not json"));
         let (v, _, _) = parsed(out, took);
-        assert_eq!(v["agents_in_flight"], "unknown");
+        assert_eq!(v["tasks_open"], "unknown");
+        assert_eq!(v["agents_in_flight"], serde_json::json!([]));
+    }
+
+    /// The work in flight the last Stop recorded: its shells and watchers,
+    /// and its agents by kind, merged with the agents the mod lists. A list
+    /// the mod gives of shells or watchers wins over the record.
+    ///
+    /// References:
+    /// - ADR-418 item 5: agents, shells and watchers in flight are pending.
+    #[test]
+    fn the_stop_record_fills_the_work_in_flight() {
+        let r = Repo::new("kw-brief-background");
+        r.commit("a.txt", "first");
+        let payload = r#"{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[
+            {"id":"b1","type":"shell","status":"running","command":"cargo test --all"},
+            {"id":"m1","type":"monitor","status":"running","description":"watch CI on #1403"},
+            {"id":"t1","type":"MCP task","status":"running","description":"index the docs"},
+            {"id":"a1","type":"subagent","status":"running","description":"review the diff"},
+            {"id":"w1","type":"workflow","status":"running","name":"wave3"},
+            {"id":"d1","type":"dream","status":"running","description":"consolidate"}]}"#;
+        r.f.drain_hook_with(payload);
+        let (v, _, _) = r.brief(&[]);
+        assert_eq!(v["shells_in_flight"], serde_json::json!(["cargo test --all"]));
+        assert_eq!(v["watchers_in_flight"], serde_json::json!(["watch CI on #1403", "index the docs"]));
+        assert_eq!(v["agents_in_flight"], serde_json::json!(["subagent: review the diff", "workflow: wave3"]));
+
+        let stdin = r#"{"agents_in_flight":["card-1395 (running)"],"shells_in_flight":[],"watchers_in_flight":["watch the deploy"]}"#;
+        let (out, took) = r.brief_with(&[], Some(stdin));
+        let (v, _, _) = parsed(out, took);
+        assert_eq!(v["shells_in_flight"], serde_json::json!([]), "the mod's list wins, empty included");
+        assert_eq!(v["watchers_in_flight"], serde_json::json!(["watch the deploy"]));
+        assert_eq!(v["agents_in_flight"], serde_json::json!(["card-1395 (running)", "subagent: review the diff", "workflow: wave3"]));
+
+        // A Stop that lists nothing leaves nothing in flight.
+        r.f.drain_hook_with(r#"{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[]}"#);
+        let (v, _, _) = r.brief(&[]);
+        for key in ["agents_in_flight", "shells_in_flight", "watchers_in_flight"] {
+            assert_eq!(v[key], serde_json::json!([]), "{key}: {v}");
+        }
+    }
+
+    /// The operator's last prompt as the mod saw it wins over the ledger's,
+    /// which hears of a prompt only while the autocompact gate reads off.
+    #[test]
+    fn the_mods_prompt_time_wins_over_the_ledgers() {
+        let r = Repo::new("kw-brief-operator");
+        let ledger = r.f.cache().join("keepwarm").join(format!("{}.ledger.json", r.f.sid));
+        std::fs::create_dir_all(ledger.parent().unwrap()).unwrap();
+        let at = now() - 90 * 60 - 10;
+        std::fs::write(
+            &ledger,
+            format!(r#"{{"misses":[],"last_ping":null,"stopped":null,"pinged_at":null,"updated_at":0,"policy":{{"operator_at":{at}}}}}"#),
+        )
+        .unwrap();
+        let (v, _, _) = r.brief(&[]);
+        assert_eq!(v["minutes_since_operator_prompt"], 90);
+        let (out, took) = r.brief_with(&[], Some(&format!(r#"{{"operator_prompt_at": {}}}"#, now() - 3 * 60 - 10)));
+        let (v, _, _) = parsed(out, took);
+        assert_eq!(v["minutes_since_operator_prompt"], 3);
     }
 
     /// The two counts come from one read of `attend message awaiting`: a

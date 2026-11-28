@@ -5,7 +5,8 @@
 //! The keepwarm part of the continuance brief's conditions: the context
 //! fill and what one ping costs at it, from the transcript reading, and the
 //! minutes since the operator's last prompt and the relay count, from the
-//! ledger. `attend keepwarm brief` adds the rest. A measure that cannot be
+//! ledger, where the mod gives no prompt time of its own. `attend keepwarm
+//! brief` adds the rest. A measure that cannot be
 //! had is `None`, which the brief prints as `"unknown"`.
 //!
 //! References:
@@ -75,8 +76,11 @@ pub struct Measures {
 
 /// The measures from `context`, the session's reading; `window`, the
 /// window the host reported, which wins over the one `ways` resolved;
-/// `ledger`; and `max_relays`, `None` where the settings could not be read.
-pub fn measure(context: Option<&Context>, window: Option<u64>, ledger: Option<&Ledger>, max_relays: Option<u32>, now: u64) -> Measures {
+/// `ledger`; `operator_at`, the operator's last prompt as the mod saw it,
+/// in epoch seconds, which wins over the ledger's (the ledger hears of a
+/// prompt only while the autocompact gate reads off); and `max_relays`,
+/// `None` where the settings could not be read.
+pub fn measure(context: Option<&Context>, window: Option<u64>, ledger: Option<&Ledger>, operator_at: Option<u64>, max_relays: Option<u32>, now: u64) -> Measures {
     let tokens = context.map(|c| c.reading.tokens_used);
     let window = window.filter(|w| *w > 0).or_else(|| context.and_then(Context::window));
     let fill_pct = tokens.zip(window).map(|(t, w)| (t as f64 * 1000.0 / w as f64).round() / 10.0);
@@ -88,7 +92,7 @@ pub fn measure(context: Option<&Context>, window: Option<u64>, ledger: Option<&L
         fill_pct,
         fill_tokens: tokens,
         price_per_ping_usd,
-        minutes_since_operator_prompt: policy.and_then(|p| p.operator_at).map(|at| now.saturating_sub(at) / 60),
+        minutes_since_operator_prompt: operator_at.or_else(|| policy.and_then(|p| p.operator_at)).map(|at| now.saturating_sub(at) / 60),
         relays: policy.zip(max_relays).map(|(p, max)| (p.relays, max)),
     }
 }
@@ -105,23 +109,23 @@ mod tests {
     #[test]
     fn the_fill_and_the_ping_come_from_the_reading() {
         let c = context(250_000, "claude-opus-5-5", 1_000_000, "model_table");
-        let m = measure(Some(&c), None, None, None, 0);
+        let m = measure(Some(&c), None, None, None, None, 0);
         assert_eq!(m.fill_tokens, Some(250_000));
         assert_eq!(m.fill_pct, Some(25.0));
         // One read of 250k tokens at $0.20 per million.
         assert_eq!(m.price_per_ping_usd, Some(0.05));
         // The host's window wins over the one ways resolved.
-        assert_eq!(measure(Some(&c), Some(400_000), None, None, 0).fill_pct, Some(62.5));
+        assert_eq!(measure(Some(&c), Some(400_000), None, None, None, 0).fill_pct, Some(62.5));
     }
 
     #[test]
     fn a_default_window_or_an_unpriced_model_is_unknown() {
         let c = context(150_000, "some-other-model", 200_000, "default");
-        let m = measure(Some(&c), None, None, None, 0);
+        let m = measure(Some(&c), None, None, None, None, 0);
         assert_eq!(m.fill_tokens, Some(150_000));
         assert_eq!(m.fill_pct, None);
         assert_eq!(m.price_per_ping_usd, None);
-        assert_eq!(measure(None, Some(200_000), None, Some(5), 0), Measures::default());
+        assert_eq!(measure(None, Some(200_000), None, None, Some(5), 0), Measures::default());
     }
 
     #[test]
@@ -129,12 +133,25 @@ mod tests {
         let mut l = Ledger::default();
         l.policy.operator_at = Some(1_000);
         l.policy.relays = 2;
-        let m = measure(None, None, Some(&l), Some(5), 1_000 + 42 * 60 + 59);
+        let m = measure(None, None, Some(&l), None, Some(5), 1_000 + 42 * 60 + 59);
         assert_eq!(m.minutes_since_operator_prompt, Some(42));
         assert_eq!(m.relays, Some((2, 5)));
         // No settings, no max; no prompt reported, no minutes.
         l.policy.operator_at = None;
-        let m = measure(None, None, Some(&l), None, 5_000);
+        let m = measure(None, None, Some(&l), None, None, 5_000);
         assert_eq!((m.minutes_since_operator_prompt, m.relays), (None, None));
+    }
+
+    /// The mod sees every prompt, where the ledger hears of one only while
+    /// the gate reads off: the time the mod gives wins over the ledger's,
+    /// and stands without a ledger.
+    #[test]
+    fn the_mods_prompt_time_wins_over_the_ledgers() {
+        let mut l = Ledger::default();
+        l.policy.operator_at = Some(1_000);
+        let now = 10_000;
+        assert_eq!(measure(None, None, Some(&l), None, None, now).minutes_since_operator_prompt, Some(150));
+        assert_eq!(measure(None, None, Some(&l), Some(now - 7 * 60), None, now).minutes_since_operator_prompt, Some(7));
+        assert_eq!(measure(None, None, None, Some(now - 7 * 60), None, now).minutes_since_operator_prompt, Some(7));
     }
 }
