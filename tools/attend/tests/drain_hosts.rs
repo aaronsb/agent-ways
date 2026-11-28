@@ -53,6 +53,45 @@ fn a_delivery_is_context_not_a_block_and_only_for_the_mod() {
     assert!(text.contains("hello from a peer"), "{text}");
 }
 
+/// A Stop payload that lists background work delivers as an empty one
+/// does: the drain records the work for keepwarm and delivers the same.
+#[test]
+fn a_payload_listing_background_work_delivers_as_before() {
+    let f = Fixture::new("drain-host-background");
+    f.ok(&["listen", "on", "--host", "mod"]);
+    f.drain("plain");
+    let payload = r#"{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[{"id":"b1","type":"shell","status":"running","description":"suite","command":"cargo test"},{"id":"m1","type":"monitor","status":"running","description":"watch CI"}]}"#;
+    assert_eq!(f.drain_hook_with(payload), "", "nothing pending, nothing delivered");
+    put_from_peer(&f, "_broadcast", "peer-sess-1-1", None, "hello from a peer");
+    let text = delivered_text(&f.drain_hook_with(payload));
+    assert!(text.contains("hello from a peer"), "{text}");
+    put_from_peer(&f, "_broadcast", "peer-sess-1-2", None, "and another");
+    let text = delivered_text(&f.drain_hook_with(r#"{"background_tasks":"not a list","stop_hook_active":false}"#));
+    assert!(text.contains("and another"), "a payload of another shape delivers too: {text}");
+}
+
+/// The drain keeps a Stop record only while the Stop lists work in flight:
+/// an empty list removes the record the last Stop left and writes none, and
+/// a message waiting is delivered either way.
+#[cfg(feature = "sensor-keepwarm")]
+#[test]
+fn an_empty_stop_removes_the_background_record_and_delivers_as_before() {
+    let f = Fixture::new("drain-host-background-empty");
+    f.ok(&["listen", "on", "--host", "mod"]);
+    f.drain("plain");
+    let record = f.cache().join("keepwarm").join(format!("{}.background.json", f.sid));
+    let running = r#"{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[{"id":"b1","type":"shell","status":"running","command":"cargo test"}]}"#;
+    let empty = r#"{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[]}"#;
+    assert_eq!(f.drain_hook_with(running), "");
+    assert!(record.exists(), "a Stop with a shell running is recorded");
+    put_from_peer(&f, "_broadcast", "peer-sess-1-1", None, "hello from a peer");
+    let text = delivered_text(&f.drain_hook_with(empty));
+    assert!(text.contains("hello from a peer"), "{text}");
+    assert!(!record.exists(), "an empty Stop removes the record");
+    assert_eq!(f.drain_hook_with(empty), "");
+    assert!(!record.exists(), "and writes none");
+}
+
 /// Findings 2 and 3: in a mod host the drain names the mod's tools and
 /// speaks its format, and a `~id` it printed is one `attend message reply` takes.
 #[cfg(feature = "sensor-peers")]

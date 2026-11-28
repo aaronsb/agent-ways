@@ -259,12 +259,14 @@ An open question is not by itself a reason to stop. Each line under DECISIONS in
 
 | Verdict | When | What happens |
 |---|---|---|
-| `stop` | at a boundary, with no agents in flight | The mod records the wrap id and arms the exit. Keepwarm goes on while something is pending or the session holds detail, up to the purchase price. Otherwise the first tick lets the cache lapse, and the mod runs `attend listen finish`, which marks the session finished in attend. Peers see the mark, and attend refuses new messages to the session. The Claude Code process keeps running, because no mod call can end it. When the operator returns, the mod runs `attend listen on`, which clears the mark. |
+| `stop` | at a boundary, with no agents in flight | The mod records the wrap id and arms the exit. Keepwarm goes on while something is pending or the session holds detail, up to the purchase price. Otherwise the first tick lets the cache lapse, and attend's check marks a listening session finished. Peers see the mark, and attend refuses new messages to the session. The Claude Code process keeps running, because no mod call can end it. When the operator returns, the mod runs `attend keepwarm reset`, which disarms the exit and clears the mark. |
 | `compact` | at a boundary, when the payback and fidelity favor it; agents in flight come through | The mod compacts with the handoff, then resumes when tasks remain or stops when none do. |
 | `continue` | at a boundary below 75%, when work remains and compacting does not pay | The agent goes back to work. The wrap stands as the checkpoint for exits that cannot wrap. |
 | drain | from 75% to 85%; the mod sets it, and it is not a verdict | Nothing new starts. The next boundary wraps and then compacts or stops. At 85% the mod wraps mid-work, as the relay mode does at its threshold today. |
 
 > Edited 2026-11-27: the probe of 2026-11-27 found no mod call that ends a session, and settled what "finished" means (Probe findings). The `stop` row ended: "Otherwise the first tick lets the cache lapse and marks the session finished."
+
+> Edited 2026-11-28: the `stop` row was corrected to the build, where attend's check sets the mark in the same check that finishes the exit, only on a session that listens, and the reset the operator's prompt runs clears it. A separate `attend listen on` would enroll a session the operator had opted out of. It read: "Otherwise the first tick lets the cache lapse, and the mod runs `attend listen finish`, which marks the session finished in attend. [...] When the operator returns, the mod runs `attend listen on`, which clears the mark."
 
 ### 13. Rules
 
@@ -311,7 +313,7 @@ The relay-mode record is not edited by this one. When this record is accepted, i
 ### Neutral
 
 - Implementation adds the boundary tool and its verdict handling to the mod, the brief and its request through the relevance judge's interface, a `continuance` judgement profile beside `disclosure` in the judge settings, the `armed` and `finished` states and the judge's fields to attend's ledger, `hard_at_pct` to the settings registry, the resume line and the DECISIONS columns (blocks, lean, reversible) to the wrap skill's handoff, and the Opus 5.5 row to keepwarm's price table.
-- The finished mark is a small change to attend. The enrollment record in attend-presence (`enrollment.rs`) gains a `finished <secs>` line, with `finish()` to set it and `is_finished()` to read it, and `enroll(Listen)` clears it. A new verb, `attend listen finish`, sets the mark, and `attend listen on` clears it. `attend listen beat` keeps the mark, because the mod beats on a timer whether or not anyone uses the session. The peer list shows a finished session as `finished`. `send`, `resolve_recipient`, `resolve_project`, `check_channel` and `sender_dest` refuse a finished session with a new `RecipientFinished` error. Item 12 says when the mod sets and clears the mark.
+- The finished mark is a small change to attend. The enrollment record in attend-presence (`enrollment.rs`) gains a `finished <secs>` line, with `finish()` to set it and `is_finished()` to read it, and `enroll(Listen)` clears it. A new verb, `attend listen finish`, sets the mark, and `attend listen on` clears it. `attend listen beat` keeps the mark, because the mod beats on a timer whether or not anyone uses the session. The peer list shows a finished session as `finished`. `send`, `resolve_recipient`, `resolve_project`, `check_channel` and `sender_dest` refuse a finished session with a new `RecipientFinished` error. Item 12 says when the mark is set and cleared.
 
 > Edited 2026-11-27: the finished mark's change set was added from the probe of 2026-11-27 (Probe findings).
 

@@ -122,7 +122,7 @@ pub fn cli_main() {
             Some(PeerCmd::Status(a)) => cmd::status::cmd_status(a.json),
         },
         #[cfg(feature = "sensor-keepwarm")]
-        Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
+        Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status(JsonArgs { json: false }))),
         // A build without the sensor cannot judge. `check` is polled by a
         // host that reads stdout alone, so it prints nothing and exits 0,
         // as it does whenever no wake is due; the arming verbs refuse.

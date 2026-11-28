@@ -7,7 +7,7 @@
 //! sensor and the check do the judging; these verbs own the arm file, the
 //! policy's marks in the ledger, and render the card.
 
-use crate::cli::{KeepwarmCheckArgs, KeepwarmCmd};
+use crate::cli::{JsonArgs, KeepwarmCheckArgs, KeepwarmCmd};
 use crate::util::keepwarm_dir;
 use sensor_keepwarm::policy::armed::{self, Judgement, Sufficiency, Verdict};
 use sensor_keepwarm::policy::{self, Action, Config, Fill, Gate, Handoff, Policy, SessionSkills, Site, WrapOutcome};
@@ -25,11 +25,16 @@ const MAX_REPLY_BYTES: u64 = 1024 * 1024;
 /// How long the policy check reuses its read of the mods.attend settings,
 /// unless a settings file it reads from changed since.
 const SETTINGS_KEPT_SECS: u64 = 300;
+/// How long these verbs give `ways settings` to answer.
+const SETTINGS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
     let ident = attend_presence::session::identity();
     if let KeepwarmCmd::Check(args) = &sub {
         return check(&ident, args);
+    }
+    if let KeepwarmCmd::Brief(args) = &sub {
+        return super::brief::cmd_brief(&ident, args);
     }
     if !ident.session_resolved {
         eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
@@ -74,7 +79,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             update_policy(&dir, sid, policy::stop_by_operator);
             println!("keepwarm is not armed");
         }
-        KeepwarmCmd::Check(_) => unreachable!("handled above"),
+        KeepwarmCmd::Check(_) | KeepwarmCmd::Brief(_) => unreachable!("handled above"),
         KeepwarmCmd::Reset { at } => {
             let at = at.filter(|t| *t <= now).unwrap_or(now);
             if !update_policy(&dir, sid, |p| policy::reset(p, at)) {
@@ -120,7 +125,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             let id = wrap.trim();
             // With keepwarm off the check judges nothing, so no tick runs
             // the exit.
-            let settings = policy_settings(&dir, sid, &ident.origin_path, now);
+            let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
             if verdict == Verdict::Stop && keepwarm_setting_off(settings.as_deref()) {
                 println!("exit armed for wrap {id}, but mods.attend.keepwarm is off: no tick runs, so the exit does nothing while it is off");
             } else if verdict == Verdict::Stop {
@@ -228,7 +233,17 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             Some(id) => println!("{id}"),
             None => std::process::exit(1),
         },
-        KeepwarmCmd::Status => {
+        // The stop exit alone, for the attend mod: a process that resumes a
+        // session learns of an exit an earlier one recorded, and resets it
+        // at the operator's prompt.
+        //
+        // References:
+        // - ADR-418 item 9: an operator prompt disarms the exit.
+        KeepwarmCmd::Status(JsonArgs { json: true }) => {
+            let state = State::resume(read_ledger(&dir, sid));
+            println!("{}", serde_json::json!({ "exit": armed::view(&state) }));
+        }
+        KeepwarmCmd::Status(_) => {
             let Some(reading) = read_context(sid, &ident.origin_path) else {
                 eprintln!("keepwarm: could not read the session transcript through `ways context`");
                 std::process::exit(1);
@@ -245,7 +260,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             let is_mod_host = attend_presence::enrollment::host(sid) == Some(attend_presence::enrollment::Host::Mod);
             let ran_policy = ledger.as_ref().is_some_and(|l| l.policy.gate.is_some());
             if is_mod_host || ran_policy {
-                let settings = mod_settings(&ident.origin_path);
+                let settings = mod_settings(&ident.origin_path, SETTINGS_TIMEOUT);
                 if is_mod_host {
                     println!("{}", mod_setting_line(settings.as_deref()));
                 }
@@ -315,8 +330,8 @@ fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> bool) -> Op
 
 /// The effective `mods.attend` entry for `project`, as the attend mod reads
 /// it: `ways settings list mods.attend --json --effective`. `None` when ways
-/// cannot answer within five seconds.
-fn mod_settings(project: &str) -> Option<String> {
+/// cannot answer within `timeout`, in which case it is killed.
+fn mod_settings(project: &str, timeout: std::time::Duration) -> Option<String> {
     use std::io::Read;
     let mut child = std::process::Command::new("ways")
         .args(["settings", "list", "mods.attend", "--json", "--effective", "--project", project])
@@ -325,7 +340,7 @@ fn mod_settings(project: &str) -> Option<String> {
         .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -429,8 +444,9 @@ fn read_handoff_at(path: PathBuf) -> Option<Handoff> {
 /// The mods.attend settings for the policy check: a read kept beside the
 /// ledger for a few minutes, so a listening session that asks every minute
 /// does not run ways every minute, unless the user's or the project's
-/// settings file changed since. `None` when ways cannot answer.
-fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<String> {
+/// settings file changed since. `None` when ways cannot answer within
+/// `timeout`.
+pub(super) fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64, timeout: std::time::Duration) -> Option<String> {
     let path = dir.join(format!("{sid}.settings.json"));
     let stamps = settings_stamps(project);
     if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
@@ -442,7 +458,7 @@ fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<Str
             }
         }
     }
-    let doc = mod_settings(project)?;
+    let doc = mod_settings(project, timeout)?;
     let kept = serde_json::json!({ "at": now, "project": project, "files": stamps, "doc": doc });
     std::fs::create_dir_all(dir).ok();
     std::fs::write(&path, kept.to_string()).ok();
@@ -476,15 +492,16 @@ fn settings_stamps(project: &str) -> serde_json::Value {
 /// write before a check removes it.
 const STALE_SECS: u64 = 7 * 24 * 3600;
 
-/// Removes other sessions' kept settings reads whose ledger is gone or has
-/// not been written for [`STALE_SECS`]: nothing else removes them.
+/// Removes other sessions' kept settings reads and Stop records of their
+/// background work whose ledger is gone or has not been written for
+/// [`STALE_SECS`]: nothing else removes them.
 fn prune_stale(dir: &Path, sid: &str, now: u64) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         // Lock files stay: one may be held, and a writer that then locked a
         // new file would hold a second lock beside the first. They are empty.
-        let Some(other) = name.strip_suffix(".settings.json") else { continue };
+        let Some(other) = name.strip_suffix(".settings.json").or_else(|| name.strip_suffix(".background.json")) else { continue };
         if other == sid {
             continue;
         }
@@ -526,7 +543,7 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     let sid = ident.session_id.as_str();
     let now = sensor_trait::epoch_secs();
     let dir = keepwarm_dir();
-    let settings = policy_settings(&dir, sid, &ident.origin_path, now);
+    let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
     if keepwarm_setting_off(settings.as_deref()) {
         return quiet("mods.attend.keepwarm is off", None);
     }
@@ -566,9 +583,6 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     if let (Some(tokens), Some(window)) = (args.fill, args.window) {
         pcfg.fill = Some(Fill { tokens, window, native_at: args.native_at });
     }
-    if let Some(p) = args.pending {
-        pcfg.pending = p;
-    }
     let Some(reading) = read_context(sid, &ident.origin_path) else {
         let why = "could not read the session transcript through `ways context`";
         if args.json {
@@ -597,7 +611,9 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         site.handoff = read_handoff(&ident.origin_path);
     }
     // An armed exit re-reads its handoff's first line at each tick, and
-    // counts the threads awaiting a reply as pending.
+    // counts as pending the host's agents, the shells and watchers the last
+    // Stop hook listed where the host named none, and the threads awaiting
+    // a reply.
     //
     // References:
     // - ADR-418 item 9: each tick checks the recorded wrap id against the
@@ -606,6 +622,7 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
         if site.handoff.is_none() {
             site.handoff = read_handoff_at(e.path.clone());
         }
+        pcfg.pending = args.pending.unwrap_or_default().with(sensor_keepwarm::background::read(&dir, sid).as_ref());
         pcfg.pending.awaiting = crate::verbs::awaiting::count().count as u32;
     }
     let mut state = State::resume(ledger);

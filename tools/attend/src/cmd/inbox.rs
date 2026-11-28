@@ -466,6 +466,20 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
         return;
     }
     let session_id = ident.session_id.clone();
+    // The Stop hook's payload, read once and first, so its writer never
+    // meets a closed pipe. The background work it lists is recorded for
+    // keepwarm whether or not the session listens: a dormant session's
+    // armed exit counts it too. A Stop that lists none removes the record.
+    //
+    // References:
+    // - ADR-418 item 5: shells and watchers in flight are pending.
+    let payload = if hook_mode { read_stdin() } else { String::new() };
+    #[cfg(feature = "sensor-keepwarm")]
+    if let Some(b) = sensor_keepwarm::background::from_stop_payload(&payload, sensor_trait::epoch_secs()) {
+        if let Err(e) = sensor_keepwarm::background::record(&crate::util::keepwarm_dir(), &session_id, &b) {
+            eprintln!("(could not record the background work in flight: {e})");
+        }
+    }
     // Listening gate (#720, ADR-406): a session that is not listening (it
     // never ran attend, joined no channel and never ran `attend listen on`,
     // or it ran `attend listen off`) is delivered nothing and has nothing
@@ -494,13 +508,11 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // drain counts as a fresh boundary. The counter resets on every
     // empty drain (below), so continuations forced by OTHER Stop hooks
     // cannot inflate it across turns.
-    let stop_active = hook_mode && stdin_stop_hook_active();
+    let stop_active = hook_mode && parse_stop_hook_active(&payload);
     // The Stop hook delivers only to a session the attend mod enrolled
     // (`attend listen on --host mod`), whose turn-end conduit it is. Any
     // other listening session, one that ran `attend listen on` or joined a
     // channel from a shell, gets nothing from it and has nothing marked.
-    // The hook's payload is read first, so its writer never meets a closed
-    // pipe.
     //
     // References:
     // - ADR-416 §1 and its turn-end settlement: no delivery outside the
@@ -1025,18 +1037,19 @@ trait DrainedView {
     fn body(&self) -> &str;
 }
 
-/// Read the Stop-hook stdin payload and extract `stop_hook_active`.
-/// Tolerant token scan rather than a JSON dependency: the harness may
-/// emit compact or pretty JSON; we only need one boolean.
-fn stdin_stop_hook_active() -> bool {
+/// The Stop-hook stdin payload, or empty where it cannot be read.
+fn read_stdin() -> String {
     use std::io::Read;
     let mut buf = String::new();
     if std::io::stdin().read_to_string(&mut buf).is_err() {
-        return false;
+        return String::new();
     }
-    parse_stop_hook_active(&buf)
+    buf
 }
 
+/// `stop_hook_active` from the Stop-hook payload. A tolerant token scan:
+/// the harness may emit compact or pretty JSON, and only one boolean is
+/// needed.
 fn parse_stop_hook_active(payload: &str) -> bool {
     payload
         .split("\"stop_hook_active\"")

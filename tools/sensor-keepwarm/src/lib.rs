@@ -28,6 +28,8 @@
 //! - ADR-182: the wake, its clock, its verdict and arming.
 //! - ADR-406 item 13: the mod polls the check.
 
+pub mod background;
+pub mod brief;
 pub mod policy;
 pub mod windows;
 
@@ -388,6 +390,13 @@ fn has_transcript(config_dir: Option<&Path>, home: &Path, working_dir: &str, ses
 /// case it is killed: a hung `ways` never stalls the caller, and never
 /// outlives it by more than the timeout.
 pub fn read_context(session_id: &str, working_dir: &str) -> Option<Reading> {
+    serde_json::from_slice(&context_json(session_id, working_dir, READ_TIMEOUT)?).ok()
+}
+
+/// The bytes `ways context --json --session <id>` printed from
+/// `working_dir`, or `None` when it fails or runs past `timeout`, in which
+/// case it is killed.
+pub fn context_json(session_id: &str, working_dir: &str, timeout: Duration) -> Option<Vec<u8>> {
     use std::io::Read;
     use std::process::Stdio;
     let mut child = Command::new("ways")
@@ -405,7 +414,7 @@ pub fn read_context(session_id: &str, working_dir: &str) -> Option<Reading> {
         let mut out = Vec::new();
         stdout.read_to_end(&mut out).ok().map(|_| out)
     });
-    let deadline = std::time::Instant::now() + READ_TIMEOUT;
+    let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -418,10 +427,7 @@ pub fn read_context(session_id: &str, working_dir: &str) -> Option<Reading> {
         }
     };
     let out = reader.join().ok()??;
-    if !status.success() {
-        return None;
-    }
-    serde_json::from_slice(&out).ok()
+    status.success().then_some(out)
 }
 
 // ── State and the decision ─────────────────────────────────────

@@ -52,6 +52,7 @@ import {
   DRAIN_ARGV,
   DRAINED_ARGV,
   KEEPWARM_CHECK_ARGV,
+  KEEPWARM_EXIT_ARGV,
   LISTEN_OFF_ARGV,
   LISTEN_ON_ARGV,
   PEERS_ARGV,
@@ -95,6 +96,10 @@ import {
   wrapPlan,
   isFullPreamble,
   joinArgv,
+  agentsInFlight,
+  stopExitOf,
+  stopExitOfStatus,
+  isJudgedStop,
   keepaliveApplies,
   keepaliveRowOf,
   parseDecision,
@@ -112,7 +117,7 @@ import {
   sendArgv,
   shortId,
 } from './lib.ts'
-import type { Decision, Fill, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
+import type { Decision, Exit, Fill, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
 import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit, HOST_EXIT_WAIT_MS, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
 import type { HostChild, HostEnd, HostSpec } from './host.ts'
 
@@ -274,10 +279,18 @@ async function activate($: $, mod: Mod, id: string, isAsked = false): Promise<Pr
   try {
     mod.config = await readConfig($, mod.cwd)
     mod.canPoll = mod.canPoll || mod.config.headlessPoll
+    // A process that resumes a session learns of a stop exit an earlier one
+    // recorded, from attend's ledger, so the operator's prompt resets it.
+    //
+    // References:
+    // - ADR-418 item 9: an operator prompt disarms the exit.
+    if (mod.ka.exit === undefined && mod.isInteractive && mod.config.keepwarm === 'on') {
+      mod.ka.exit = stopExitOfStatus((await run($, KEEPWARM_EXIT_ARGV)).stdout)
+    }
     // The config read again may change whether the policy applies: one judge
     // per ledger, the policy's timer or the poll's plain check.
     const didApply = mod.ka.applies
-    mod.ka.applies = keepaliveApplies(mod.config, mod.isInteractive)
+    mod.ka.applies = keepaliveApplies(mod.config, mod.isInteractive, mod.ka.exit !== undefined)
     mod.ka.relay = mod.config.relay
     if (mod.ka.applies && !didApply) await armKeepalive($, mod, (await $.clock.now()) + POLICY_START_MS)
     if (!mod.ka.applies) mod.ka.timer?.cancel()
@@ -951,6 +964,33 @@ async function armKeepalive($: $, mod: Mod, atMs: number) {
   }) as unknown as Timer
 }
 
+/** The stop exit as the mod now knows it, and whether the policy applies
+ *  with it: a session whose settings run no policy runs its check while an
+ *  exit stands, and the plain check again once none does. True where the
+ *  policy applies and did not before, so the caller sets the timer. */
+function setExit(mod: Mod, exit: Exit | undefined): boolean {
+  const ka = mod.ka
+  const didApply = ka.applies
+  ka.exit = exit
+  ka.applies = keepaliveApplies(mod.config, mod.isInteractive, exit !== undefined)
+  if (!ka.applies) {
+    ka.timer?.cancel()
+    ka.timer = undefined
+  }
+  return ka.applies && !didApply
+}
+
+/** The agent loops in flight, for `--pending`; undefined where the list
+ *  cannot be read, so `--pending` names no agents and attend counts the
+ *  subagents, teammates and workflows the last Stop hook listed. */
+async function agentsRunning($: $): Promise<number | undefined> {
+  try {
+    return agentsInFlight(await $.agent.list())
+  } catch {
+    return undefined
+  }
+}
+
 /** One check: read the gate, ask attend, submit what it returns, and set the
  *  timer for when attend says to ask again. Nothing is due while a main-loop
  *  turn runs, and a prompt or a turn that starts while attend judges (the
@@ -960,6 +1000,9 @@ async function checkKeepalive($: $, mod: Mod) {
   const ka = mod.ka
   if (!ka.applies || mod.running.size > 0 || mod.config.keepwarm !== 'on') return
   const epoch = ka.epoch
+  // An operator prompt while attend judges disarmed the exit: this
+  // decision is older than it.
+  const operatorThen = ka.operatorEpoch
   await serialize(ka, async () => {
     const gate = await readGate($, ka)
     const isListening = await isOn($, mod)
@@ -973,7 +1016,13 @@ async function checkKeepalive($: $, mod: Mod) {
     const due = ka.fillDue
     ka.fillDue = undefined
     const fill: Fill | undefined = due && { tokens: due.tokens, window: due.window, nativeAt: gate === 'on' ? ka.nativeAt : undefined }
-    let r = await run($, policyArgv(gate, ka.skills, ka.isLegacyAttend, fill), POLICY_TIMEOUT_MS)
+    // Agents still running keep an armed exit warm; attend reads the
+    // shells and watchers from the Stop hook itself.
+    //
+    // References:
+    // - ADR-418 item 5: what is in flight is pending.
+    const agents = await agentsRunning($)
+    let r = await run($, policyArgv(gate, ka.skills, ka.isLegacyAttend, fill, agents), POLICY_TIMEOUT_MS)
     // An attend from before --skills: ask as before, and keep asking so.
     if (!ka.isLegacyAttend && isUnknownFlag(r)) {
       ka.isLegacyAttend = true
@@ -991,7 +1040,19 @@ async function checkKeepalive($: $, mod: Mod) {
     // attend read the relay setting for this check: it governs what follows.
     ka.relay = d.relay
     ka.isDraining = d.draining
-    await setKeepaliveRow($, k => keepaliveRowOf(d, k))
+    // attend's word on the stop exit, `policy` false or not. A finish has
+    // submitted nothing and attend has marked the session finished.
+    //
+    // An operator prompt that came while attend judged has reset the exit
+    // and the row; a decision from before it neither sets them again.
+    //
+    // References:
+    // - ADR-418 item 12: a stopped session is marked finished.
+    // - ADR-418 item 9: an operator prompt disarms the exit.
+    if (ka.operatorEpoch === operatorThen) {
+      setExit(mod, stopExitOf(d))
+      await setKeepaliveRow($, k => keepaliveRowOf(d, k))
+    }
     // A relay that stopped hands the reply to the operator, once.
     if (d.sendHandoff && d.wrap) await sendRelayHandoff($, ka, d.wrap, d.text)
     // With relay off, a /wrap's marker was only recorded: nothing waits on it.
@@ -1050,14 +1111,22 @@ async function checkKeepalive($: $, mod: Mod) {
       // it again at the next check.
       if (isEntered && plan.submit.kind === 'drain') await run($, DRAINED_ARGV)
     }
-    if (plan.armAtMs !== null) await armKeepalive($, mod, plan.armAtMs)
+    // A session the exit alone ran the policy for goes back to the plain
+    // check once attend reports none.
+    if (plan.armAtMs !== null && ka.applies) await armKeepalive($, mod, plan.armAtMs)
   })
 }
 
 /** The operator is present: the count starts again, and a sent wrap and a
  *  stop are cleared (ADR-414 item 4). attend hears of it only while the
  *  gate last read off; otherwise the prompt is held, and sent when the gate
- *  first reads off, so a session with autocompact on runs nothing. */
+ *  first reads off, so a session with autocompact on runs nothing. A stop
+ *  exit is reset whatever the gate reads: the prompt disarms it, and the
+ *  reset clears a finished mark, so peers see the session live again.
+ *
+ *  References:
+ *  - ADR-418 item 9: an operator prompt disarms the exit.
+ *  - ADR-418 item 12: the operator's return clears the finished mark. */
 async function keepaliveOperator($: $, mod: Mod) {
   const ka = mod.ka
   if (!ka.applies) return
@@ -1071,13 +1140,15 @@ async function keepaliveOperator($: $, mod: Mod) {
   // Never awaited: the prompt must not wait on the chain a check holds.
   if (ka.wrap) void reportUnrouted($, ka, 'the operator prompted before the wrap answered')
   const now = await $.clock.now()
-  if ((await readGate($, ka, true)) === 'off' || ka.relay) {
+  const hadExit = ka.exit !== undefined
+  if ((await readGate($, ka, true)) === 'off' || ka.relay || hadExit) {
     ka.heldPromptMs = undefined
     void serialize(ka, () => run($, resetArgv(now / 1000)))
   } else {
     ka.heldPromptMs = now
   }
-  await setKeepaliveRow($, rowAfterPrompt)
+  if (hadExit) setExit(mod, undefined)
+  await setKeepaliveRow($, k => (ka.applies ? rowAfterPrompt(k) : null))
 }
 
 /** A main-loop turn ended, which restarts the clock: the timer is set for
@@ -1350,7 +1421,9 @@ export const register: Register = on => {
       isRelayPending: false,
       relayReply: undefined,
       operatorEpoch: 0,
+      operatorPromptAtMs: undefined,
       relay: false,
+      exit: undefined,
     },
   }
 
@@ -1361,7 +1434,16 @@ export const register: Register = on => {
     if (!mod.config.install) return next(e)
     mod.canPoll = e.isInteractive || mod.config.headlessPoll
     mod.isInteractive = e.isInteractive
-    mod.ka.applies = keepaliveApplies(mod.config, e.isInteractive)
+    // A process that resumes a session learns of a stop exit an earlier one
+    // recorded, from attend's ledger, so the operator's prompt resets it,
+    // dormant or not; activate's read then finds it known.
+    //
+    // References:
+    // - ADR-418 item 9: an operator prompt disarms the exit.
+    if (mod.ka.exit === undefined && e.isInteractive && mod.config.keepwarm === 'on') {
+      mod.ka.exit = stopExitOfStatus((await run($, KEEPWARM_EXIT_ARGV)).stdout)
+    }
+    mod.ka.applies = keepaliveApplies(mod.config, e.isInteractive, mod.ka.exit !== undefined)
     mod.ka.relay = mod.config.relay
     // The first check reads where the transcript stands (a resumed session
     // may be warm) and records the gate for the status card.
@@ -1382,6 +1464,12 @@ export const register: Register = on => {
     // project's config starts it, as it does every session there.
     const id = await $.session.id()
     const kept = await readStatus($)
+    // A reload keeps the stop exit the row shows: the policy check carries
+    // it on until the operator's prompt.
+    const keptExit = kept.keepalive?.state
+    if ((keptExit === 'armed' || keptExit === 'finished') && setExit(mod, keptExit)) {
+      await armKeepalive($, mod, (await $.clock.now()) + POLICY_START_MS)
+    }
     // A reload in the middle of a /clear or a /resume takes the watch up.
     if (kept.move) {
       adoptMove(mod, kept.move)
@@ -1483,6 +1571,26 @@ export const register: Register = on => {
     return done
   })
 
+  // A stop verdict recorded by hand (`attend keepwarm judged --verdict
+  // stop`) may arm an exit, which attend carries out at its ticks. The
+  // policy check runs from here, in a session whose settings run none too,
+  // and the turn's end sets its timer; a check that finds no exit ends it.
+  //
+  // References:
+  // - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
+  //   armed exit.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const done = await next(e)
+    const command = (e as { command?: unknown }).command
+    if (mod.isStarted && mod.ka.exit === undefined && typeof command === 'string' && isJudgedStop(command)) {
+      setExit(mod, 'judged')
+      // No main-loop turn runs, a subagent's call say, so no turn's end
+      // sets the timer: it is set here.
+      if (mod.running.size === 0) await armKeepalive($, mod, (await $.clock.now()) + firstCheckMs(mod.config))
+    }
+    return done
+  })
+
   // The operator's next prompt while a message waits on a lapsed cache, or
   // while the cold start's held-back note waits: what is pending enters
   // beside it, read in the same turn, rather than as a turn the operator
@@ -1493,6 +1601,7 @@ export const register: Register = on => {
     // starts the count again.
     mod.ka.epoch += 1
     if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    mod.ka.operatorPromptAtMs = await $.clock.now()
     await keepaliveOperator($, mod)
     const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold
     if (mod.heldNote === undefined && !isHeldCold) return next(e)
