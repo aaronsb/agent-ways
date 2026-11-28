@@ -26,7 +26,7 @@
 //! - ADR-418 item 13: the handoff is the exit flag; an operator prompt
 //!   disarms.
 
-use super::{due_point, is_wrap_id, watch, Action, Config, Decision, Handoff, Idle, Policy, Site, PLAIN_EVERY_SECS, VERDICT_SECS};
+use super::{due_point, hold, is_wrap_id, watch, Action, Config, Decision, Handoff, Idle, Policy, Site, PLAIN_EVERY_SECS, VERDICT_SECS};
 use crate::{cache_lapsed, fmt_duration, fmt_usd, price_of, wake_line, ArmFile, Outcome, Price, Reading, State, FRESH_START_TOKENS};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -212,6 +212,18 @@ pub fn record(p: &mut Policy, mut j: Judgement, handoff: Option<&Handoff>, cfg: 
         super::stop_relay(p, "doubt", super::doubt_stop(reason.as_deref()));
         p.handed = true;
     }
+    // A doubt, and a stop whose handoff lists a one-way decision, wait on
+    // the operator. The last boundary's record replaces an earlier wait.
+    //
+    // References:
+    // - ADR-418 item 6: waiting on the operator is pending.
+    // - ADR-418 item 11: a one-way lean waits for the operator.
+    let one_way = || handoff.is_some_and(|h| !hold::one_way_decisions(&h.text).is_empty());
+    p.wait = match moved {
+        Verdict::Doubt => Some(hold::begin(hold::Cause::Doubt, cfg, now)),
+        Verdict::Stop if one_way() => Some(hold::begin(hold::Cause::Decisions, cfg, now)),
+        _ => None,
+    };
     Ok(Recorded { moved, compact_refused })
 }
 
@@ -552,11 +564,17 @@ pub(super) fn judge(state: &mut State, reading: &Reading, cfg: &Config, site: &S
         d.next_at = Some(tick);
         return Some(d);
     }
+    // Waiting on the operator is pending while its hold lasts; the first
+    // tick decides hold or lapse, once.
+    let model = state.model.clone();
+    let waiting = hold::stay(&mut state.policy, e.handoff, state.ctx, &model, ttl.saturating_sub(cfg.margin_secs), now);
     let pending = cfg.pending;
-    let stay = match (pending.any(), e.handoff) {
-        (true, _) => Some(pending.describe()),
-        (false, Sufficiency::HoldsDetail) => Some("the handoff holds detail a cold reload would have to rebuild".to_string()),
-        (false, Sufficiency::Sufficient) => None,
+    let stay = match (waiting, pending.any(), e.handoff) {
+        (Some(w), true, _) => Some(format!("{w}; {}", pending.describe())),
+        (Some(w), false, _) => Some(w),
+        (None, true, _) => Some(pending.describe()),
+        (None, false, Sufficiency::HoldsDetail) => Some("the handoff holds detail a cold reload would have to rebuild".to_string()),
+        (None, false, Sufficiency::Sufficient) => None,
     };
     let Some(stay) = stay else {
         return Some(finish(state, cfg, "nothing is pending and the handoff is sufficient", now));
@@ -587,7 +605,8 @@ pub(super) fn judge(state: &mut State, reading: &Reading, cfg: &Config, site: &S
     }
     let price = price_of(&state.model)?;
     let b = bound(e.handoff, state.ctx, price);
-    if e.pings >= b.worth {
+    // A hold was held to the bound when the first tick decided it.
+    if e.pings >= b.worth && !hold::holding(&state.policy, now) {
         let why = format!("{stay}, but {} rent {} paid of {} and the next would pass the purchase price", pings(e.pings), fmt_usd(Some(b.rent * e.pings as f64)), fmt_usd(Some(b.purchase)));
         return Some(finish(state, cfg, &why, now));
     }

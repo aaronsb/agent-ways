@@ -37,6 +37,7 @@
 //!   at `hard_at_pct`; a `stop` at a boundary arms the exit ([`armed`]).
 
 pub mod armed;
+pub mod hold;
 
 use crate::windows::Windows;
 use crate::{
@@ -250,6 +251,13 @@ pub struct Policy {
     /// - ADR-418 item 9: the `armed` and `finished` states.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit: Option<armed::Exit>,
+    /// A stop that waits on the operator, and when the operator is likely
+    /// back. An operator prompt clears it.
+    ///
+    /// References:
+    /// - ADR-418 item 6: waiting on the operator is pending.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<hold::Wait>,
 }
 
 /// What the last check found of `wrap_skill` in the session's listing.
@@ -449,14 +457,21 @@ pub fn resume_failed(p: &mut Policy, why: &str) {
 
 /// `attend keepwarm stopped`: a resumed generation ended a turn with a
 /// `relay: stop <reason>` line. Only a session that has relayed since the
-/// operator's prompt has one; false where nothing was recorded.
-pub fn stopped_by_agent(p: &mut Policy, reason: &str, detail: &str) -> bool {
+/// operator's prompt has one; false where nothing was recorded. A stop on
+/// `decision` waits on the operator, from `now`, under `cfg`'s horizon.
+///
+/// References:
+/// - ADR-418 item 6: waiting on the operator is pending.
+pub fn stopped_by_agent(p: &mut Policy, reason: &str, detail: &str, cfg: &Config, now: u64) -> bool {
     if p.relays == 0 || !STOP_REASONS.contains(&reason) {
         return false;
     }
     let detail = detail.split_whitespace().collect::<Vec<_>>().join(" ");
     let why = if detail.is_empty() { format!("the agent stopped the relay: {reason}") } else { format!("the agent stopped the relay: {reason}, {}", echo(&detail)) };
     stop_relay(p, reason, why);
+    if reason == "decision" {
+        p.wait = Some(hold::begin(hold::Cause::Decision, cfg, now));
+    }
     true
 }
 
@@ -737,6 +752,11 @@ pub struct Config {
     /// and the agents, shells and watchers the host reported. Not a
     /// setting: the caller fills it.
     pub pending: armed::Pending,
+    /// `operator_horizon`: how long after a stop the operator is likely
+    /// back, in seconds.
+    pub horizon_secs: u64,
+    /// `morning`: where the local night ends, in minutes after midnight.
+    pub morning_min: u16,
 }
 
 /// The context fill at a main-loop turn's end (`--fill`, `--window`,
@@ -819,6 +839,8 @@ impl Default for Config {
             session_skills: SessionSkills::NotChecked,
             fill: None,
             pending: armed::Pending::default(),
+            horizon_secs: hold::DEFAULT_HORIZON_SECS,
+            morning_min: hold::DEFAULT_MORNING_MIN,
         }
     }
 }
@@ -878,6 +900,11 @@ impl Config {
             session_skills: SessionSkills::NotChecked,
             fill: None,
             pending: armed::Pending::default(),
+            horizon_secs: text("continuity.operator_horizon")
+                .and_then(|t| crate::parse_duration(&t))
+                .filter(|s| (hold::HORIZON_RANGE.0..=hold::HORIZON_RANGE.1).contains(s))
+                .unwrap_or(d.horizon_secs),
+            morning_min: text("continuity.morning").and_then(|t| crate::windows::parse_time(t.trim(), false).ok()).unwrap_or(d.morning_min),
         }
     }
 
@@ -1430,6 +1457,13 @@ pub fn next_tick_at(state: &State, reading: &Reading, arm: Option<&ArmFile>, cfg
         return None;
     }
     let runs = p.gate.as_deref().is_some_and(|g| cfg.why_off(Gate::parse(g)).is_none());
+    // A relay stop on a decision holds the cache until the operator is
+    // likely back.
+    if runs && p.stopped.is_some() {
+        if let Some(t) = hold::tick_at(state, reading, cfg) {
+            return Some(state.pinged_at.filter(|p| state.last_seen_at < *p).unwrap_or(t));
+        }
+    }
     if runs && relay_held(p) {
         return None;
     }
@@ -1783,7 +1817,7 @@ pub fn drained(p: &mut Policy, now: u64) {
 /// References:
 /// - ADR-417 items 4 and 5: the compaction and resume, and the stops that
 ///   end the relay.
-fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option<Decision> {
+fn judge_relay(state: &mut State, reading: &Reading, cfg: &Config, site: &Site, now: u64) -> Option<Decision> {
     // A stop a report recorded (a resumed turn's stop line, a compaction or
     // a resume that failed, an unfinished wrap) hands the reply over once.
     if state.policy.relay_stop.is_some() && !state.policy.handed {
@@ -1803,8 +1837,11 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
             d.reason = format!("{}; the mod compacts with the handoff", d.reason);
             d.action = Action::Compact;
             d.text = Some(h.instructions.clone());
+            return Some(d);
         }
-        return Some(d);
+        // A stop on a decision waits on the operator: once its compaction
+        // ran, the hold keeps the cache until the operator is likely back.
+        return hold::relay_tick(state, reading, cfg, now).or(Some(d));
     }
     // Compacted, and the resume never reported: the mod that compacted is
     // gone, since a live one reports the resume before it lets another
@@ -1885,6 +1922,9 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
     // a turn that starts first defers it, and the next check asks again.
     if let Some((short, why)) = ended {
         state.policy.compact_due = true;
+        if m.stop == Some("decision") && !goal_ended {
+            state.policy.wait = Some(hold::begin(hold::Cause::Decision, cfg, now));
+        }
         let mut d = stop(state, cfg, site, &short, why, true, now);
         d.action = Action::Compact;
         d.text = Some(handoff.instructions);
@@ -2007,7 +2047,7 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
         state.policy.resumed_at = None;
     }
     // A relay wrap waiting to be judged, compacted, or stopped.
-    if let Some(d) = judge_relay(state, cfg, site, now) {
+    if let Some(d) = judge_relay(state, reading, cfg, site, now) {
         return (out, d);
     }
     // Relay's fill path: one drain and one wrap per generation. A fill
@@ -2072,6 +2112,10 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
     // Wrapped, with keepalives or the compaction after it still to come.
     let after = if p.wrapped_at.is_some() { "wrapped" } else { "running" };
     if let Some(why) = &p.stopped {
+        // A resumed turn's stop on a decision waits on the operator.
+        if let Some(d) = hold::relay_tick(state, reading, cfg, now) {
+            return (out, d);
+        }
         return (out, Decision::new(cfg, &p, true, "stopped", format!("stopped: {why}; nothing more until the operator's next prompt")));
     }
     if !cfg.enabled {

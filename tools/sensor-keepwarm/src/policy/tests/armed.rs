@@ -15,11 +15,11 @@ use super::*;
 use crate::background::Background;
 use crate::policy::armed::{self as exit, bound, judged, Given, Judgement, Pending, Sufficiency, Verdict};
 
-const OPUS: &str = "claude-opus-5-5";
-const WRAP: &str = "20261127T0900Z-3f9a1c2e";
+pub(super) const OPUS: &str = "claude-opus-5-5";
+pub(super) const WRAP: &str = "20261127T0900Z-3f9a1c2e";
 const HANDOFF: &str = "/work/agent-ways/.claude/handoff.wrap.md";
 
-fn handoff(id: &str) -> Handoff {
+pub(super) fn handoff(id: &str) -> Handoff {
     Handoff {
         path: PathBuf::from(HANDOFF),
         wrap_id: Some(id.into()),
@@ -29,11 +29,11 @@ fn handoff(id: &str) -> Handoff {
 }
 
 /// The site with the handoff whose first line carries `id`, or none.
-fn carrying(id: Option<&str>) -> Site {
+pub(super) fn carrying(id: Option<&str>) -> Site {
     Site { handoff: id.map(handoff), ..site() }
 }
 
-fn judgement(verdict: Verdict, h: Sufficiency) -> Judgement {
+pub(super) fn judgement(verdict: Verdict, h: Sufficiency) -> Judgement {
     Judgement { wrap_id: WRAP.into(), verdict, handoff: h, own: Verdict::Stop, moved: verdict, reason: Some("the release landed".into()) }
 }
 
@@ -53,7 +53,7 @@ fn awaiting(n: u32) -> Config {
 /// Runs the stretch left alone from `start`: each check at the `next_at`
 /// the last one gave, each ping's turn landing at once. Each action with
 /// its time in minutes after `start`.
-fn ride(s: &mut Session, cfg: &Config, site: &Site, start: u64) -> Vec<(Action, u64)> {
+pub(super) fn ride(s: &mut Session, cfg: &Config, site: &Site, start: u64) -> Vec<(Action, u64)> {
     let mut seen = Vec::new();
     let mut now = start + MIN;
     for _ in 0..200 {
@@ -73,7 +73,7 @@ fn ride(s: &mut Session, cfg: &Config, site: &Site, start: u64) -> Vec<(Action, 
     seen
 }
 
-fn count(seen: &[(Action, u64)], a: Action) -> usize {
+pub(super) fn count(seen: &[(Action, u64)], a: Action) -> usize {
     seen.iter().filter(|(x, _)| *x == a).count()
 }
 
@@ -600,7 +600,7 @@ fn a_compact_without_room_is_recorded_as_stop_and_says_why() {
     };
     // The relay stopped on `relay: stop decision`.
     let mut p = Policy { relays: 1, ..Policy::default() };
-    assert!(stopped_by_agent(&mut p, "decision", "which database"));
+    assert!(stopped_by_agent(&mut p, "decision", "which database", &cfg(), MONDAY));
     assert_eq!(refused(&mut p, &relay(), false), "the relay stopped: decision");
     // A relay wrap the policy sent waits for its answer.
     let mut s = Session::new(MONDAY, 700_000);
