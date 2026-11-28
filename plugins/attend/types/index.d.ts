@@ -4,7 +4,8 @@
 
 /** The keepalive policy as the row draws it (ADR-414 item 9). */
 export type KeepaliveRow = {
-  state: 'running' | 'wrapped' | 'compacted' | 'resumed' | 'stopped'
+  /** `armed` and `finished` are a stop exit's (ADR-418 item 9). */
+  state: 'running' | 'wrapped' | 'compacted' | 'resumed' | 'stopped' | 'armed' | 'finished'
   count: number
   max: number
   /** Keepalives since the wrap, of `afterMax` (`after_wrap_keepalives`). */

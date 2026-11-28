@@ -96,15 +96,33 @@ export function resetArgv(atS: number): string[] {
  *
  *  References:
  *  - ADR-414 item 7: attend's check judges the policy and the mod acts on it.
- *  - ADR-417 item 2a: a context fill past the threshold starts a wrap. */
-export function policyArgv(gate: Gate, skills: Skills | null, legacy = false, fill?: Fill): string[] {
+ *  - ADR-417 item 2a: a context fill past the threshold starts a wrap.
+ *  - ADR-418 item 5: agents in flight keep an armed exit warm. */
+export function policyArgv(gate: Gate, skills: Skills | null, legacy = false, fill?: Fill, agents = 0): string[] {
   const argv = [ATTEND, 'keepwarm', 'check', '--policy', '--json', '--autocompact', gate]
   if (legacy) return argv
   const listed = skills === null ? ['--skills-unread'] : [`--skills=${skills.names.join(',')}`, ...(skills.isPartial ? ['--skills-partial'] : [])]
   const filled = fill
     ? ['--fill', String(fill.tokens), '--window', String(fill.window), ...(fill.nativeAt !== undefined ? ['--native-at', String(fill.nativeAt)] : [])]
     : []
-  return [...argv, ...listed, ...filled]
+  // With none running, attend reads zero agents, and the shells and
+  // watchers the last Stop hook listed, as it would with the flag.
+  const pending = agents > 0 ? ['--pending', `agents=${agents}`] : []
+  return [...argv, ...listed, ...filled, ...pending]
+}
+
+/** The agent loops still in flight, from `$.agent.list()`: started, running
+ *  a turn, or waiting on work of their own. An idle teammate waits for a
+ *  message, and an ended loop runs nothing. */
+export function agentsInFlight(list: readonly { status: string }[]): number {
+  return list.filter(a => a.status === 'pending' || a.status === 'running' || a.status === 'waiting').length
+}
+
+/** Whether a Bash command records a stop verdict by hand
+ *  (`attend keepwarm judged ... --verdict stop`). A command that only
+ *  mentions one costs a policy check, which finds no exit and ends it. */
+export function isJudgedStop(command: string): boolean {
+  return /\battend\s+keepwarm\s+judged\b[^\n;|&]*--verdict[=\s]+["']?stop\b/.test(command)
 }
 
 /** The context at a main-loop turn's end, as `session.measure` reported
@@ -337,7 +355,19 @@ export type Keepalive = {
    *  - ADR-417 item 1: the relay setting is read when a wrap starts, not
    *    at session start. */
   relay: boolean
+  /** A stop exit as the mod last knew it: `judged` once a Bash command
+   *  recorded a stop verdict, then `armed` or `finished` as attend's
+   *  checks say; undefined with none. While it is set the policy check
+   *  runs, in a session whose settings would not run it too.
+   *
+   *  References:
+   *  - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
+   *    armed exit. */
+  exit: Exit | undefined
 }
+
+/** A stop exit as the mod knows it ([`Keepalive.exit`]). */
+export type Exit = 'judged' | 'armed' | 'finished'
 
 // ── tools ────────────────────────────────────────────────────────────────
 
@@ -588,13 +618,17 @@ export function isContextReset(before: number | undefined, after: number | undef
  *  `isInteractive` under `c`: never a -p run or an SDK session, whatever
  *  `headless_poll` says; autocompact is judged at each check. The idle path
  *  or relay turns it on. Where it applies, the policy drives every cache
- *  wake.
+ *  wake. A stop exit (`hasExit`) turns it on too, with relay and the idle
+ *  path off, the default: attend's check carries the exit out there, and
+ *  a session with none runs the plain check as before.
  *
  *  References:
  *  - ADR-414 item 1: the policy runs only in interactive sessions.
- *  - ADR-417 item 1: relay turns the policy on as the idle path does. */
-export function keepaliveApplies(c: ModConfig, isInteractive: boolean): boolean {
-  return isInteractive && c.install && c.keepwarm === 'on' && (c.keepalive || c.relay)
+ *  - ADR-417 item 1: relay turns the policy on as the idle path does.
+ *  - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
+ *    armed exit. */
+export function keepaliveApplies(c: ModConfig, isInteractive: boolean, hasExit = false): boolean {
+  return isInteractive && c.install && c.keepwarm === 'on' && (c.keepalive || c.relay || hasExit)
 }
 
 /** Claude Code's own autocompact threshold, in tokens, from
@@ -721,8 +755,10 @@ export type WrapRoute = {
 /** What `attend keepwarm check --policy --json` decided. */
 export type Decision = {
   /** `drain`: submit `text`, the `drain:` turn, between turns. `compact`:
-   *  compact the conversation between turns, `text` the focus. */
-  action: 'none' | 'keepalive' | 'drain' | 'wrap' | 'compact'
+   *  compact the conversation between turns, `text` the focus. `finish`:
+   *  an armed exit's tick lets the cache lapse; nothing goes in, and attend
+   *  has marked the session finished. */
+  action: 'none' | 'keepalive' | 'drain' | 'wrap' | 'compact' | 'finish'
   text: string | null
   /** When to ask again, in epoch seconds. */
   nextAt: number | null
@@ -730,9 +766,11 @@ export type Decision = {
   max: number
   wrapsAt: string | null
   wrappedAt: string | null
-  /** Whether the policy runs; false is ADR-182's armed windows alone. */
+  /** Whether the policy runs; false is ADR-182's armed windows alone, and
+   *  a stop exit's ticks where the policy is off. */
   policy: boolean
-  state: 'running' | 'wrapped' | 'compacted' | 'resumed' | 'stopped' | 'off'
+  /** `armed` and `finished` are a stop exit's, whatever `policy` says. */
+  state: 'running' | 'wrapped' | 'compacted' | 'resumed' | 'stopped' | 'armed' | 'finished' | 'off'
   reason: string
   afterCount: number
   afterMax: number
@@ -774,11 +812,12 @@ export function parseDecision(stdout: string): Decision | undefined {
   } catch {
     return undefined
   }
-  const action = d.action
-  if (action !== 'none' && action !== 'keepalive' && action !== 'drain' && action !== 'wrap' && action !== 'compact') return undefined
+  const actions =['none', 'keepalive', 'drain', 'wrap', 'compact', 'finish'] as const
+  const action = actions.find(x => x === d.action)
+  if (action === undefined) return undefined
   const str = (v: unknown) => (typeof v === 'string' ? v : null)
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
-  const states = ['running', 'wrapped', 'compacted', 'resumed', 'stopped', 'off'] as const
+  const states = ['running', 'wrapped', 'compacted', 'resumed', 'stopped', 'armed', 'finished', 'off'] as const
   const state = states.find(x => x === d.state) ?? 'off'
   const w = d.wrap as Record<string, unknown> | null | undefined
   const dests = ['transcript', 'file', 'send', 'off'] as const
@@ -840,10 +879,17 @@ export function compactFocus(reply: string): string {
 }
 
 
-/** The row's segment after a decision; null where the policy does not run.
- *  A dormant session shows it from the first turn the policy submits. */
+/** The stop exit a decision reports, `armed` or `finished`, whether or not
+ *  the policy runs; undefined with none. */
+export function stopExitOf(d: Decision): Exit | undefined {
+  return d.state === 'armed' || d.state === 'finished' ? d.state : undefined
+}
+
+/** The row's segment after a decision; null where neither the policy nor a
+ *  stop exit runs. A dormant session shows it from the first turn the
+ *  policy submits, or from the tick that finished it. */
 export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): KeepaliveRow | null {
-  if (!d.policy || d.state === 'off') return null
+  if (d.state === 'off' || (!d.policy && stopExitOf(d) === undefined)) return null
   return {
     state: d.state,
     count: d.count,
@@ -852,7 +898,7 @@ export function keepaliveRowOf(d: Decision, was: KeepaliveRow | null): Keepalive
     afterMax: d.afterMax,
     compactsAt: d.compactsAt,
     compactedAt: d.compactedAt,
-    nextAt: d.state === 'running' || isAfterWrap(d) ? d.nextAt : null,
+    nextAt: d.state === 'running' || d.state === 'armed' || isAfterWrap(d) ? d.nextAt : null,
     wrapsAt: d.wrapsAt,
     wrappedAt: d.wrappedAt,
     idle: d.state === 'running' ? d.idle : null,
@@ -879,12 +925,16 @@ function nextIn(nextAt: number, nowMs: number): string {
  *  `⟳ wrapped 21:40`, `⟳ wrapped 21:40 · 1/3 · next 41m · compact ~00:10`,
  *  `⟳ compacted 00:10`, `⟳ stopped`; in relay mode `⟳ relay 2/5` once a
  *  relay has run, `⟳ draining` or `⟳ relay 2/5 · draining` once the drain
- *  has started, and `⟳ relay stopped: decision`.
+ *  has started, and `⟳ relay stopped: decision`; after a stop verdict
+ *  `⟳ exit armed · next 41m`, then `⟳ finished`.
  *
  *  References:
  *  - ADR-417 item 4: the row's words for a relay and for its stop.
- *  - ADR-418 item 14: the row shows the drain. */
+ *  - ADR-418 item 14: the row shows the drain.
+ *  - ADR-418 item 9: the armed and finished states. */
 export function keepaliveSegment(k: KeepaliveRow, nowMs: number): string {
+  if (k.state === 'finished') return '⟳ finished'
+  if (k.state === 'armed') return k.nextAt !== null ? `⟳ exit armed · ${nextIn(k.nextAt, nowMs)}` : '⟳ exit armed'
   if (k.relayStop) return `⟳ relay stopped: ${k.relayStop}`
   const isWorking = k.state === 'running' || k.state === 'resumed'
   if (k.isDraining && isWorking) return k.relayCount > 0 ? `⟳ relay ${k.relayCount}/${k.maxRelays} · draining` : '⟳ draining'
@@ -939,7 +989,9 @@ export function planCheck(d: Decision, isListening: boolean): CheckPlan {
   if (d.action === 'drain' && d.text && d.policy) submit = { kind: 'drain', text: d.text, route: null }
   if (d.action === 'wrap' && d.text && d.wrap && d.policy) submit = { kind: 'wrap', text: d.text, route: d.wrap }
   if (d.action === 'compact' && d.text && d.policy) submit = { kind: 'compact', text: d.text, route: null }
-  const armAtMs = !d.retry && d.nextAt !== null && (d.policy || isListening) ? d.nextAt * 1000 : null
+  // A finish submits nothing and asks nothing more: the pings stop until a
+  // main-loop turn's end sets the timer again.
+  const armAtMs = !d.retry && d.action !== 'finish' && d.nextAt !== null && (d.policy || isListening) ? d.nextAt * 1000 : null
   return { submit, armAtMs, retry: d.retry }
 }
 
