@@ -243,8 +243,8 @@ The mod records your call. A judge, a separate model call that reads only the ha
 - `continue`: go back to work at DO NEXT. The handoff stands as the checkpoint for an exit that cannot run a wrap. When the reply says the handoff lacks what you see, add what is missing to the handoff, then go back to work.
 - `stop`: the mod arms the exit. End the turn and start nothing new. An operator prompt disarms the exit.
 - `compact`: end the turn. After the reply ends, the mod compacts with the handoff and then resumes the work or stops.
-- `doubt`: end the turn. The mod stops and sends the handoff to the operator over attend.
-- A refusal: the reply names the call the mod refused and why, such as a stop while agents are in flight, a `continue` while the session drains, or the `max_relays` cap. Do what the reply says.
+- `doubt`: end the turn. The mod arms the exit and sends the handoff to the operator over attend; in relay mode, in a turn the operator did not start, it also compacts with the handoff after the reply ends and submits no resume.
+- A refusal: the reply names the call the mod refused and why, such as a stop while agents are in flight, a `continue` while the session drains, or a `compact` in a turn the operator started. Do what the reply says. A `compact` the mod cannot carry out, because relay is off or `max_relays` relays have run, comes back as `stop`.
 
 Do not claim the session is stopped, compacted or resumed: the mod does each after the reply ends.
 
@@ -254,7 +254,7 @@ Do not claim the session is stopped, compacted or resumed: the mod does each aft
 - **Print the list you squared** — an unenumerated honesty pass is unreviewable; the user should see every task and description without asking.
 - **Prepare, don't pretend** — a skill cannot run `/compact`. In handoff mode it hands off a ready `/compact` line; in relay mode the attend mod compacts after the wrap's reply. Never report compaction as done.
 - **Directed > generic** — a synthesis-anchored `/compact` keeps what matters; an unanchored one keeps what the system guesses.
-- **On-demand** — that's the whole reason this exists alongside the `compaction-checkpoint` way. You choose the seam with `/wrap`, the agent runs `/wrap boundary` when a piece of work lands, or the attend mod asks for a wrap at its idle bound or, in relay mode, at its context fill threshold.
+- **On-demand** — that's the whole reason this exists alongside the `compaction-checkpoint` way. You choose the seam with `/wrap`, the agent runs `/wrap boundary` when a piece of work lands, or the attend mod asks for a wrap at its idle bound or, in relay mode, for `/wrap boundary` at the next boundary once the drain starts and for a mid-work wrap at the hard line.
 - **The agent's call is recorded, and the judge makes the call** — in boundary mode the agent passes its own call to `attend_boundary`, the mod records it, and the judge decides from the handoff and the measured conditions. The agent acts on the reply.
 - **Two survival layers** — TaskList + continuation prompt survive even a hard reset; `/compact` is the lighter same-session path on top. The prompt carries the tasks *and* the instruction to rehydrate them, because a fresh window starts with an empty list.
 

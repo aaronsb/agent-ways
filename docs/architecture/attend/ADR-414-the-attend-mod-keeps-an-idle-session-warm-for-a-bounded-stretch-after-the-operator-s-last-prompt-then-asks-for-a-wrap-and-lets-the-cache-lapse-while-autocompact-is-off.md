@@ -130,7 +130,7 @@ Two facts from the source shape the design. The keepwarm sensor wakes at a fixed
    - **The keepalive's verdict** stays ADR-182's. When a wake produces no turn within the margin, or its turn reads a cold cache, the policy stops until the operator's next prompt.
    - **Defaults in time.** With the defaults, the keepalives land 50, 100 and on to 400 minutes after the operator's last turn ends, the wrap at 450 minutes (7 h 30 min), and the cache lapses an hour later. That is ADR-501's eight-hour bound, counted in wakes.
 
-   > Amended 2026-11-27 by ADR-418: after the judge's `stop` at a work boundary, the count no longer decides the due points. While the handoff's first line carries the judged wrap id, each due point runs the armed exit instead: it sends the keepalive while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise sends nothing, lets the cache lapse, and attend marks a listening session finished. The exit also runs where item 1 runs no policy because autocompact is on. The operator's next prompt (`attend keepwarm reset`) clears the exit with the count. ADR-417 item 2(c) carries the rules.
+   > Amended 2026-11-27 by ADR-418: after a work boundary whose move is `stop` or `doubt`, the count no longer decides the due points. While the handoff's first line carries the judged wrap id, each due point runs the armed exit instead: it sends the keepalive while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise sends nothing, lets the cache lapse, and attend marks a listening session finished. The exit also runs where item 1 runs no policy because autocompact is on. The operator's next prompt (`attend keepwarm reset`) clears the exit with the count. ADR-417 item 2(c) carries the rules.
 
 5. **Windows.** `windows` is a list of entries, each `<days> <HH:MM>-<HH:MM>`.
    - **Days** are `daily`, one day (`Sat`), or a range (`Mon-Fri`; a range may wrap the week, as `Fri-Mon` does).
@@ -260,4 +260,4 @@ Two facts from the source shape the design. The keepwarm sensor wakes at a fixed
 
 ## References
 
-- ADR-418: the dated amendment note at item 4, where the armed exit after a `stop` replaces the count.
+- ADR-418: the dated amendment note at item 4, where the armed exit after a boundary's `stop` or `doubt` replaces the count.
