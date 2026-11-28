@@ -22,9 +22,11 @@ svg { color: #222222; }
 <text class="h" x="16" y="24">A supervisor session watching a relay-mode worker</text>
 <text class="s" x="16" y="42">Time runs left to right. The left part is compressed (hours of relays); 0 to 60 minutes after the stop is drawn to scale, 5 px a minute.</text>
 
-<!-- max_relays bound -->
-<path class="ln" d="M150,74 L150,66 L1020,66 L1020,74"/>
-<text class="t" x="585" y="60" text-anchor="middle">max_relays (10 on this host) counts relays from the operator's last prompt; a nudge is no operator prompt and resets nothing</text>
+<!-- the relay count: open-ended, since the supervisor may nudge past max_relays -->
+<path class="ln" d="M150,74 L150,66 L1000,66"/>
+<path class="dash" d="M1000,66 L1036,66"/>
+<path class="ln" d="M1030,61 L1040,66 L1030,71"/>
+<text class="s" x="160" y="60">relays count from the operator's last prompt, and a nudge resets nothing; the supervisor may nudge past max_relays (10 on this host), so the run has no fixed end</text>
 
 <!-- lane labels -->
 <text class="h" x="16" y="108">worker</text>
