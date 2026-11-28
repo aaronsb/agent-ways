@@ -15,6 +15,8 @@ basis:
   - precedent: ADR-414
   - precedent: ADR-182
   - precedent: ADR-708
+  - evidence: 'Probe of 2026-11-27 on ending a session: Claude Code 2.1.332 bundled mod types (plugin-authoring/types/claude-code.d.ts) have no call that ends, exits or detaches a session; attend treats a session as alive while its Claude Code process runs and records no finished state (attend-presence alive, sensor-peers discover_peers, send.rs SenderExited)'
+  - evidence: 'Probe of 2026-11-27 on the size of a fresh start: 330 main-session transcripts across 73 projects, deduplicated by message id, excluding claude -p runs, teammate sessions and scratch projects; in the 75 sessions that started from a handoff the context at the first edit had a median of 171k tokens'
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -85,12 +87,14 @@ related:
 
 ## Summary
 
-- **Decided:** When a piece of work lands, the working agent calls a tool that the attend mod registers. The call runs the wrap, which writes the handoff, and the mod then sends the handoff and the conditions it measures to the judge: a clean model call through the same judge interface that decides which ways are disclosed, under its own judgement profile, `continuance`, beside the `disclosure` profile. Each profile names its own model, and neither follows the other. The judge returns `stop`, `compact`, `continue` or `doubt`, and says whether the handoff is enough to start fresh from. A stop arms an exit: keepwarm pings only while something is pending or the session holds detail the handoff lacks, and only while the pings cost less than whatever would replace the session. Otherwise the first keepwarm tick lets the cache lapse and marks the session finished. From 75% of the window the session drains: it starts nothing new, finishes the work in flight, and wraps at the next boundary. Only at a hard line, proposed at 85%, does the mod wrap mid-work. This amends the relay mode: `relay_at_pct` becomes the drain point, a new `hard_at_pct` marks the mid-work wrap, the judge is the independent check the relay mode deferred, and the idle path gains the armed exit.
-- **Trades away:** a model call at every boundary, which costs little but can be wrong, and a wrap at every boundary even when the session carries on. The drain spends context between 80% and 85%, past where the operator sees the agent's capability hold, to finish work instead of leaving it dangling. A session that stops lets its cache lapse, so an operator who returns after the exit starts fresh from the handoff or pays a cold reload. The bands are the operator's observation, not a measurement, and the price of a fresh start (100k tokens) is an estimate. The design rests on early-access mod calls (`$.model.complete`, tool registration) and on a way to mark a session finished that does not exist yet.
+- **Decided:** When a piece of work lands, the working agent calls a tool that the attend mod registers. The call runs the wrap, which writes the handoff, and the mod then sends the handoff and the conditions it measures to the judge: a clean model call through the same judge interface that decides which ways are disclosed, under its own judgement profile, `continuance`, beside the `disclosure` profile. Each profile names its own model, and neither follows the other. The judge returns `stop`, `compact`, `continue` or `doubt`, and says whether the handoff is enough to start fresh from. A stop arms an exit: keepwarm pings only while something is pending or the session holds detail the handoff lacks, and only while the pings cost less than whatever would replace the session. Otherwise the first keepwarm tick lets the cache lapse, and attend marks the session finished for its peers; the Claude Code process keeps running, because no mod call can end it. From 75% of the window the session drains: it starts nothing new, finishes the work in flight, and wraps at the next boundary. Only at a hard line, proposed at 85%, does the mod wrap mid-work. This amends the relay mode: `relay_at_pct` becomes the drain point, a new `hard_at_pct` marks the mid-work wrap, the judge is the independent check the relay mode deferred, and the idle path gains the armed exit.
+- **Trades away:** a model call at every boundary, which costs little but can be wrong, and a wrap at every boundary even when the session carries on. The drain spends context between 80% and 85%, past where the operator sees the agent's capability hold, to finish work instead of leaving it dangling. A session that stops lets its cache lapse, so an operator who returns after the exit starts fresh from the handoff or pays a cold reload. The bands are the operator's observation, not a measurement. The price of a fresh start (171k tokens) is a median over past sessions, and one successor can read far more before its first edit. The design rests on early-access mod calls (`$.model.complete`, tool registration) and on a finished mark in attend that is not built yet.
 - **One-way?** No. Reversible: the bands are settings, the tool, the judge and the armed exit are mod code, and relay mode stays off by default. A stop deletes nothing: the transcript stays on disk, and `claude --resume` brings the session back.
 - **Probes:** *Confident (settings):* `relay_at_pct` keeps its 75 but now means "start draining", and a new setting, `hard_at_pct`, proposed at 85, is where the session wraps mid-work. Lean: yes. *Not confident (judge-model):* the judge runs on Claude Haiku 5.5: a different model from the working agent, about a tenth of a cent for a brief of ten thousand tokens, and answering from a closed set of verdicts. Lean: Haiku 5.5; the alternative is the working agent's own model in a clean call, which reads more carefully but shares more of the working agent's habits. *Not confident (first):* what ships first is two probes: whether the mod can mark a session finished for its peers, and the measured size of a fresh start. Lean: yes; the alternative is to build the tool and the judge first on the 100k estimate. *Answered 2026-11-27:* the operator accepted the record and the leans on settings and first, and settled judge-model differently: the judge uses the same interface as way disclosure, under a `continuance` judgement profile of its own beside the `disclosure` profile, each naming its model independently.
 - **Open:** where the hard line can sit under Claude Code's own compaction point, whether the price ratio holds under a subscription, and two Claudes working together through attend, which stays deferred (Open questions).
 - **Inversion:** at one end, every session stays warm until the operator returns and pays a cache read of its whole context every 50 minutes. At the other end, every session ends at its first boundary and the next one always starts fresh from the handoff. This record sits between them: what is pending, and the price of the pings against the price of a replacement, decide how long a stopped session stays warm, and a clean judge, not the working agent, makes the call. A third answer outside that framing, two sessions handing work to each other through attend, is deferred.
+
+> Edited 2026-11-27: the two probes this record left open ran on 2026-11-27 (Probe findings). Decided read: "Otherwise the first keepwarm tick lets the cache lapse and marks the session finished." Trades away read: "and the price of a fresh start (100k tokens) is an estimate. The design rests on early-access mod calls (`$.model.complete`, tool registration) and on a way to mark a session finished that does not exist yet."
 
 ## Context
 
@@ -157,12 +161,12 @@ Claude API list prices for Claude Opus 5.5 are $4 per million input tokens, $0.2
 
 | Context | Per ping | Cold reload of this context | Pings before a fresh start is cheaper |
 |---|---|---|---|
-| 200k (20%) | $0.04 | $1.60 | 20 (about 17 h) |
-| 350k (35%) | $0.07 | $2.80 | 11 (about 9 h) |
-| 500k (50%) | $0.10 | $4.00 | 8 (about 6.7 h) |
-| 700k (70%) | $0.14 | $5.60 | 6 (about 4.8 h) |
+| 200k (20%) | $0.04 | $1.60 | 34 (about 28 h) |
+| 350k (35%) | $0.07 | $2.80 | 20 (about 16 h) |
+| 500k (50%) | $0.10 | $4.00 | 14 (about 11 h) |
+| 700k (70%) | $0.14 | $5.60 | 10 (about 8 h) |
 
-The last column assumes that a fresh start writes about 100k tokens: the system prompt, the tools and ways, the handoff, and what the successor re-reads before its first edit, about $0.80. That figure is an estimate to measure. A write costs 40 times a read, so the rule fits on one line:
+The last column takes a fresh start to be 171k tokens: the median context of a session started from a handoff when it made its first edit, holding the system prompt, the tools and ways, the handoff, and what the successor read before that edit. Written at the one-hour price, 171k tokens cost about $1.37. A write costs 40 times a read, so the rule fits on one line:
 
 ```
 pings worth paying = 40 × (the price of whatever replaces this session ÷ current context)
@@ -170,11 +174,15 @@ pings worth paying = 40 × (the price of whatever replaces this session ÷ curre
 
 This is the ski-rental rule, named for the choice between renting skis each day and buying a pair: keep paying rent while the rent paid stays under the purchase price, then buy. Here the rent is a ping and the purchase is whatever replaces the session. The rule needs no forecast of when the operator returns, and it never costs more than twice the best choice made with hindsight. What replaces the session sets the purchase price, and the judge's answer on the handoff chooses it (item 10).
 
+> Edited 2026-11-27: the size of a fresh start was measured on 2026-11-27 from 330 main-session transcripts (Probe findings). The paragraph read: "The last column assumes that a fresh start writes about 100k tokens: the system prompt, the tools and ways, the handoff, and what the successor re-reads before its first edit, about $0.80. That figure is an estimate to measure." The last column read 20 (about 17 h), 11 (about 9 h), 8 (about 6.7 h) and 6 (about 4.8 h).
+
 ### 6. How long to stay warm
 
-The figure below draws, in keepwarm ticks, how long an armed exit stays warm in each of three cases, for a session at 35% of the window with a 100k fresh start.
+The figure below draws, in keepwarm ticks, how long an armed exit stays warm in each of three cases, for a session at 35% of the window with a 171k fresh start.
 
-![Three lanes of idle time in keepwarm ticks, drawn for a session at 35 percent of a 1M window with a 100k fresh start; each tick is about 50 idle minutes, and the first hour is free for all three. When the handoff is enough and nothing is pending, the session exits at the first tick. When something is pending, such as a reply, a peer or a CI run, it stays warm until that arrives, at most 11 ticks, about 9 hours. When the session holds detail the handoff lacks, it stays warm until the operator returns, up to 40 ticks, about 33 hours.](figures/ADR-418-stay-warm.svg)
+![Three lanes of idle time in keepwarm ticks, drawn for a session at 35 percent of a 1M window with a measured fresh start of 171k tokens; each tick is about 50 idle minutes, and the first hour is free for all three. When the handoff is enough and nothing is pending, the session exits at the first tick. When something is pending, such as a reply, a peer or a CI run, it stays warm until that arrives, at most about 20 ticks, about 16 hours. When the session holds detail the handoff lacks, it stays warm until the operator returns, up to 40 ticks, about 33 hours.](figures/ADR-418-stay-warm.svg)
+
+> Edited 2026-11-27: the figure was redrawn for the fresh start measured on 2026-11-27 (Probe findings). It was drawn for a 100k fresh start, and its pending lane ended at 11 ticks, about 9 hours.
 
 - **The handoff is enough and nothing is pending.** The operator will start fresh from the handoff anyway, so pings buy nothing, and the session leaves at the first tick.
 - **Something is pending.** A reply, a peer's message or a CI run makes it worth staying, up to the price of a fresh start.
@@ -184,20 +192,22 @@ The figure below draws, in keepwarm ticks, how long an armed exit stays warm in 
 
 The figure above reads one fill. The figure below reads every fill. It is laid out like an engine's dyno sheet, where fuel flow, torque and power share the rpm axis: four panels share the context fill axis, so a reader picks a fill and reads down. Each panel holds one quantity on its own scale, and the drain band, the 80% capability line and the 85% hard line run through all four.
 
-![Four panels over context fill from 0 to 100 percent of a 1M window, with the drain band from 75 to 85 percent, a dashed line at 80 percent and the hard line at 85 percent through all four. Price of one turn or one ping: a straight line rising to 20 cents at a full window. Input cost of working up to the fill: a curve rising to about 20 dollars at a full window. How long staying warm pays: about 33 hours at every fill when the session holds detail the handoff lacks; when something is pending, 33 hours up to 10 percent, then falling to about 9.5 hours at 35 percent and under 4 hours at 85. Turns for a compaction to pay back: from 62 at 10 percent down to about 5 at 85; the curve starts at 10 percent because below it a compaction barely shrinks the context.](figures/ADR-418-performance-curves.svg)
+![Four panels over context fill from 0 to 100 percent of a 1M window, with the drain band from 75 to 85 percent, a dashed line at 80 percent and the hard line at 85 percent through all four. Price of one turn or one ping: a straight line rising to 20 cents at a full window. Input cost of working up to the fill: a curve rising to about 20 dollars at a full window. How long staying warm pays: about 33 hours at every fill when the session holds detail the handoff lacks; when something is pending, 33 hours up to about 17 percent, then falling to about 16 hours at 35 percent and under 7 hours at 85. Turns for a compaction to pay back: from 62 at 10 percent down to about 5 at 85; the curve starts at 10 percent because below it a compaction barely shrinks the context.](figures/ADR-418-performance-curves.svg)
 
-The curves assume Claude Opus 5.5 list prices, one ping every 50 idle minutes, a fresh start of 100k tokens, 5k tokens added per working turn from a 50k start, and a compaction that writes a 10k summary into a 50k context. With nothing pending and a sufficient handoff, staying warm pays nothing past the free first hour, so that case has no curve. The same model gives these values:
+The curves assume Claude Opus 5.5 list prices, one ping every 50 idle minutes, a fresh start of 171k tokens, 5k tokens added per working turn from a 50k start, and a compaction that writes a 10k summary into a 50k context. With nothing pending and a sufficient handoff, staying warm pays nothing past the free first hour, so that case has no curve. The same model gives these values:
 
 | Fill | Per turn or ping | Working up to here | Warm, something pending | Warm, holds detail | Compaction payback |
 |---|---|---|---|---|---|
 | 10% | $0.020 | $0.15 | 33.3 h | 33.3 h | 62 turns |
-| 20% | $0.040 | $0.75 | 16.7 h | 33.3 h | 21 turns |
-| 35% | $0.070 | $2.40 | 9.5 h | 33.3 h | 11 turns |
-| 50% | $0.100 | $4.95 | 6.7 h | 33.3 h | 8 turns |
-| 70% | $0.140 | $9.75 | 4.8 h | 33.3 h | 6 turns |
-| 75% | $0.150 | $11.20 | 4.4 h | 33.3 h | 5 turns |
-| 85% | $0.170 | $14.40 | 3.9 h | 33.3 h | 5 turns |
-| 100% | $0.200 | $19.95 | 3.3 h | 33.3 h | 4 turns |
+| 20% | $0.040 | $0.75 | 28.5 h | 33.3 h | 21 turns |
+| 35% | $0.070 | $2.40 | 16.3 h | 33.3 h | 11 turns |
+| 50% | $0.100 | $4.95 | 11.4 h | 33.3 h | 8 turns |
+| 70% | $0.140 | $9.75 | 8.1 h | 33.3 h | 6 turns |
+| 75% | $0.150 | $11.20 | 7.6 h | 33.3 h | 5 turns |
+| 85% | $0.170 | $14.40 | 6.7 h | 33.3 h | 5 turns |
+| 100% | $0.200 | $19.95 | 5.7 h | 33.3 h | 4 turns |
+
+> Edited 2026-11-27: the figure, its alt text, the assumptions above and the "Warm, something pending" column were recomputed for the fresh start measured on 2026-11-27 (Probe findings). They assumed a 100k fresh start, and the column read 33.3, 16.7, 9.5, 6.7, 4.8, 4.4, 3.9 and 3.3 h; the alt text read "33 hours up to 10 percent, then falling to about 9.5 hours at 35 percent and under 4 hours at 85".
 
 ### 8. Compact or continue
 
@@ -249,10 +259,12 @@ An open question is not by itself a reason to stop. Each line under DECISIONS in
 
 | Verdict | When | What happens |
 |---|---|---|
-| `stop` | at a boundary, with no agents in flight | The mod records the wrap id and arms the exit. Keepwarm goes on while something is pending or the session holds detail, up to the purchase price. Otherwise the first tick lets the cache lapse and marks the session finished. |
+| `stop` | at a boundary, with no agents in flight | The mod records the wrap id and arms the exit. Keepwarm goes on while something is pending or the session holds detail, up to the purchase price. Otherwise the first tick lets the cache lapse, and the mod runs `attend listen finish`, which marks the session finished in attend. Peers see the mark, and attend refuses new messages to the session. The Claude Code process keeps running, because no mod call can end it. When the operator returns, the mod runs `attend listen on`, which clears the mark. |
 | `compact` | at a boundary, when the payback and fidelity favor it; agents in flight come through | The mod compacts with the handoff, then resumes when tasks remain or stops when none do. |
 | `continue` | at a boundary below 75%, when work remains and compacting does not pay | The agent goes back to work. The wrap stands as the checkpoint for exits that cannot wrap. |
 | drain | from 75% to 85%; the mod sets it, and it is not a verdict | Nothing new starts. The next boundary wraps and then compacts or stops. At 85% the mod wraps mid-work, as the relay mode does at its threshold today. |
+
+> Edited 2026-11-27: the probe of 2026-11-27 found no mod call that ends a session, and settled what "finished" means (Probe findings). The `stop` row ended: "Otherwise the first tick lets the cache lapse and marks the session finished."
 
 ### 13. Rules
 
@@ -290,13 +302,18 @@ The relay-mode record is not edited by this one. When this record is accepted, i
 - Every boundary costs a wrap and a judge call, even when the session carries on.
 - A wrong `stop` lets the cache lapse; the operator then starts fresh from the handoff or pays a cold reload. A wrong `continue` spends context the judge thought was worth spending.
 - The drain runs the session between 80% and 85%, where the operator sees capability begin to fall.
-- The purchase price rests on an estimated 100k fresh start until it is measured, and on API list prices, whose weight under a subscription is unverified.
+- The purchase price rests on the median fresh start of 171k tokens, so it prices low a session whose successor reads more before its first edit; a quarter of the measured successors passed 280k. It also rests on API list prices, whose weight under a subscription is unverified.
 - Keepwarm's price table matches `claude-opus-5-5` to its Opus 5 row today, a write-to-read ratio of 20 where Opus 5.5's list prices give 40, so the bound it computes is half the one this record derives until the table gains the Opus 5.5 row.
-- "Finished" cannot yet be marked for peers: without a mod action for it, peers may send messages that wait for a session that will not wake.
+- A finished session's Claude Code process runs until the operator closes it. The mod's ticker and the sensor host keep running locally with it, but they call no model, so they cost no tokens. Until attend gains the finished mark, peers can still send to a stopped session, and the message waits cold for a session that will not wake.
+
+> Edited 2026-11-27: two consequences were rewritten for the probes of 2026-11-27 (Probe findings). They read: "The purchase price rests on an estimated 100k fresh start until it is measured, and on API list prices, whose weight under a subscription is unverified." and ""Finished" cannot yet be marked for peers: without a mod action for it, peers may send messages that wait for a session that will not wake."
 
 ### Neutral
 
 - Implementation adds the boundary tool and its verdict handling to the mod, the brief and its request through the relevance judge's interface, a `continuance` judgement profile beside `disclosure` in the judge settings, the `armed` and `finished` states and the judge's fields to attend's ledger, `hard_at_pct` to the settings registry, the resume line and the DECISIONS columns (blocks, lean, reversible) to the wrap skill's handoff, and the Opus 5.5 row to keepwarm's price table.
+- The finished mark is a small change to attend. The enrollment record in attend-presence (`enrollment.rs`) gains a `finished <secs>` line, with `finish()` to set it and `is_finished()` to read it, and `enroll(Listen)` clears it. A new verb, `attend listen finish`, sets the mark, and `attend listen on` and `attend listen beat` clear it. The peer list shows a finished session as `finished`. `send`, `resolve_recipient`, `resolve_project`, `check_channel` and `sender_dest` refuse a finished session with a new `RecipientFinished` error. Item 12 says when the mod sets and clears the mark.
+
+> Edited 2026-11-27: the finished mark's change set was added from the probe of 2026-11-27 (Probe findings).
 - The PreCompact hook stays as the relay mode defines it, and covers the compaction past the hard line.
 - The design favors the main session as a supervisor of subagents, which keeps its context small and makes its compactions cheap to lose.
 
@@ -313,11 +330,34 @@ The relay-mode record is not edited by this one. When this record is accepted, i
 
 ## Open questions
 
-1. **Can the mod mark a session finished for peers?** The mod API exposes `$.session.end` only as an event the mod receives. Without an action for it, "finished" means no more pings plus a mark in attend, so peers see the session as gone instead of sending it messages that wait cold. This needs a probe.
-2. **The size of a fresh start.** The 100k figure is an estimate. Measure it after each real stop: the system prompt and the handoff, plus what the successor reads before its first edit.
+1. **Can the mod mark a session finished for peers?** Answered 2026-11-27: the mod cannot end the session, so "finished" is a mark in attend plus the end of keepwarm pings, and the Claude Code process stays (item 12 and Probe findings; the change set is under Neutral consequences).
+2. **The size of a fresh start.** Answered 2026-11-27: a session started from a handoff held a median of 171k tokens at its first edit, which replaces the 100k estimate throughout this record (Probe findings).
 3. **Prices under a subscription.** The figures here are API list prices. Under a subscription the cost lands on the usage budget instead. The read-to-write ratio probably weighs the same there, but that is unverified.
 4. **Where the hard line can sit.** 85% works only below the point where Claude Code compacts on its own. The mod reads that point from the session's settings and sets the hard line under it with room for the wrap; how much room the wrap needs is not yet measured.
 5. **Deferred: two Claudes through attend.** Two sessions working together, handing work across with attend's `handoff:` messages, stays out of this design for now.
+
+> Edited 2026-11-27: items 1 and 2 were answered by the probes of 2026-11-27 (Probe findings). Item 1 read: "The mod API exposes `$.session.end` only as an event the mod receives. Without an action for it, "finished" means no more pings plus a mark in attend, so peers see the session as gone instead of sending it messages that wait cold. This needs a probe." Item 2 read: "The 100k figure is an estimate. Measure it after each real stop: the system prompt and the handoff, plus what the successor reads before its first edit."
+
+## Probe findings (2026-11-27)
+
+The two probes this record left open ran on 2026-11-27. The passages they changed carry dated notes.
+
+### Ending a session
+
+- The mod API in Claude Code 2.1.332's bundled types (`plugin-authoring/types/claude-code.d.ts`) had no call that ends, exits or detaches a session. `$.session` exposed `compact` and `send`, among others. `session.end` was an event the mod hears, not a call it makes, and `turn.abort` cancelled only the running turn. Two workarounds existed and were not tested: `$.command.run({command: "exit"})`, and killing the process that `CLAUDE_PID` names. The design does not rest on either.
+- attend treated a session as alive while its Claude Code process ran: the peers sensor's `discover_peers` read `~/.claude/sessions/*.json`, and `attend_presence::alive` checked the process. Nothing recorded a session as finished. Sends went to `live_sessions()`, and a new send to a stopped session was accepted and waited cold. The only refusal covered a reply whose sender's process had exited (`SenderExited` in `send.rs`).
+- Once the cache lapsed, nothing else called the model. The mod's ticker and the sensor host kept running locally, and only keepwarm's `prompt.submit` cost money.
+
+So a stopped session needs no exit to stop costing money: ending the pings is enough, and attend's mark tells peers not to wait on it.
+
+### The size of a fresh start
+
+- The probe read 330 main-session transcripts from 73 projects, 83 of them in agent-ways. It left out `claude -p` runs, teammate sessions and scratch projects, and it counted each API message once by its id.
+- At the first API call, the context held a median of 51k tokens (p25–p75 46k–54k). The cold write at the start had a median of 26k tokens, all with the one-hour lifetime, and about 25k more was usually read from a cache that another session had written.
+- In the 75 sessions that started from a handoff, the context at the first edit had a median of 171k tokens (p25–p75 124k–280k, p90 435k), after 36 API calls at the median. Those sessions wrote a median of 151k tokens to the cache between the start and the first edit. At Claude Opus 5.5 list prices, the stretch from the start to the first edit cost a median of $2.03 (p25–p75 $1.26–$6.38).
+- The probe counted an edit only in the main thread, so a session that left its edits to subagents reached its first counted edit late. The median is less affected by those sessions than the upper percentiles are.
+
+This record takes the median context at the first edit, 171k tokens, as the size of a fresh start, and item 5 prices it.
 
 ## References
 
