@@ -175,8 +175,9 @@ pub struct Pending {
 }
 
 /// `--pending` as the host gave it: the counts, and which of them it named.
-/// The mod names agents alone, and only while some run; the rest come from
-/// the last Stop's record ([`crate::background`]).
+/// The mod names agents alone, and only while it reads some running; the
+/// rest, and the agents where it names none, come from the last Stop's
+/// record ([`crate::background`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Given {
     pub counts: Pending,
@@ -210,13 +211,14 @@ impl Given {
     }
 
     /// The counts, with what `bg` recorded in place of any the host did not
-    /// name: its workflows as agents, since a workflow orchestrates agents,
-    /// its shells and its watchers. A count the host gave wins.
+    /// name: its agents (subagents, teammates, cloud sessions and
+    /// workflows), its shells and its watchers. A count the host gave wins.
+    /// No record is a last Stop with nothing in flight.
     pub fn with(self, bg: Option<&crate::background::Background>) -> Pending {
         let mut p = self.counts;
         if let Some(b) = bg {
             if !self.agents {
-                p.agents = b.workflows.len() as u32;
+                p.agents = b.agents.len() as u32;
             }
             if !self.shells {
                 p.shells = b.shells.len() as u32;

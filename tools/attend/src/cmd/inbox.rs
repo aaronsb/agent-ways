@@ -469,7 +469,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // The Stop hook's payload, read once and first, so its writer never
     // meets a closed pipe. The background work it lists is recorded for
     // keepwarm whether or not the session listens: a dormant session's
-    // armed exit counts it too.
+    // armed exit counts it too. A Stop that lists none removes the record.
     //
     // References:
     // - ADR-418 item 5: shells and watchers in flight are pending.
