@@ -73,6 +73,15 @@ considered:
     said: "perhaps the judge interface gets different judgement profiles - a ways disclosure and continuance profile. we can specify the models just the same, but they're not tied to each other"
     via: operator in session, 2026-11-27, refining the earlier answer on the judge's profile
     covers: [judge-model]
+  - operator: aaronsb
+    said: "the continuance model is named at gate.profiles.<engine>.judgements.continuance.model, a judgement nested in each engine profile, and disclosure keeps the profile's own model"
+    via: "issue #1400, the operator's decisions of 2026-11-27 (decision 1, confirmed), as recorded on the issue"
+    paraphrase: true
+    covers: [judge-model]
+  - operator: aaronsb
+    said: "the boundary tool registers in every session, whatever the relay setting; with relay off it offers stop and continue only, and compaction stays with the operator"
+    via: "issue #1400, the operator's decisions of 2026-11-27 (decision 5), as recorded on the issue and on #1397"
+    paraphrase: true
 status: accepted
 date: 2026-11-27
 deciders:
@@ -95,6 +104,8 @@ related:
 - **Inversion:** at one end, every session stays warm until the operator returns and pays a cache read of its whole context every 50 minutes. At the other end, every session ends at its first boundary and the next one always starts fresh from the handoff. This record sits between them: what is pending, and the price of the pings against the price of a replacement, decide how long a stopped session stays warm, and a clean judge, not the working agent, makes the call. A third answer outside that framing, two sessions handing work to each other through attend, is deferred.
 
 > Edited 2026-11-27: the two probes this record left open ran on 2026-11-27 (Probe findings). Decided read: "Otherwise the first keepwarm tick lets the cache lapse and marks the session finished." Trades away read: "and the price of a fresh start (100k tokens) is an estimate. The design rests on early-access mod calls (`$.model.complete`, tool registration) and on a way to mark a session finished that does not exist yet."
+
+> Settled 2026-11-27 in the build: Trades away calls the finished mark in attend not built yet, and the build has it (Open questions, item 1).
 
 ## Context
 
@@ -239,9 +250,13 @@ The working agent wrote the handoff, but it does not make the call. A clean mode
 | conditions | the mod, measured | Fill in percent and tokens, and the price per ping. Background agents, shells and CI watchers still running. Questions posted to the operator and peer threads awaiting a reply. Open and in-progress tasks. `git status`. Open PRs and their checks. Minutes since the operator's last prompt. The relay count, n of `max_relays`. Commits, merges and closed tasks since the last wrap's `head`. |
 | verdicts | fixed | `stop`, `compact`, `continue` or `doubt`; and `sufficient` or `holds detail`, saying whether the handoff carries what matters. Each comes with one line of reason, the turns of work the judge thinks are left, and the next step it would take from the handoff. |
 
+> Settled 2026-11-27 in the build, by the operator's decisions recorded on issue #1400. The `continuance` profile is a judgement nested in each engine profile, `gate.profiles.<engine>.judgements.continuance.model`, because a model id is written in each provider's own form; the engine profile's own `model` stays the disclosure model (decision 1, which the operator confirmed). Every shipped engine names Claude Haiku 5.5 for it, as `claude-haiku-5-5` or `anthropic/claude-haiku-5.5` (decision 2). `gate.mode` governs disclosure only, so the judge runs wherever an engine resolves (decision 11). `ways judge continuance` makes the request: on a key engine the ways agent sends it, and on the Claude Code engine the verb prints the job for the caller to send through `$.model.complete` and pass back with `--parse` (decision 3). `attend keepwarm brief` gathers the conditions. It reads the agents, shells and watchers in flight from the `background_tasks` that attend's classic Stop hook passes to attend at every Stop, since `$.agent.list()` shows subagents alone (decision 4). The shells and watchers the mod passes win over the Stop's, and the agents it passes are listed with the Stop's.
+
 - **The judge decides and never works.** The handoff is written to be acted on: it opens with "Continue work on" and ends with DO NEXT. So the judge is no agent at all. The mod sends the brief as one judge request through the relevance judge's interface, under the `continuance` profile, with no tools and no session, so the call cannot pick up the work. On the Claude Code engine that request is a `$.model.complete` call; on a key engine the ways agent makes it. The handoff sits in the brief as quoted data, under a line that says the judge is deciding whether this session stops, compacts or continues, not resuming the work. The mod keeps only the verdict line and discards anything else.
 - **Sufficiency sets the purchase price.** `sufficient` means a fresh start replaces the session, at the price of the fresh start. `holds detail` means getting the session back takes a cold reload, at the price of the whole context.
 - **The working agent's preference stays out of the brief.** The working agent records its own call separately. The two calls are compared afterwards, and both go into the handoff's DECISIONS.
+
+  > Settled 2026-11-27 in the build (issue #1400, decision 9): the handoff is written before the verdict arrives, so attend's ledger holds both calls, not the handoff. `attend keepwarm judged` records the judge's verdict, its answer on the handoff and its reason beside the working agent's own call (`--own`), for the last boundary wrap.
 - **The relay count is evidence.** Each continuance compacts an earlier summary, and the operator has been away longer, so a high count leans toward stop. A relay that closed nothing since the last wrap leans toward `doubt`.
 - **When the two calls disagree, the more reversible move wins.** An armed stop beats a compaction, because the stop waits for the keepwarm tick and the operator can undo it while the cache is warm. When the working agent says continue and the judge says stop, the handoff is missing what the working agent sees: the working agent fixes the handoff and continues.
 - **The mod's refusals come first.** Agents, shells or CI watchers in flight refuse a stop, since exiting would end them; they do not refuse a compaction. During the drain the mod refuses `continue`. The `max_relays` cap ends the chain. None of these reach the judge.
@@ -267,6 +282,8 @@ An open question is not by itself a reason to stop. Each line under DECISIONS in
 > Edited 2026-11-27: the probe of 2026-11-27 found no mod call that ends a session, and settled what "finished" means (Probe findings). The `stop` row ended: "Otherwise the first tick lets the cache lapse and marks the session finished."
 
 > Edited 2026-11-28: the `stop` row was corrected to the build, where attend's check sets the mark in the same check that finishes the exit, only on a session that listens, and the reset the operator's prompt runs clears it. A separate `attend listen on` would enroll a session the operator had opted out of. It read: "Otherwise the first tick lets the cache lapse, and the mod runs `attend listen finish`, which marks the session finished in attend. [...] When the operator returns, the mod runs `attend listen on`, which clears the mark."
+
+> Decided 2026-11-27 by the operator (issue #1400, decision 5): the boundary tool registers in every session, whatever the relay setting. With relay on it offers all four verdicts: `stop`, `compact`, `continue` and `doubt`. With relay off it offers `stop` and `continue` only, and compaction stays with the operator. The reason recorded with it on issue #1397: the morning that prompted this record, where keepwarm pinged an idle session, had nothing to do with relay, and the armed exit after a `stop` already runs with relay off. The lean on the parent issue was to register the tool only with relay on.
 
 ### 13. Rules
 
@@ -310,6 +327,8 @@ The relay-mode record is not edited by this one. When this record is accepted, i
 
 > Edited 2026-11-27: two consequences were rewritten for the probes of 2026-11-27 (Probe findings). They read: "The purchase price rests on an estimated 100k fresh start until it is measured, and on API list prices, whose weight under a subscription is unverified." and ""Finished" cannot yet be marked for peers: without a mod action for it, peers may send messages that wait for a session that will not wake."
 
+> Settled 2026-11-27 in the build: two of the negative consequences no longer hold. Keepwarm's price table gained the Claude Opus 5.5 row in attend 0.38.2: a $0.20 cache read and an $8 one-hour write, a ratio of 40, so the bound it computes is the one this record derives. attend has the finished mark (Open questions, item 1), so peers see a stopped session as finished and their new messages to it are refused.
+
 ### Neutral
 
 - Implementation adds the boundary tool and its verdict handling to the mod, the brief and its request through the relevance judge's interface, a `continuance` judgement profile beside `disclosure` in the judge settings, the `armed` and `finished` states and the judge's fields to attend's ledger, `hard_at_pct` to the settings registry, the resume line and the DECISIONS columns (blocks, lean, reversible) to the wrap skill's handoff, and the Opus 5.5 row to keepwarm's price table.
@@ -341,6 +360,10 @@ The relay-mode record is not edited by this one. When this record is accepted, i
 5. **Deferred: two Claudes through attend.** Two sessions working together, handing work across with attend's `handoff:` messages, stays out of this design for now.
 
 > Edited 2026-11-27: items 1 and 2 were answered by the probes of 2026-11-27 (Probe findings). Item 1 read: "The mod API exposes `$.session.end` only as an event the mod receives. Without an action for it, "finished" means no more pings plus a mark in attend, so peers see the session as gone instead of sending it messages that wait cold. This needs a probe." Item 2 read: "The 100k figure is an estimate. Measure it after each real stop: the system prompt and the handoff, plus what the successor reads before its first edit."
+
+> Settled 2026-11-27 in the build, for item 1 (issue #1400, decision 8). The enrollment record gains a `finished <secs>` line. attend's check sets it in the same check that returns `finish` for an armed exit, and only on a session that listens, so a session the operator left unenrolled is not enrolled by the exit. `attend keepwarm reset`, which the mod runs at the operator's next prompt, clears it by listening again, and only where the mark is set. `attend listen finish` stays as the verb that sets it by hand, `attend listen on` clears it, and a beat keeps it. The peer list shows the session as `finished`. A direct message or a reply to a finished session is refused, and nothing is sent. A send to a project skips the finished sessions there and is refused only when every session there has finished, and a channel post goes through while one member has not finished. `attend message awaiting` leaves out a message sent to a finished session, since no answer will come.
+
+> Settled 2026-11-27 in the build, for item 2 (issue #1400, decision 10): the fresh start is a constant of 171k tokens in keepwarm, not a setting. Written at the one-hour rate on Claude Opus 5.5, it prices a sufficient handoff's purchase at about $1.37, and the status card's exit line names it.
 
 ## Probe findings (2026-11-27)
 
