@@ -54,7 +54,7 @@ pub enum Cause {
 }
 
 impl Cause {
-    fn describe(self) -> &'static str {
+    pub fn describe(self) -> &'static str {
         match self {
             Cause::Decision => "the relay stopped on a decision",
             Cause::Doubt => "the judge's doubt went to the operator",
@@ -239,9 +239,9 @@ pub(super) fn relay_tick(state: &mut State, reading: &Reading, cfg: &Config, now
         };
         return end(state, cfg, &why, now);
     };
-    if price_of(&model).is_none() {
-        return None;
-    }
+    // With no price the hold is undecided, and the relay stop runs no
+    // keepalive, as it did before the hold.
+    price_of(&model)?;
     let n = {
         let w = state.policy.wait.as_mut()?;
         w.pings += 1;

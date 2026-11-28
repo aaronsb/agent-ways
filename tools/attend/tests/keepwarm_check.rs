@@ -1504,8 +1504,12 @@ fn status_json_gives_a_cold_cache_and_no_tick() {
 }
 
 /// A resumed generation's `relay: stop decision`: the relay is on, one
-/// relay ran of the default five, it stopped on `decision`, and nothing
-/// ticks until the operator's next prompt.
+/// relay ran of the default five, and it stopped on `decision`. The stop
+/// waits on the operator, so the hold's first tick falls 50 minutes after
+/// the last request and decides hold or lapse.
+///
+/// References:
+/// - ADR-418 item 6: waiting on the operator is pending.
 #[test]
 fn status_json_gives_a_relay_stopped_on_decision() {
     let w = Warm::new("kw-status-decision");
@@ -1519,7 +1523,10 @@ fn status_json_gives_a_relay_stopped_on_decision() {
     policy(&w, "off");
     let s = status_json(&w, &[]);
     assert_eq!(s["relays"], serde_json::json!({ "count": 1, "max": 5, "relay": true, "stopped": "decision" }), "{s}");
-    assert_eq!((s["cache"]["state"].as_str(), s["cache"]["next_tick_at"].clone()), (Some("warm"), serde_json::Value::Null), "{s}");
+    let last = last_request(&s, 5 * MIN);
+    assert_eq!((s["cache"]["state"].as_str(), s["cache"]["next_tick_at"].as_u64()), (Some("warm"), Some(last + 50 * MIN)), "{s}");
+    assert_eq!((s["hold"]["decision"].clone(), s["hold"]["until"].clone()), (serde_json::Value::Null, serde_json::Value::Null), "{s}");
+    assert!(s["hold"]["reason"].as_str().is_some_and(|r| r.starts_with("the relay stopped on a decision: the operator is likely back about ")), "{s}");
 }
 
 /// With `max_relays` 1, one boundary relay leaves the count at 1 of 1 and
@@ -1558,6 +1565,8 @@ fn status_json_with_nothing_on_record_is_all_null() {
             "cache": { "state": "unknown", "last_request_at": null, "lapses_at": null, "next_tick_at": null },
             "relays": { "count": null, "max": null, "relay": null, "stopped": null },
             "operator_prompt_at": null,
+            "hold": { "decision": null, "until": null, "pings": null, "reason": null },
+            "timezone": { "zone": null, "source": null },
         })
     );
     assert!(!w.ledger().exists(), "status writes no ledger");

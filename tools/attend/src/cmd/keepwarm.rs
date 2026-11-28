@@ -273,8 +273,12 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             }
         }
         KeepwarmCmd::Stopped { reason, detail } => {
+            // A stop on a decision waits on the operator, under the horizon,
+            // morning and zone the settings give.
+            let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
+            let cfg = Config::from_settings(settings.as_deref());
             let mut took = false;
-            if !update_policy(&dir, sid, |p| took = policy::stopped_by_agent(p, &reason, &detail)) {
+            if !update_policy(&dir, sid, |p| took = policy::stopped_by_agent(p, &reason, &detail, &cfg, now)) {
                 std::process::exit(1);
             }
             if !took {
@@ -352,12 +356,15 @@ fn status(ident: &attend_presence::session::SessionIdentity, json: bool) {
     }
 }
 
-/// The `cache`, `relays` and `operator_prompt_at` keys of `status --json`,
-/// from what the card reads: the transcript through `ways context`, the arm
-/// file, the ledger, and the session's project settings. A value that
-/// cannot be read is null: the cache's without a transcript reading, the
-/// count, stop and prompt without a ledger, and the cap and relay mode
-/// without the settings.
+/// The `cache`, `relays`, `operator_prompt_at`, `hold` and `timezone` keys
+/// of `status --json`, from what the card reads: the transcript through
+/// `ways context`, the arm file, the ledger, and the session's project
+/// settings. A value that cannot be read is null: the cache's without a
+/// transcript reading, the count, stop, prompt and hold without a ledger,
+/// and the cap, relay mode and zone without the settings.
+///
+/// References:
+/// - ADR-418 item 6: the operator hold and the zone it reads the night in.
 fn status_fields(ident: &attend_presence::session::SessionIdentity, ledger: Option<&sensor_keepwarm::Ledger>, dir: &Path, now: u64) -> serde_json::Value {
     let sid = ident.session_id.as_str();
     let arm = read_arm(dir, sid);
@@ -384,7 +391,28 @@ fn status_fields(ident: &attend_presence::session::SessionIdentity, ledger: Opti
             "stopped": p.and_then(policy::relay_stopped),
         },
         "operator_prompt_at": p.and_then(|p| p.operator_at),
+        "hold": policy::hold::view(p.unwrap_or(&Policy::default())),
+        "timezone": zone_view(&cfg),
     })
+}
+
+/// The zone keepwarm reads the night in under `cfg`: `{"zone": null,
+/// "source": null}` when it is unknown or the settings could not be read.
+fn zone_view(cfg: &Config) -> sensor_keepwarm::windows::ZoneView {
+    match cfg.settings_ok {
+        true => cfg.windows.zone().into(),
+        false => sensor_keepwarm::windows::ZoneView { zone: None, source: None },
+    }
+}
+
+/// Session `sid`'s effective zone, from the settings read its policy check
+/// keeps beside its ledger, for `attend peer list --json`. `None` where no
+/// check has kept one. The read runs no `ways`.
+pub(crate) fn kept_zone(sid: &str) -> Option<sensor_keepwarm::windows::ZoneView> {
+    let path = keepwarm_dir().join(format!("{sid}.settings.json"));
+    let kept: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let cfg = Config::from_settings(Some(kept.get("doc")?.as_str()?));
+    cfg.settings_ok.then(|| zone_view(&cfg))
 }
 
 /// The session `id` names, for `status --session` from any shell, resolved
@@ -791,7 +819,19 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
 
 #[cfg(test)]
 mod tests {
-    use super::mod_setting_line;
+    use super::{mod_setting_line, zone_view};
+    use sensor_keepwarm::policy::{hold, Config, Policy};
+
+    /// `status --json`'s `hold` and `timezone` with no wait and with an
+    /// override, and with the settings unread.
+    #[test]
+    fn the_hold_and_the_zone_print_as_status_shows_them() {
+        let none = serde_json::to_string(&hold::view(&Policy::default())).unwrap();
+        assert_eq!(none, r#"{"decision":null,"until":null,"pings":null,"reason":null}"#);
+        let cfg = Config::from_settings(Some(r#"{"keys":{"mods.attend.continuity.timezone":{"value":"America/Denver"}}}"#));
+        assert_eq!(serde_json::to_string(&zone_view(&cfg)).unwrap(), r#"{"zone":"America/Denver","source":"override"}"#);
+        assert_eq!(serde_json::to_string(&zone_view(&Config::from_settings(None))).unwrap(), r#"{"zone":null,"source":null}"#);
+    }
 
     fn settings(value: &str, layer: &str, file: Option<&str>) -> String {
         let file = file.map_or("null".to_string(), |f| format!("\"{f}\""));

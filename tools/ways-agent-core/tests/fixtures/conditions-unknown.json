@@ -15,5 +15,6 @@
   "relays": "unknown",
   "commits_since_wrap": "unknown",
   "merges_since_wrap": "unknown",
-  "tasks_closed_since_wrap": "unknown"
+  "tasks_closed_since_wrap": "unknown",
+  "waiting_on_operator": "unknown"
 }

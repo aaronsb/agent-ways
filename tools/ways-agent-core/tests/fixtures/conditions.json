@@ -15,5 +15,6 @@
   "relays": {"n": 2, "max": 5},
   "commits_since_wrap": ["42bb7dfa Merge pull request #1401 from aaronsb/build/adr-418-wave1"],
   "merges_since_wrap": ["42bb7dfa Merge pull request #1401 from aaronsb/build/adr-418-wave1"],
-  "tasks_closed_since_wrap": ["[gh#1390] judge: a judgement profile per purpose"]
+  "tasks_closed_since_wrap": ["[gh#1390] judge: a judgement profile per purpose"],
+  "waiting_on_operator": ["a one-way decision waits for the operator: Cut 1.58.0 now?"]
 }
