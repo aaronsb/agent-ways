@@ -72,7 +72,7 @@ pub struct FinishedSession {
 impl std::fmt::Display for FinishedSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        write!(f, "{} (session {}) finished {}", self.name, self.session, agent_fmt::when::ago(now.saturating_sub(self.finished_at)))
+        write!(f, "{} (session {}) was marked finished {}", self.name, self.session, agent_fmt::when::ago(now.saturating_sub(self.finished_at)))
     }
 }
 
@@ -110,8 +110,8 @@ pub enum SendError {
     NotInChannel { name: String, channel: String },
     /// The message being answered came from a session that has exited.
     SenderExited { session: String, name: String },
-    /// Every session the message would reach is marked finished: its
-    /// Claude Code process runs, but it does not wake for a message.
+    /// Every session the message would reach is marked finished, so
+    /// nothing is sent to it.
     RecipientFinished { sessions: Vec<FinishedSession> },
     /// The `to` path is this session's own project, and no other session
     /// works there, so nobody would receive the message.
@@ -173,8 +173,7 @@ impl std::fmt::Display for SendError {
             ),
             Self::RecipientFinished { sessions } => {
                 let named: Vec<String> = sessions.iter().map(ToString::to_string).collect();
-                let wake = if sessions.len() == 1 { "does not wake" } else { "do not wake" };
-                write!(f, "{}, and {wake} for messages; nothing was sent", named.join(", "))
+                write!(f, "{}; nothing was sent", named.join(", "))
             }
             Self::OwnProject { path } => write!(
                 f,

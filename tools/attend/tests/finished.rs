@@ -93,9 +93,9 @@ fn a_direct_send_to_a_finished_session_is_refused_until_it_listens_again() {
         match send(Some(to), None, "after the mark") {
             Err(e @ SendError::RecipientFinished { .. }) => {
                 let why = e.to_string();
-                assert!(why.starts_with(&name) && why.contains("(session peer-sess) finished "), "{to}: {why}");
-                assert!(why.contains(" ago, and does not wake for messages"), "{to}: {why}");
-                assert!(why.ends_with("nothing was sent"), "{to}: {why}");
+                assert!(why.starts_with(&name) && why.contains("(session peer-sess) was marked finished "), "{to}: {why}");
+                assert!(why.ends_with(" ago; nothing was sent"), "{to}: {why}");
+                assert!(!why.contains("wake"), "{to}: {why}");
             }
             other => panic!("{to}: expected recipient_finished: {other:?}"),
         }

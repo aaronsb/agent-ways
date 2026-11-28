@@ -32,10 +32,10 @@
 //!   `#open` (ADR-404 D3a), so its cold start replays what was posted there
 //!   since (D3b);
 //! - `finished <secs>`, when the session was marked finished
-//!   (`attend listen finish`), in seconds since the epoch. A finished
-//!   session's Claude Code process still runs, but the session does not
-//!   wake again: peers see it finished, and attend refuses new messages to
-//!   it. Listening again (`enroll` by `listen`) clears the mark, and a
+//!   (`attend listen finish`), in seconds since the epoch. Peers see the
+//!   session finished, and attend refuses new messages to it. The mark
+//!   leaves listening and keepwarm as they were. Listening again
+//!   (`enroll` by `listen`) clears the mark, and a
 //!   `/clear` leaves it behind with the earlier id ([`carry`]).
 //!
 //! The session is enrolled while the record holds a way. A record whose
