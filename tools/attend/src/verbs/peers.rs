@@ -34,7 +34,10 @@ pub struct Agent {
     /// since the epoch. `None` for this session and for a peer that has not
     /// finished.
     pub finished: Option<u64>,
-    /// Context window used, in percent. `None` for this session.
+    /// Context window used, in percent, from the newest turn's API usage in
+    /// the session's transcript ([`own_context_pct`] for this session, the
+    /// peers sensor for a peer). `None`, `null` in JSON, when the transcript
+    /// holds no such figure yet: unknown, not empty.
     pub context_pct: Option<f64>,
     /// Works in the same directory as this session.
     pub here: bool,
@@ -89,13 +92,13 @@ pub fn peers() -> Peers {
         let others = listed.iter().filter(|(_, _, inst, ..)| inst.is_none()).map(|(sid, c, ..)| (sid.as_str(), c.as_str()));
         me.chain(others).filter(|(_, c)| attend_presence::session::same_dir(c, dir)).map(|(sid, _)| sid.to_string()).collect()
     };
-    let me = agent(self_sid.clone(), &cwd, self_instance.clone(), "working".to_string(), None, true, &rowless(&cwd));
+    let me = self_agent(&ways_core::paths::claude_dir(), self_sid.clone(), &cwd, self_instance.clone(), &rowless(&cwd));
     let now = std::time::SystemTime::now();
     let peers: Vec<Agent> = listed
         .iter()
         .map(|(sid, peer_cwd, instance, status, ctx)| {
             let here = attend_presence::session::same_dir(peer_cwd, &cwd);
-            let mut peer = agent(Some(sid.clone()), peer_cwd, instance.clone(), status.clone(), Some(*ctx), here, &rowless(peer_cwd));
+            let mut peer = agent(Some(sid.clone()), peer_cwd, instance.clone(), status.clone(), *ctx, here, &rowless(peer_cwd));
             if let Some(at) = attend_presence::enrollment::finished_since(sid) {
                 let age = now.duration_since(at).map_or(0, |d| d.as_secs());
                 peer.status = format!("finished {}", agent_fmt::when::ago(age));
@@ -120,6 +123,31 @@ pub fn peers() -> Peers {
         .collect();
 
     Peers { me, channels, peers }
+}
+
+/// This session's row: working, in its own directory, with the context fill
+/// its transcript under `claude` records.
+fn self_agent(
+    claude: &claude_sessions::ClaudeDir,
+    session_id: Option<String>,
+    cwd: &str,
+    instance: Option<String>,
+    rowless: &[String],
+) -> Agent {
+    let context_pct = own_context_pct(claude, cwd, session_id.as_deref());
+    agent(session_id, cwd, instance, "working".to_string(), context_pct, true, rowless)
+}
+
+/// This session's context fill, in percent of its own window, read from its
+/// transcript under `claude` the way the context sensor reads it. The window
+/// is this session's own, so `CLAUDE_CONTEXT_WINDOW` applies
+/// ([`ways_core::context_fill::Owner::Own`]). `None` without a resolved
+/// session, without a transcript, or before a turn reports API usage: the
+/// byte estimate is not shown as a figure, as for a peer.
+fn own_context_pct(claude: &claude_sessions::ClaudeDir, cwd: &str, session_id: Option<&str>) -> Option<f64> {
+    use ways_core::context_fill::{measure_session, Method};
+    let fill = measure_session(claude, Some(cwd), session_id?)?;
+    (fill.model.is_some() && fill.method == Method::Api).then(|| fill.percent())
 }
 
 /// A channel's members by name, so a member can see who else has joined
@@ -226,12 +254,12 @@ pub(crate) fn names(cwd: &str, session_id: &str, instance: Option<&str>, rowless
 }
 
 #[cfg(feature = "sensor-peers")]
-fn list_peers() -> Vec<(String, String, String, String, f64)> {
+fn list_peers() -> Vec<(String, String, String, String, Option<f64>)> {
     crate::sensors::PeerSensor::new().list_peers()
 }
 
 #[cfg(not(feature = "sensor-peers"))]
-fn list_peers() -> Vec<(String, String, String, String, f64)> {
+fn list_peers() -> Vec<(String, String, String, String, Option<f64>)> {
     Vec::new()
 }
 
@@ -306,6 +334,51 @@ mod tests {
             named("cccccccc-3333", "/z/home/app", "Clelia"),
         ];
         assert_eq!(scopes_of(&agents), ["work/app aaaaaaaa", "work/app bbbbbbbb", "home/app"]);
+    }
+
+    /// A Claude config dir holding one transcript, `lines`, for session
+    /// `sid` of the project at `cwd`.
+    fn claude_with_transcript(tag: &str, cwd: &str, sid: &str, lines: &str) -> (std::path::PathBuf, claude_sessions::ClaudeDir) {
+        let root = std::env::temp_dir().join(format!("attend-peers-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(&root);
+        let dir = claude.project_dir(cwd);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{sid}.jsonl")), lines).unwrap();
+        (root, claude)
+    }
+
+    #[test]
+    fn self_reads_its_own_fill_from_an_api_usage_line() {
+        let sid = "11111111-1111-1111-1111-111111111111";
+        let (root, claude) = claude_with_transcript(
+            "self-api",
+            "/srv/proj",
+            sid,
+            "{\"type\":\"user\"}\n{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\",\"usage\":{\"input_tokens\":1000,\"cache_read_input_tokens\":99000,\"cache_creation_input_tokens\":0}}}\n",
+        );
+        let me = self_agent(&claude, Some(sid.to_string()), "/srv/proj", None, &[]);
+        std::fs::remove_dir_all(&root).ok();
+        assert!(me.context_pct.is_some_and(|p| p > 0.0), "self's fill from its API usage line, got {:?}", me.context_pct);
+    }
+
+    #[test]
+    fn self_without_an_api_usage_line_has_no_figure() {
+        // Only user turns so far: the byte estimate is not shown as a figure.
+        let sid = "22222222-2222-2222-2222-222222222222";
+        let (root, claude) = claude_with_transcript("self-bytes", "/srv/proj", sid, "{\"type\":\"user\",\"message\":\"hello\"}\n");
+        let me = self_agent(&claude, Some(sid.to_string()), "/srv/proj", None, &[]);
+        let unresolved = self_agent(&claude, None, "/srv/proj", None, &[]);
+        std::fs::remove_dir_all(&root).ok();
+        assert_eq!(me.context_pct, None);
+        assert_eq!(unresolved.context_pct, None);
+    }
+
+    #[test]
+    fn an_unknown_figure_serializes_as_null() {
+        let a = named("33333333-3333-3333-3333-333333333333", "/srv/proj", "McKay");
+        let json = serde_json::to_value(&a).unwrap();
+        assert!(json["context_pct"].is_null());
     }
 
     #[test]

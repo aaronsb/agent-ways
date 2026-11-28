@@ -600,13 +600,13 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 
 * `on` — Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
 * `off` — Disarm and forget the window
-* `status` — Cache state, context size, cold price, window left, and this session's cold writes. With --json, the stop exit alone, read from the ledger with no transcript read: `exit` is its state (armed or finished, or the verdict's name for a judgment other than stop, which arms nothing), wrap id, pings, rent and purchase, or null with none
+* `status` — Cache state, context size, cold price, window left, this session's cold writes, and one line for the last boundary. With --json, the ledger's boundary alone, with no transcript read: `exit` is the stop exit's state (armed or finished, or the move's name for a move that arms nothing), wrap id, verdict, move, pings, rent and purchase, and `boundary` is the last boundary's wrap, verdict, handoff, own, move and reason; each is null with none
 * `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). The attend mod polls it
 * `reset` — The operator prompted: the keepalive and relay counts start again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
 * `compacted` — Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends
 * `resumed` — Record that a relay's resume turn went in: the relay count goes up by one and the keepalive count starts again. The attend mod runs it once the compaction after a relay wrap has run
-* `judged` — Record the judge's verdict for a boundary wrap, its answer on the handoff and the agent's own call. With --verdict stop it arms the exit: each idle tick then pings while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise lets the cache lapse and marks the session finished. Refused, changing nothing, when .claude/handoff.wrap.md is missing or its first line does not carry wrap=<ID>
+* `judged` — Record the judge's verdict for a boundary wrap, its answer on the handoff, the agent's own call and the move the mod carries out. A move of stop or doubt arms the exit: each idle tick then pings while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise lets the cache lapse and marks the session finished. Compact and continue arm nothing. A compact is recorded as stop, which arms, when it has no room: relay off, the relay stopped, a relay wrap on record, max_relays resumes since the operator's prompt, or --operator-turn. A doubt with relay on stops the relay until the operator's next prompt. Recording the same wrap again replaces its record. Refused, changing nothing, when .claude/handoff.wrap.md is missing or its first line does not carry wrap=<ID>
 * `drained` — Record that relay's drain turn went in, which starts this generation's drain: no further drain turn is offered until a compaction, a resume or a fill under the drain point ends it. The attend mod runs it once the drain turn has entered
 * `goal` — Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended
 * `stopped` — Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt
@@ -637,13 +637,14 @@ Disarm and forget the window
 
 ## `attend keepwarm status`
 
-Cache state, context size, cold price, window left, and this session's cold writes. With --json, the stop exit alone, read from the ledger with no transcript read: `exit` is its state (armed or finished, or the verdict's name for a judgment other than stop, which arms nothing), wrap id, pings, rent and purchase, or null with none
+Cache state, context size, cold price, window left, this session's cold writes, and one line for the last boundary. With --json, the ledger's boundary alone, with no transcript read: `exit` is the stop exit's state (armed or finished, or the move's name for a move that arms nothing), wrap id, verdict, move, pings, rent and purchase, and `boundary` is the last boundary's wrap, verdict, handoff, own, move and reason; each is null with none
 
 **Usage:** `attend keepwarm status [OPTIONS]`
 
 ###### **Options:**
 
-* `--json` — Print the result as one JSON document
+* `--json` — Print the ledger's boundary as one JSON object
+* `--session <ID>` — The session to read, from any shell; unset, the session this shell runs in. Exit 3 when no session record names it
 
 
 
@@ -741,7 +742,7 @@ Record that a relay's resume turn went in: the relay count goes up by one and th
 
 ## `attend keepwarm judged`
 
-Record the judge's verdict for a boundary wrap, its answer on the handoff and the agent's own call. With --verdict stop it arms the exit: each idle tick then pings while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise lets the cache lapse and marks the session finished. Refused, changing nothing, when .claude/handoff.wrap.md is missing or its first line does not carry wrap=<ID>
+Record the judge's verdict for a boundary wrap, its answer on the handoff, the agent's own call and the move the mod carries out. A move of stop or doubt arms the exit: each idle tick then pings while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise lets the cache lapse and marks the session finished. Compact and continue arm nothing. A compact is recorded as stop, which arms, when it has no room: relay off, the relay stopped, a relay wrap on record, max_relays resumes since the operator's prompt, or --operator-turn. A doubt with relay on stops the relay until the operator's next prompt. Recording the same wrap again replaces its record. Refused, changing nothing, when .claude/handoff.wrap.md is missing or its first line does not carry wrap=<ID>
 
 **Usage:** `attend keepwarm judged [OPTIONS] --wrap <ID> --verdict <VERDICT> --handoff <HANDOFF> --own <OWN>`
 
@@ -760,7 +761,13 @@ Record the judge's verdict for a boundary wrap, its answer on the handoff and th
 
   Possible values: `stop`, `compact`, `continue`
 
+* `--move <MOVE>` — The move the mod carries out, which can differ from the verdict. Without it, the move is the verdict
+
+  Possible values: `stop`, `compact`, `continue`, `doubt`
+
 * `--reason <REASON>` — The judge's one line of reason
+* `--operator-turn` — An operator's prompt started this turn: a compact is recorded as stop, and a doubt does not compact
+* `--json` — Print one JSON object, every field present: recorded; armed; acted_on, false where mods.attend.keepwarm is off and otherwise armed; the move recorded; compact_refused, why a compact was recorded as stop, or null; wrap, the route the handoff takes for a doubt (where it goes and the handoff: line it opens with), or null; instructions, the compaction's, for a compact or a doubt the mod compacts on, or null; and resume, the turn after a compact, or null. A refusal prints none
 
 
 

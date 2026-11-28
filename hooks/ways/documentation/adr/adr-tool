@@ -5462,9 +5462,22 @@ def probe_names(adr) -> list:
         names.append('inversion')
     return names
 
-# A --via naming an advisor or an unattended run means the answer did not come
-# from the git user, so the default attribution would be wrong (#624).
-_NON_HUMAN_VIA = re.compile(r'advisor|skeptic|subagent|model|/goal', re.IGNORECASE)
+# A --via naming an advisor, a model or an unattended run means the answer did
+# not come from the git user, so the default attribution would be wrong (#624).
+# The consider step tells the writer to name "which advisor and model", so the
+# forms below are the ones that sentence produces. A false match costs one retry
+# with --operator; a miss records an advisor's answer as the operator's, so the
+# match leans wide. Whole words keep "skeptical", "advisory", "modelling",
+# claude-code and claude-sessions out, and the bare word "model" is not
+# matched, since an operator's own channel often holds it (#1402).
+_NON_HUMAN_VIA = re.compile(r'''
+      \badvisors?\b | \bskeptics?\b | subagent | /goal
+    | \b(?:opus|sonnet|haiku|fable|gemini|codex|chatgpt|llms?)\b | \bgpt-?\d
+    | \bclaude-(?:instant|\d)
+    | \b(?:second|another|other|different)[-\s]model\b
+    | \b[a-z]+-(?:reviewer|architect|analyst|planner|orchestrator|curator)\b
+    | \b(?:reviewer|review|explore|plan|general-purpose|research)\s(?:sub)?agents?\b
+''', re.IGNORECASE | re.VERBOSE)
 
 def cmd_consider(args):
     """Append one considered entry: the operator's answer to the Summary
@@ -5478,8 +5491,9 @@ def cmd_consider(args):
             print(f"Error: {flag} is required: {what}.", file=sys.stderr)
             return 1
     if not args.operator and _NON_HUMAN_VIA.search(args.via):
-        print("Error: --via names an advisor or an unattended run; pass --operator explicitly "
-              "(e.g. --operator advisor) so the answer is not attributed to the git user.", file=sys.stderr)
+        print("Error: --via names an advisor, a model or an unattended run, so the answer is not the "
+              "git user's. Pass --operator advisor for an advisor's answer, or --operator NAME for the "
+              "person who gave it.", file=sys.stderr)
         return 1
     operator = args.operator or _detect_git_user()
     if not operator:

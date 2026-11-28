@@ -13,11 +13,38 @@
 //! the decision log says.
 
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 fn ways_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_ways"))
+}
+
+/// Starts `cmd`, one spawn at a time across the binary. Every process a
+/// scenario starts goes through here.
+///
+/// On macOS, std makes a pipe with pipe(2) and marks both ends close-on-exec
+/// in a second step; on Linux pipe2(2) does both at once. A process another
+/// thread starts between those steps inherits both ends. A scenario starts
+/// its judge host and its hook at the same moment, and the scenarios run in
+/// parallel, so on macOS a hook could inherit the write end of a `take`'s
+/// stdout. The take printed the job and exited, but the host read no EOF
+/// until the hook gave up waiting for the answer the host had not sent yet:
+/// `gate_fallback` `deadline` about 61.5 s in, the job claimed (#1292). A
+/// `take` that inherited a hook's stdin held the hook at its read until the
+/// take timed out, and the job the hook wrote then was never claimed
+/// (`deadline: unclaimed`). Holding one lock across each spawn closes the
+/// window; a pipe is close-on-exec before the next spawn starts.
+fn spawn(cmd: &mut Command) -> Child {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let _held = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    cmd.spawn().unwrap()
+}
+
+/// What [`Command::output`] returns, with the process started by [`spawn`].
+fn output(cmd: &mut Command) -> Output {
+    spawn(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())).wait_with_output().unwrap()
 }
 
 /// Mirror of `session::sessions_root()`, as session_sim.rs keeps it.
@@ -35,11 +62,8 @@ fn sessions_root() -> String {
     }
     #[cfg(not(windows))]
     {
-        let uid = Command::new("id")
-            .arg("-u")
-            .output()
+        let uid = String::from_utf8(output(Command::new("id").arg("-u")).stdout)
             .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|| "0".to_string());
         format!("/tmp/.claude-sessions-{uid}")
@@ -67,7 +91,9 @@ struct Sim {
 /// ways back as that deadline nears. A host stalled for roughly 9 s can
 /// still fail a scenario. The shipped values are tested in the gate's unit
 /// tests, on a clock the test advances and on the real clock, and by the
-/// two scenarios that mark their `Sim` `shipped_timing`.
+/// two scenarios that mark their `Sim` `shipped_timing`. The macOS failures
+/// first put down to such a pause were pipe ends one process inherited from
+/// another's spawn, which [`spawn`] rules out (#1292).
 const SEAM: [(&str, &str); 2] = [("WAYS_TEST_JUDGE_CLAIM_WINDOW_MS", "60000"), ("WAYS_TEST_JUDGE_BUDGET_MS", "60000")];
 
 const MAIN_PROSE: &str = "lead narration about the release notes";
@@ -109,7 +135,7 @@ impl Sim {
             let dir = sim.home.join(".config/agent-ways");
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("agent.yaml"), yaml).unwrap();
-            let out = sim.ways().args(["judge", "host", "--session", &sim.session]).output().unwrap();
+            let out = output(sim.ways().args(["judge", "host", "--session", &sim.session]));
             assert!(out.status.success(), "judge host: {}", String::from_utf8_lossy(&out.stderr));
         }
         sim
@@ -164,22 +190,11 @@ impl Sim {
     /// Runs `ways hook <event>` on `tool_input`, from `agent` when given,
     /// and returns its stdout.
     fn hook(&self, event: &str, tool: &str, tool_input: serde_json::Value, agent: Option<&str>) -> String {
-        let mut payload = serde_json::json!({
-            "session_id": self.session,
-            "hook_event_name": "PreToolUse",
-            "tool_name": tool,
-            "tool_input": tool_input,
-            "cwd": self.project,
-            "transcript_path": self.transcript(),
-        });
+        let mut payload = serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input});
         if let Some(a) = agent {
             payload["agent_id"] = a.into();
         }
-        let mut child = self.ways().args(["hook", event]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-        std::io::Write::write_all(&mut child.stdin.take().unwrap(), payload.to_string().as_bytes()).unwrap();
-        let out = child.wait_with_output().unwrap();
-        assert!(out.status.success(), "hook {event}: {}", String::from_utf8_lossy(&out.stderr));
-        String::from_utf8_lossy(&out.stdout).into_owned()
+        self.raw_hook(event, payload)
     }
 
     /// Writes a way `judged/<rel>` with the frontmatter lines `extra`.
@@ -199,7 +214,7 @@ impl Sim {
         payload["session_id"] = self.session.clone().into();
         payload["cwd"] = self.project.to_string_lossy().into_owned().into();
         payload["transcript_path"] = self.transcript().to_string_lossy().into_owned().into();
-        let mut child = self.ways().args(["hook", event]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        let mut child = spawn(self.ways().args(["hook", event]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()));
         std::io::Write::write_all(&mut child.stdin.take().unwrap(), payload.to_string().as_bytes()).unwrap();
         let out = child.wait_with_output().unwrap();
         assert!(out.status.success(), "hook {event}: {}", String::from_utf8_lossy(&out.stderr));
@@ -297,7 +312,7 @@ impl HostEnv {
 /// printed and how it exited, for a failed scenario's output.
 fn take_job(env: &HostEnv) -> Option<serde_json::Value> {
     let begun = Instant::now();
-    let out = env.ways().args(["judge", "take", "--session", &env.session, "--wait", "--timeout-ms", "10000"]).output().unwrap();
+    let out = output(env.ways().args(["judge", "take", "--session", &env.session, "--wait", "--timeout-ms", "10000"]));
     let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if line.is_empty() || line == "standby" {
         eprintln!(
@@ -328,12 +343,7 @@ fn answer_one(env: &HostEnv) -> Option<String> {
         judgements.push(serde_json::json!({"id": format!("g{}", i + 1), "relevant": !drop, "confidence": 0.95}));
     }
     let answer = serde_json::json!({"text": serde_json::json!({"judgements": judgements}).to_string()});
-    let mut child = env
-        .ways()
-        .args(["judge", "answer", "--session", &env.session, "--job", job["id"].as_str().unwrap()])
-        .stdin(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = spawn(env.ways().args(["judge", "answer", "--session", &env.session, "--job", job["id"].as_str().unwrap()]).stdin(Stdio::piped()));
     std::io::Write::write_all(&mut child.stdin.take().unwrap(), answer.to_string().as_bytes()).unwrap();
     assert!(child.wait().unwrap().success());
     Some(prompt)
@@ -426,7 +436,7 @@ fn shadow_under_claude_code_injects_everything_and_starts_no_detached_judge() {
 impl Sim {
     fn assert_no_detached_judge(&self) {
         std::thread::sleep(Duration::from_millis(1500));
-        let out = self.ways().args(["judge", "take", "--session", &self.session]).output().unwrap();
+        let out = output(self.ways().args(["judge", "take", "--session", &self.session]));
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "", "no job was written");
         assert!(self.decisions().iter().all(|r| r.get("detached").is_none()), "{:#?}", self.decisions());
         let events = std::fs::read_to_string(self.state.join("agent-ways/events.jsonl")).unwrap_or_default();

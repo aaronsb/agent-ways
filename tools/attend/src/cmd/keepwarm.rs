@@ -7,7 +7,7 @@
 //! sensor and the check do the judging; these verbs own the arm file, the
 //! policy's marks in the ledger, and render the card.
 
-use crate::cli::{JsonArgs, KeepwarmCheckArgs, KeepwarmCmd};
+use crate::cli::{KeepwarmCheckArgs, KeepwarmCmd, KeepwarmStatusArgs};
 use crate::util::keepwarm_dir;
 use sensor_keepwarm::policy::armed::{self, Judgement, Sufficiency, Verdict};
 use sensor_keepwarm::policy::{self, Action, Config, Fill, Gate, Handoff, Policy, SessionSkills, Site, WrapOutcome};
@@ -35,6 +35,9 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
     }
     if let KeepwarmCmd::Brief(args) = &sub {
         return super::brief::cmd_brief(&ident, args);
+    }
+    if let KeepwarmCmd::Status(KeepwarmStatusArgs { json, session: Some(id) }) = &sub {
+        return status(&named(id, *json), *json);
     }
     if !ident.session_resolved {
         eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
@@ -103,39 +106,92 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 }
             }
         }
-        KeepwarmCmd::Judged { wrap, verdict, handoff, own, reason } => {
-            let parsed = (Verdict::parse(&verdict), Sufficiency::parse(&handoff), Verdict::parse(&own));
-            let (Some(verdict), Some(handoff), Some(own)) = parsed else {
-                eprintln!("keepwarm judged takes --verdict stop|compact|continue|doubt, --handoff sufficient|holds-detail and --own stop|compact|continue");
+        KeepwarmCmd::Judged { wrap, verdict, handoff, own, moved, reason, operator_turn, json } => {
+            let parsed = (
+                Verdict::parse(&verdict),
+                Sufficiency::parse(&handoff),
+                Verdict::parse(&own),
+                moved.as_deref().map_or(Some(None), |m| Verdict::parse(m).map(Some)),
+            );
+            let (Some(verdict), Some(handoff), Some(own), Some(moved)) = parsed else {
+                eprintln!("keepwarm judged takes --verdict stop|compact|continue|doubt, --handoff sufficient|holds-detail, --own stop|compact|continue and --move stop|compact|continue|doubt");
                 std::process::exit(2);
             };
-            let j = Judgement { wrap_id: wrap.trim().to_string(), verdict, handoff, own, reason };
+            // The move the mod carries out; a hand-run call from before
+            // --move carries out the verdict.
+            let moved = moved.unwrap_or(verdict);
+            let j = Judgement { wrap_id: wrap.trim().to_string(), verdict, handoff, own, moved, reason: reason.clone() };
             let file = read_handoff(&ident.origin_path);
+            // attend decides whether a compact has room, from the relay
+            // settings and the ledger.
+            let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
+            let cfg = Config::from_settings(settings.as_deref());
             let _lock = lock_session(&dir, sid).ok();
             let mut ledger = read_ledger(&dir, sid).unwrap_or_default();
-            if let Err(why) = armed::judged(&mut ledger.policy, j, file.as_ref(), now) {
-                eprintln!("keepwarm judged refused: {why}; nothing recorded");
-                std::process::exit(1);
-            }
+            let rec = match armed::record(&mut ledger.policy, j, file.as_ref(), &cfg, operator_turn, now) {
+                Ok(rec) => rec,
+                Err(why) => {
+                    eprintln!("keepwarm judged refused: {why}; nothing recorded");
+                    std::process::exit(1);
+                }
+            };
             ledger.updated_at = now;
             if let Err(e) = write_ledger(&dir, sid, &ledger) {
                 eprintln!("keepwarm: could not write the ledger: {e}");
                 std::process::exit(1);
             }
             let id = wrap.trim();
+            let moved = rec.moved;
+            let arms = matches!(moved, Verdict::Stop | Verdict::Doubt);
             // With keepwarm off the check judges nothing, so no tick runs
             // the exit.
-            let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
-            if verdict == Verdict::Stop && keepwarm_setting_off(settings.as_deref()) {
+            let keepwarm_off = keepwarm_setting_off(settings.as_deref());
+            // A doubt sends the handoff to the operator over attend, on the
+            // route a relay stop's handoff takes; attend owns that route.
+            // A compact, and a doubt with relay on and the operator away,
+            // compact with the instructions the relay builds; a compact
+            // then resumes with the relay's resume and its escape.
+            //
+            // References:
+            // - ADR-417 item 4: a relay compaction takes its instructions
+            //   from the handoff.
+            // - ADR-418 item 11: in relay mode, `doubt` becomes `relay: stop
+            //   doubt`, and the handoff goes to the operator over attend.
+            if json {
+                let route = (moved == Verdict::Doubt).then(|| policy::doubt_route(&cfg, &site(&ident), reason.as_deref(), operator_turn, now));
+                let compacts = moved == Verdict::Compact || (moved == Verdict::Doubt && cfg.relay && !operator_turn);
+                let instructions = file.as_ref().filter(|_| compacts).map(|h| h.instructions.clone());
+                let resume = file
+                    .as_ref()
+                    .filter(|_| moved == Verdict::Compact)
+                    .map(|h| policy::boundary_resume_text(&h.path, ledger.policy.relays + 1, cfg.max_relays));
+                crate::cmd::print_json(&serde_json::json!({
+                    "recorded": true,
+                    "armed": arms,
+                    "acted_on": arms && !keepwarm_off,
+                    "move": moved.as_str(),
+                    "compact_refused": rec.compact_refused,
+                    "wrap": route,
+                    "instructions": instructions,
+                    "resume": resume,
+                }));
+                return;
+            }
+            if let Some(why) = &rec.compact_refused {
+                println!("compact refused for wrap {id}: {why}; recorded as stop");
+            }
+            if arms && keepwarm_off {
                 println!("exit armed for wrap {id}, but mods.attend.keepwarm is off: no tick runs, so the exit does nothing while it is off");
-            } else if verdict == Verdict::Stop {
+            } else if arms {
                 let stay = match handoff {
                     Sufficiency::Sufficient => "while something is pending, up to the price of a fresh start",
                     Sufficiency::HoldsDetail => "up to the price of a cold reload, since the handoff holds detail",
                 };
                 println!("exit armed for wrap {id}: each idle tick pings {stay}, and otherwise lets the cache lapse and marks the session finished");
-            } else {
+            } else if moved == verdict {
                 println!("judged wrap {id}: {}, the handoff {}; no exit is armed", verdict.as_str(), handoff.as_str());
+            } else {
+                println!("judged wrap {id}: {}, carried out {}, the handoff {}; no exit is armed", verdict.as_str(), moved.as_str(), handoff.as_str());
             }
         }
         KeepwarmCmd::Wrapped { outcome, detail, path, save, focus, marker } => {
@@ -165,16 +221,22 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
         KeepwarmCmd::Compacted { failed, trigger } => {
             let failed = failed.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
             let took = take_policy(&dir, sid, |p| match trigger {
-                Some(_) => policy::boundary_compacted(p, failed, now),
+                Some(_) => match policy::relay_wrap_on_record(p) {
+                    Some(why) => Err(why),
+                    None => {
+                        policy::boundary_compacted(p, failed, now);
+                        Ok(())
+                    }
+                },
                 None => {
                     policy::compacted(p, failed, now);
-                    true
+                    Ok(())
                 }
             });
             match took {
-                Some(true) => {}
-                Some(false) => {
-                    eprintln!("keepwarm: a relay wrap waits to be judged, so its compaction is the relay's; the boundary compaction is not recorded");
+                Some(Ok(())) => {}
+                Some(Err(why)) => {
+                    eprintln!("keepwarm: {why}, so its compaction is the relay's; the boundary compaction is not recorded");
                     std::process::exit(1);
                 }
                 None => std::process::exit(1),
@@ -233,45 +295,73 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             Some(id) => println!("{id}"),
             None => std::process::exit(1),
         },
-        // The stop exit alone, for the attend mod: a process that resumes a
-        // session learns of an exit an earlier one recorded, and resets it
-        // at the operator's prompt.
-        //
-        // References:
-        // - ADR-418 item 9: an operator prompt disarms the exit.
-        KeepwarmCmd::Status(JsonArgs { json: true }) => {
-            let state = State::resume(read_ledger(&dir, sid));
-            println!("{}", serde_json::json!({ "exit": armed::view(&state) }));
+        KeepwarmCmd::Status(args) => status(&ident, args.json),
+    }
+}
+
+/// `attend keepwarm status` for the session `ident` names. With `json`, the
+/// ledger's boundary alone, for the attend mod: a process that resumes a
+/// session learns of an exit an earlier one recorded, and resets it at the
+/// operator's prompt.
+///
+/// References:
+/// - ADR-418 item 9: an operator prompt disarms the exit.
+/// - ADR-418 item 14, item 4: the ledger records each boundary's calls.
+fn status(ident: &attend_presence::session::SessionIdentity, json: bool) {
+    let sid = ident.session_id.as_str();
+    let dir = keepwarm_dir();
+    let now = sensor_trait::epoch_secs();
+    if json {
+        let state = State::resume(read_ledger(&dir, sid));
+        println!("{}", serde_json::json!({ "exit": armed::view(&state), "boundary": armed::boundary(&state.policy) }));
+        return;
+    }
+    let Some(reading) = read_context(sid, &ident.origin_path) else {
+        eprintln!("keepwarm: could not read the session transcript through `ways context`");
+        std::process::exit(1);
+    };
+    let arm = read_arm(&dir, sid);
+    let ledger = read_ledger(&dir, sid);
+    for line in card(&reading, arm.as_ref(), ledger.as_ref(), now) {
+        println!("{line}");
+    }
+    // In a session the attend mod hosts, the mod's own switch decides
+    // whether the check runs at all, whatever is armed here. The
+    // keepalive lines show wherever the mod has run the policy's
+    // check, a dormant session's included.
+    let is_mod_host = attend_presence::enrollment::host(sid) == Some(attend_presence::enrollment::Host::Mod);
+    let ran_policy = ledger.as_ref().is_some_and(|l| l.policy.gate.is_some());
+    if is_mod_host || ran_policy {
+        let settings = mod_settings(&ident.origin_path, SETTINGS_TIMEOUT);
+        if is_mod_host {
+            println!("{}", mod_setting_line(settings.as_deref()));
         }
-        KeepwarmCmd::Status(_) => {
-            let Some(reading) = read_context(sid, &ident.origin_path) else {
-                eprintln!("keepwarm: could not read the session transcript through `ways context`");
-                std::process::exit(1);
-            };
-            let arm = read_arm(&dir, sid);
-            let ledger = read_ledger(&dir, sid);
-            for line in card(&reading, arm.as_ref(), ledger.as_ref(), now) {
-                println!("{line}");
-            }
-            // In a session the attend mod hosts, the mod's own switch decides
-            // whether the check runs at all, whatever is armed here. The
-            // keepalive lines show wherever the mod has run the policy's
-            // check, a dormant session's included.
-            let is_mod_host = attend_presence::enrollment::host(sid) == Some(attend_presence::enrollment::Host::Mod);
-            let ran_policy = ledger.as_ref().is_some_and(|l| l.policy.gate.is_some());
-            if is_mod_host || ran_policy {
-                let settings = mod_settings(&ident.origin_path, SETTINGS_TIMEOUT);
-                if is_mod_host {
-                    println!("{}", mod_setting_line(settings.as_deref()));
-                }
-                let cfg = Config::from_settings(settings.as_deref());
-                let state = card_state(&reading, arm.as_ref(), ledger.as_ref());
-                for line in policy::card(&state, &reading, &cfg, &site(&ident), now) {
-                    println!("{line}");
-                }
-            }
+        let cfg = Config::from_settings(settings.as_deref());
+        let state = card_state(&reading, arm.as_ref(), ledger.as_ref());
+        for line in policy::card(&state, &reading, &cfg, &site(ident), now) {
+            println!("{line}");
         }
     }
+}
+
+/// The session `id` names, for `status --session` from any shell, resolved
+/// as `attend sensor poll --session` resolves it: exit 2 for an id no
+/// session could have, and exit 3 when no session record names it, since
+/// its project, where its transcript is read, is unknown.
+fn named(id: &str, json: bool) -> attend_presence::session::SessionIdentity {
+    if !agent_identity::signal::is_tag_value(id) {
+        let why = format!("{id:?} is not a session id");
+        crate::cmd::refuse_usage(&format!("keepwarm status: {why}"), &why, json)
+    }
+    let Some(origin_path) = attend_presence::session::origin_path(id) else {
+        let why = format!("no record of session {id}; its project is unknown");
+        if json {
+            crate::cmd::print_json(&serde_json::json!({ "error": why }));
+        }
+        eprintln!("keepwarm status: {why}");
+        std::process::exit(agent_settings::exit::REJECTED);
+    };
+    attend_presence::session::SessionIdentity { session_id: id.to_string(), origin_path, session_resolved: true, origin_resolved: true, claude_pid: None }
 }
 
 /// Writes the wrap's reply, read on stdin, to `path` (ADR-414 item 6): the
@@ -304,23 +394,23 @@ fn saved_outcome(o: WrapOutcome, detail: &str, path: &str, sid: &str) -> (String
 fn update_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy)) -> bool {
     take_policy(dir, sid, |p| {
         f(p);
-        true
+        Ok(())
     })
     .is_some()
 }
 
 /// [`update_policy`] for a mark that can be refused: the ledger is written
-/// only when `f` takes the mark. Whether it took it, or `None`, with the
-/// reason on stderr, when the ledger cannot be written.
-fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> bool) -> Option<bool> {
+/// only when `f` takes the mark. Whether it took it or why it refused, or
+/// `None`, with the reason on stderr, when the ledger cannot be written.
+fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> Result<(), String>) -> Option<Result<(), String>> {
     let _lock = lock_session(dir, sid).ok();
     let mut ledger = read_ledger(dir, sid).unwrap_or_default();
-    if !f(&mut ledger.policy) {
-        return Some(false);
+    if let Err(why) = f(&mut ledger.policy) {
+        return Some(Err(why));
     }
     ledger.updated_at = sensor_trait::epoch_secs();
     match write_ledger(dir, sid, &ledger) {
-        Ok(()) => Some(true),
+        Ok(()) => Some(Ok(())),
         Err(e) => {
             eprintln!("keepwarm: could not write the ledger: {e}");
             None
@@ -333,13 +423,16 @@ fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> bool) -> Op
 /// cannot answer within `timeout`, in which case it is killed.
 fn mod_settings(project: &str, timeout: std::time::Duration) -> Option<String> {
     use std::io::Read;
-    let mut child = std::process::Command::new("ways")
-        .args(["settings", "list", "mods.attend", "--json", "--effective", "--project", project])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
+    // Through the brief's spawn lock: the brief runs this beside its other
+    // probes, and on macOS a pipe made during a sibling's spawn leaks into it.
+    let mut child = sensor_keepwarm::spawn_probe(
+        std::process::Command::new("ways")
+            .args(["settings", "list", "mods.attend", "--json", "--effective", "--project", project])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null()),
+    )
+    .ok()?;
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {

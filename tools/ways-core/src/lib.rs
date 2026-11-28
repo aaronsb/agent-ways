@@ -29,6 +29,7 @@ pub mod frontmatter;
 pub mod handoff;
 pub mod introspection;
 pub mod paths;
+pub mod proc;
 pub mod provenance;
 pub mod reflow;
 pub mod scanner;

@@ -537,6 +537,18 @@ mod tests {
             .collect()
     }
 
+    /// What the feed sends until `want` arrives, or for five seconds, a
+    /// deadline a loaded runner's late thread still meets.
+    fn sent_until(rx: &std::sync::mpsc::Receiver<Delivery>, want: &str) -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut got = sent(rx);
+        while !got.iter().any(|g| g == want) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+            got.extend(sent(rx));
+        }
+        got
+    }
+
     fn keys(names: &[&str]) -> Vec<String> {
         names.iter().map(|n| format!("{n}.signal")).collect()
     }
@@ -590,23 +602,62 @@ mod tests {
         assert_eq!(sent(&rx), ["restored before"]);
     }
 
-    /// A burst of changes to the mark store is read once it ends, however
-    /// long it runs.
-    #[test]
-    fn the_mark_store_is_read_once_its_changes_stop() {
+    /// One burst of a hundred changes to a fresh mark store, each a
+    /// fiftieth of [`MARKS_SETTLE`] after the last, and whether it held: by
+    /// the clock, each change came within [`MARKS_SETTLE`] of the last.
+    ///
+    /// The burst runs twice [`MARKS_SETTLE`], so a read timed from its first
+    /// change would come during it. The short step leaves each change nearly
+    /// all of [`MARKS_SETTLE`] as slack for a stalled thread.
+    ///
+    /// While the burst holds, the store is not read. A loaded runner can
+    /// stretch a sleep past [`MARKS_SETTLE`], which ends the burst, and the
+    /// store may then rightly be read; from there the burst asks only that
+    /// it was read once.
+    fn settle_burst() -> bool {
         let base = crate::test_dir::unique("settle");
         write(&base.join("_broadcast"), "a");
         let (feed, rx) = feed_at(&base);
         feed.deliver(base.join("_broadcast").join("a.signal"));
         assert_eq!(sent(&rx), ["a"]);
         tombstones::mark_messages(&base, &keys(&["a"])).unwrap();
-        for _ in 0..10 {
+        let mut got = Vec::new();
+        let mut held = true;
+        let mut last: Option<Instant> = None;
+        for _ in 0..100 {
+            let change = Instant::now();
             feed.marks_changed();
-            thread::sleep(MARKS_SETTLE / 5);
-            assert!(sent(&rx).is_empty(), "read during the burst");
+            held &= last.is_none_or(|l| l.elapsed() < MARKS_SETTLE);
+            thread::sleep(MARKS_SETTLE / 50);
+            got.extend(sent(&rx));
+            held &= change.elapsed() < MARKS_SETTLE;
+            if held {
+                assert!(got.is_empty(), "read during the burst");
+            }
+            last = Some(change);
         }
-        thread::sleep(MARKS_SETTLE * 3);
-        assert_eq!(sent(&rx), ["withdrawn _broadcast/a"]);
+        let withdrawn = "withdrawn _broadcast/a";
+        if !got.iter().any(|g| g == withdrawn) {
+            got.extend(sent_until(&rx, withdrawn));
+        }
+        assert_eq!(got, [withdrawn]);
+        held
+    }
+
+    /// A burst of changes to the mark store is read once it ends, however
+    /// long it runs.
+    ///
+    /// A burst that did not hold never checks that the store went unread
+    /// during it, so a broken burst is run again on a fresh store, and the
+    /// test fails when no attempt held. A pass has run that check at least
+    /// once.
+    #[test]
+    fn the_mark_store_is_read_once_its_changes_stop() {
+        const ATTEMPTS: usize = 5;
+        assert!(
+            (0..ATTEMPTS).any(|_| settle_burst()),
+            "no attempt held: in each of {ATTEMPTS} bursts a change came {MARKS_SETTLE:?} or more after the last, so the read-during-the-burst check never ran"
+        );
     }
 
     /// The watcher withholds marks at backfill, and a mark or an undo
@@ -622,19 +673,10 @@ mod tests {
         spawn_watcher(base.to_path_buf(), String::new(), String::new(), tx).unwrap();
         assert_eq!(sent(&rx), ["kept"], "the backfill withholds the mark");
 
-        let wait = |want: &str| {
-            let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            let mut got = Vec::new();
-            while std::time::Instant::now() < deadline && !got.iter().any(|g| g == want) {
-                got.extend(sent(&rx));
-                thread::sleep(Duration::from_millis(20));
-            }
-            got
-        };
         tombstones::undo(&base, None).unwrap();
-        assert_eq!(wait("restored gone"), ["restored gone"]);
+        assert_eq!(sent_until(&rx, "restored gone"), ["restored gone"]);
         tombstones::mark_messages(&base, &keys(&["kept"])).unwrap();
-        assert_eq!(wait("withdrawn _broadcast/kept"), ["withdrawn _broadcast/kept"]);
+        assert_eq!(sent_until(&rx, "withdrawn _broadcast/kept"), ["withdrawn _broadcast/kept"]);
     }
 
     /// A file delivered once is not delivered again; gone, it leaves the

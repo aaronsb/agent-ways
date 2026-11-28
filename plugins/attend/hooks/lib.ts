@@ -120,13 +120,80 @@ export function agentsInFlight(list: readonly { status: string }[]): number {
   return list.filter(a => a.status === 'pending' || a.status === 'running' || a.status === 'waiting').length
 }
 
-/** Whether a Bash command records a stop verdict by hand
- *  (`attend keepwarm judged ... --verdict stop`). The whole command is
- *  matched, newlines included, so a line split with a backslash or a quoted
- *  `--reason` holding `;`, `|` or `&` still counts. A command that only
- *  mentions one costs a policy check, which finds no exit and ends it. */
-export function isJudgedStop(command: string): boolean {
-  return /\battend\s+keepwarm\s+judged\b[\s\S]*?--verdict[=\s]+["']?stop\b/.test(command)
+/** Whether a Bash command records by hand a boundary that arms the exit
+ *  (`attend keepwarm judged ...`). The move decides: `--move stop` or
+ *  `--move doubt` arms, and `--move continue` or `--move compact` arms
+ *  nothing, whatever `--verdict` says. With no `--move`, a `--verdict` of
+ *  stop or doubt arms. The command is read as shell words, so a quoted
+ *  `--reason` is one word: the flags it mentions are text, and the `;`,
+ *  `|` or `&` it holds end no command. A line split with a backslash reads
+ *  as one. Every `judged` in a compound command counts, and one that arms
+ *  is enough. A command that only mentions one costs a policy check, which
+ *  finds no exit and ends it. */
+export function isJudgedArming(command: string): boolean {
+  const words = shellWords(command)
+  for (let i = 0; i + 2 < words.length; i++) {
+    const w = words[i]!
+    if (w.isSeparator || !/(^|\/)attend$/.test(w.text) || words[i + 1]!.text !== 'keepwarm' || words[i + 2]!.text !== 'judged') continue
+    let end = i + 3
+    while (end < words.length && !words[end]!.isSeparator) end++
+    const args = words.slice(i + 3, end).map(x => x.text)
+    const flag = (name: string) => {
+      const at = args.indexOf(`--${name}`)
+      if (at !== -1) return args[at + 1]
+      return args.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3)
+    }
+    const move = flag('move') ?? flag('verdict')
+    if (move === 'stop' || move === 'doubt') return true
+    i = end
+  }
+  return false
+}
+
+/** A command split into shell words: quotes join and are dropped, a
+ *  backslash escapes the next character (a backslash-newline joins two
+ *  lines), and `;`, `&`, `|` and a newline outside quotes are separators of
+ *  their own. Enough of the shell's grammar to read flags, not more. */
+function shellWords(command: string): { text: string; isSeparator: boolean }[] {
+  const words: { text: string; isSeparator: boolean }[] = []
+  let word = ''
+  let isWord = false
+  let quote: '"' | "'" | undefined
+  const flush = () => {
+    if (isWord) words.push({ text: word, isSeparator: false })
+    word = ''
+    isWord = false
+  }
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]!
+    if (quote === "'") {
+      if (c === "'") quote = undefined
+      else word += c
+    } else if (quote === '"') {
+      if (c === '"') quote = undefined
+      else if (c === '\\' && i + 1 < command.length) word += command[++i]
+      else word += c
+    } else if (c === '\\') {
+      const next = command[++i]
+      if (next !== undefined && next !== '\n') {
+        word += next
+        isWord = true
+      }
+    } else if (c === "'" || c === '"') {
+      quote = c
+      isWord = true
+    } else if (c === ';' || c === '&' || c === '|' || c === '\n') {
+      flush()
+      words.push({ text: c, isSeparator: true })
+    } else if (/\s/.test(c)) {
+      flush()
+    } else {
+      word += c
+      isWord = true
+    }
+  }
+  flush()
+  return words
 }
 
 /** The context at a main-loop turn's end, as `session.measure` reported
@@ -154,12 +221,24 @@ function focusArgs(focus: string | undefined): string[] {
   return focus === undefined ? [] : ['--focus', oneLine(focus)]
 }
 
+/** What started a relay's compaction: attend's check after a relay wrap
+ *  (undefined), or the boundary tool, whose resume counts toward
+ *  `max_relays` like any other relay.
+ *
+ *  References:
+ *  - ADR-418 §13: self-relays count. */
+export type RelayTrigger = 'boundary' | undefined
+
+function triggerArgs(trigger: RelayTrigger): string[] {
+  return trigger === undefined ? [] : ['--trigger', trigger]
+}
+
 /** A relay's resume went in, or why it did not.
  *
  *  References:
  *  - ADR-417 item 4: a resume that fails to go in stops the relay. */
-export function resumedArgv(failed?: string): string[] {
-  return [ATTEND, 'keepwarm', 'resumed', ...(failed === undefined ? [] : ['--failed', oneLine(failed)])]
+export function resumedArgv(failed?: string, trigger?: RelayTrigger): string[] {
+  return [ATTEND, 'keepwarm', 'resumed', ...(failed === undefined ? [] : ['--failed', oneLine(failed)]), ...triggerArgs(trigger)]
 }
 
 /** A `/goal` the operator typed: set (active) or cleared (none). */
@@ -174,8 +253,8 @@ export function stoppedArgv(stop: RelayStop): string[] {
 }
 
 /** The compaction after the wrap ran, or why it failed. */
-export function compactedArgv(failed?: string): string[] {
-  return [ATTEND, 'keepwarm', 'compacted', ...(failed === undefined ? [] : ['--failed', oneLine(failed)])]
+export function compactedArgv(failed?: string, trigger?: RelayTrigger): string[] {
+  return [ATTEND, 'keepwarm', 'compacted', ...(failed === undefined ? [] : ['--failed', oneLine(failed)]), ...triggerArgs(trigger)]
 }
 
 /** A session boundary, a compaction or a /clear: the session's pending
@@ -298,7 +377,22 @@ export type Mod = {
   isCueWaiting: boolean
   /** The keepalive policy's state (ADR-414). */
   ka: Keepalive
+  /** The model's window the last `session.measure` reported, in tokens,
+   *  which the boundary tool's brief takes for the fill. */
+  contextWindow: number | undefined
+  /** What will have started the next main-loop turn, and what started the
+   *  one running: an operator's prompt, or a `/wrap` the operator typed
+   *  without `boundary`. The boundary tool reads `turnStart`.
+   *
+   *  References:
+   *  - ADR-418 §13: no self-compaction while the operator is talking.
+   *  - ADR-418 §14 item 2(b): a `/wrap` the operator types is not judged. */
+  nextTurn: TurnStart
+  turnStart: TurnStart
 }
+
+/** What started a main-loop turn ([`Mod.turnStart`]). */
+export type TurnStart = { isOperator: boolean; isTypedWrap: boolean }
 
 export type Keepalive = {
   /** keepaliveApplies: an interactive session, keepwarm on, the policy
@@ -345,11 +439,16 @@ export type Keepalive = {
    *  next check judges it, and a turn that comes first defers it to that
    *  turn's end. */
   isRelayPending: boolean
+  /** A relay wrap's compaction or its resume is running. A boundary
+   *  compaction stands down while this or `isRelayPending` holds, so one
+   *  turn's end never compacts twice. */
+  isRelayRunning: boolean
   /** The reply the relay hands to the operator when it stops: the wrap's,
    *  or a resumed turn's that ended with a stop line. */
   relayReply: string | undefined
-  /** Moves at each operator prompt: a resume whose compaction an operator
-   *  prompt followed is not submitted. */
+  /** Moves at each operator prompt, whether or not the policy applies: a
+   *  resume whose compaction an operator prompt followed is not submitted,
+   *  and a boundary compaction waiting on the chain does not run. */
   operatorEpoch: number
   /** When the operator last prompted, in epoch ms, whatever the policy and
    *  the gate: the mod sees every prompt, where attend's ledger hears of one
@@ -376,6 +475,30 @@ export type Keepalive = {
    *  - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
    *    armed exit. */
   exit: Exit | undefined
+  /** The compaction the boundary tool's compact or doubt asked for, which
+   *  runs once the tool's turn has ended. A turn that starts first defers
+   *  it to that turn's end, and an operator prompt cancels it.
+   *
+   *  References:
+   *  - ADR-418 §12: the compact row.
+   *  - ADR-417 item 4: the mod compacts and resumes only between turns. */
+  boundary: BoundaryCompaction | undefined
+}
+
+/** A boundary compaction ([`Keepalive.boundary`]): attend's compaction
+ *  instructions from `judged --json`. For a compact, attend's resume turn,
+ *  the relay count it is relay `relayCount + 1` of, and attend's record of
+ *  the same wrap as a stop, for a compaction that leaves no work or fails.
+ *  A doubt has neither. `continueArgv` records the same wrap as continue,
+ *  for an operator prompt that cancels the compaction. */
+export type BoundaryCompaction = {
+  move: 'compact' | 'doubt'
+  instructions: string
+  resume: string | null
+  relayCount: number
+  maxRelays: number
+  stopArgv: string[] | null
+  continueArgv: string[]
 }
 
 /** A stop exit as the mod knows it ([`Keepalive.exit`]). */
@@ -816,6 +939,25 @@ export type Decision = {
 
 export type WrapOutcome = 'transcript' | 'file' | 'sent' | 'refused' | 'unfinished'
 
+/** A wrap's route as attend prints it, in a policy decision's `wrap` and in
+ *  `keepwarm judged --json`'s for a doubt; null where `w` is none. */
+export function parseRoute(w: unknown): WrapRoute | null {
+  if (typeof w !== 'object' || w === null) return null
+  const o = w as Record<string, unknown>
+  const dests = ['transcript', 'file', 'send', 'off'] as const
+  const dest = dests.find(x => x === o.dest)
+  if (!dest || typeof o.file !== 'string' || typeof o.to !== 'string') return null
+  const keepalives = o.after_keepalives
+  return {
+    dest,
+    file: o.file,
+    to: o.to,
+    after: o.after === 'compact' || o.after === 'relay' ? o.after : 'lapse',
+    afterKeepalives: typeof keepalives === 'number' && Number.isFinite(keepalives) ? keepalives : 0,
+    handoff: typeof o.handoff === 'string' ? o.handoff : 'handoff:',
+  }
+}
+
 /** The decision; undefined where the output is not one (an attend without
  *  `--policy`, a build without the sensor). */
 export function parseDecision(stdout: string): Decision | undefined {
@@ -834,20 +976,7 @@ export function parseDecision(stdout: string): Decision | undefined {
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
   const states = ['running', 'wrapped', 'compacted', 'resumed', 'stopped', 'armed', 'finished', 'off'] as const
   const state = states.find(x => x === d.state) ?? 'off'
-  const w = d.wrap as Record<string, unknown> | null | undefined
-  const dests = ['transcript', 'file', 'send', 'off'] as const
-  const dest = dests.find(x => x === w?.dest)
-  const wrap: WrapRoute | null =
-    w && dest && typeof w.file === 'string' && typeof w.to === 'string'
-      ? {
-          dest,
-          file: w.file,
-          to: w.to,
-          after: w.after === 'compact' || w.after === 'relay' ? w.after : 'lapse',
-          afterKeepalives: num(w.after_keepalives) ?? 0,
-          handoff: str(w.handoff) ?? 'handoff:',
-        }
-      : null
+  const wrap = parseRoute(d.wrap)
   return {
     action,
     text: str(d.text),
@@ -1127,6 +1256,19 @@ export function rowAfterPrompt(k: KeepaliveRow | null): KeepaliveRow | null {
  *  generation has not drained. */
 export function rowAfterResume(k: KeepaliveRow | null, relayCount: number, maxRelays: number): KeepaliveRow | null {
   return k && { ...k, state: 'resumed', count: 0, afterCount: 0, wrappedAt: null, compactedAt: null, relayCount, maxRelays, relayStop: null, isShown: true, isDraining: false }
+}
+
+/** After the boundary tool's doubt with relay on: the row reads
+ *  `relay stopped: doubt` until attend's next word on the exit.
+ *
+ *  References:
+ *  - ADR-418 §11: in relay mode, doubt becomes `relay: stop doubt`. */
+export function rowAfterDoubt(k: KeepaliveRow | null): KeepaliveRow {
+  const blank: KeepaliveRow = {
+    state: 'stopped', count: 0, max: 0, afterCount: 0, afterMax: 0, compactsAt: null, compactedAt: null, nextAt: null,
+    wrapsAt: null, wrappedAt: null, idle: null, isRefused: false, isShown: true, relayCount: 0, maxRelays: 0, relayStop: null,
+  }
+  return { ...(k ?? blank), state: 'stopped', nextAt: null, idle: null, isShown: true, relayStop: 'doubt', isDraining: false }
 }
 
 /** After a main-loop turn's end: the next check's time, while it runs, the

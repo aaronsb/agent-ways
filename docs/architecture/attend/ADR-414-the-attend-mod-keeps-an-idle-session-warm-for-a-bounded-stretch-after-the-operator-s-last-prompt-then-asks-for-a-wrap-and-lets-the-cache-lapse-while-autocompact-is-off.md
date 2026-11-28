@@ -130,6 +130,8 @@ Two facts from the source shape the design. The keepwarm sensor wakes at a fixed
    - **The keepalive's verdict** stays ADR-182's. When a wake produces no turn within the margin, or its turn reads a cold cache, the policy stops until the operator's next prompt.
    - **Defaults in time.** With the defaults, the keepalives land 50, 100 and on to 400 minutes after the operator's last turn ends, the wrap at 450 minutes (7 h 30 min), and the cache lapses an hour later. That is ADR-501's eight-hour bound, counted in wakes.
 
+   > Amended 2026-11-27 by ADR-418: after a work boundary whose move is `stop` or `doubt`, the count no longer decides the due points. While the handoff's first line carries the judged wrap id, each due point runs the armed exit instead: it sends the keepalive while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise sends nothing, lets the cache lapse, and attend marks a listening session finished. The exit also runs where item 1 runs no policy because autocompact is on. The operator's next prompt (`attend keepwarm reset`) clears the exit with the count. ADR-417 item 2(c) carries the rules.
+
 5. **Windows.** `windows` is a list of entries, each `<days> <HH:MM>-<HH:MM>`.
    - **Days** are `daily`, one day (`Sat`), or a range (`Mon-Fri`; a range may wrap the week, as `Fri-Mon` does).
    - **Times.** `24:00` closes a day. An end before its start crosses midnight and belongs to the start's day.
@@ -255,3 +257,7 @@ Two facts from the source shape the design. The keepwarm sensor wakes at a fixed
 - **A dedicated handoff frame for a wrap sent to another agent,** drawn by the receiving mod as an instruction to pick the work up. Rejected for now: attend cannot make a sender unforgeable (ADR-406 item 4), so a frame that grants authority to a handoff would grant it to any peer that writes one. The `handoff:` line names the message and leaves the decision to the recipient. A frame can follow once attend has an origin a peer cannot produce.
 - **A separate destination value for each kind of recipient** (`dm` for the operator, `agent` for a session, `channel`). Rejected: `attend message send` already resolves every kind of target from one name, so one `send` value and one `wrap_to` key cover them all.
 - **Working hours as the default window.** Rejected for now: a window that does not match the operator's schedule or timezone would wrap sessions without warning, and the count already bounds a stretch to about eight hours.
+
+## References
+
+- ADR-418: the dated amendment note at item 4, where the armed exit after a boundary's `stop` or `doubt` replaces the count.
