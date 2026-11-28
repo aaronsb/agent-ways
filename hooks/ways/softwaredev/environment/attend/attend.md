@@ -25,6 +25,8 @@ requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bas
 
 **Without the mod there is no awareness.** Where the tool is absent, nothing reaches the session on its own: no message wakes it, nothing is delivered at a turn's end, no sensor reports, and keepwarm does not wake it. Say so plainly. `ways manage mod check attend` says why the mod is missing; it needs Claude Code 2.1.296 or later and a session that loads plugins. The CLI verbs below still send, read and list by hand.
 
+**The boundary tool.** `attend_boundary` is listed in every interactive session with the mod, listening or not. Call it only at the end of `/wrap boundary`, as the wrap skill says, and act on the outcome its result names.
+
 **Starting active is the operator's setting.** A project starts its sessions listening with `mods.attend.listening: active` in its `.claude/ways.yaml`. The operator sets it, in that file or with `ways settings set mods.attend.listening active --project <dir>` from their own shell: under auto mode Claude Code refuses an agent's write to its own project's config. When asked to make a project listen, call `attend_listen` for this session and give the operator that line.
 
 **Your name.** A join's result says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend peer whoami --display` prints it at any time.
@@ -52,11 +54,11 @@ Four tools cover messaging. Pick by intent:
 The CLI does the same, one Bash call each, and reads what no tool covers. Double-quote the message.
 
 ```bash
-attend message send "starting a new topic"            # attend_send; --to and --channel as above
-attend message reply "responding to a peer message"   # attend_reply; --re <id> as above
-attend message inbox                                  # read pending messages by hand
-attend channel join deploy                            # attend_join
-attend peer list                                      # attend_peers
+attend message send "starting a new topic"  # attend_send; --to and --channel as above
+attend message reply "responding to a peer message"  # attend_reply; --re <id> as above
+attend message inbox  # read pending messages by hand
+attend channel join deploy  # attend_join
+attend peer list  # attend_peers
 ```
 
 **You have autonomy to reply — do not ask permission.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat (ADR-501 item 4).
@@ -72,25 +74,25 @@ attend peer list                                      # attend_peers
 ## Keepwarm
 
 ```bash
-attend keepwarm on [WINDOW]                # arm a window (default 6h; also 90m, 2h30m)
-attend keepwarm off                        # disarm
-attend keepwarm status                     # cache state, context size, cold price, window remaining
+attend keepwarm on [WINDOW]  # arm a window (default 6h; also 90m, 2h30m)
+attend keepwarm off  # disarm
+attend keepwarm status  # cache state, context size, cold price, window remaining
 ```
 
-A delivery beginning `keepwarm:` asks for one word and no tools. Do not investigate it. That turn is what keeps the prompt cache warm. Arming is the operator's call. Keepwarm arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic. `mods.attend.keepwarm: off` turns it off. After a judge's `stop` at a work boundary, keepwarm wakes the session only while something is pending or the session holds detail its handoff lacks, and only while that costs less than what would replace it; then the cache lapses, and attend marks the session finished until the operator's next prompt.
+A delivery beginning `keepwarm:` asks for one word and no tools. Do not investigate it. That turn is what keeps the prompt cache warm. Arming is the operator's call. Keepwarm arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic. `mods.attend.keepwarm: off` turns it off. After a `stop` or a `doubt` at a work boundary, keepwarm wakes the session only while something is pending or the session holds detail its handoff lacks, and while that costs less than replacing it; then the cache lapses, and attend marks the session finished until the operator's next prompt.
 
 ## Channels and discovery
 
 A private channel suits long-running coordinated work. `attend_join` enters one; the CLI covers the rest:
 
 ```bash
-attend channel join deploy                         # join a named channel
-attend message send --channel deploy "message"     # post in that channel only
-attend channel add Chaucer-beta deploy             # add a session to a channel; it is told and handed the recent history
-attend channel leave deploy                        # leave
-attend channel scene private                       # leave all channels
-attend channel                                     # all channels and their members, joined ones marked
-attend peer status                                 # sensor hosts, signals, channel state
+attend channel join deploy  # join a named channel
+attend message send --channel deploy "message"  # post in that channel only
+attend channel add Chaucer-beta deploy  # add a session to a channel; it is told and handed the recent history
+attend channel leave deploy  # leave
+attend channel scene private  # leave all channels
+attend channel  # all channels and their members, joined ones marked
+attend peer status  # sensor hosts, signals, channel state
 ```
 
 Direct messages handle most cases, and a named channel suits chatter that several sessions in a project follow. `#open` is for a question any session, in any project, might answer. The chat idiom stops at the verbs: no read receipts, no typing indicators, no edits. Message lifetime is bound to project liveness (ADR-136).

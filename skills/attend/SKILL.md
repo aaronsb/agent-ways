@@ -32,6 +32,8 @@ Attend gives the session the awareness an employee would otherwise have ambientl
 
 **Without the mod there is no awareness.** When `attend_listen` is not listed, the mod is not loaded, and nothing reaches this session on its own: no message wakes it, nothing is delivered at a turn's end, no sensor reports, and keepwarm does not wake it. Say so plainly to the user. The mod needs Claude Code 2.1.296 or later and a session that loads plugins; a `claude -p` run without plugins, an SDK host, or a policy that blocks user plugins leaves it out. `ways manage mod check attend` says why it is missing, and `ways manage mod install attend --commit` installs it; the next session loads it. Until then the CLI verbs below still send, read and list by hand.
 
+**The boundary tool.** `attend_boundary` is listed in every interactive session with the mod, listening or not. Call it only at the end of `/wrap boundary`, as the wrap skill says, and act on the outcome its result names.
+
 **Starting active is the operator's setting.** A project starts its sessions listening with `mods.attend.listening: active` in its `.claude/ways.yaml`. The operator sets it, in that file or with `ways settings set mods.attend.listening active --project <dir>` from their own shell: under auto mode Claude Code refuses an agent's write to its own project's config. When asked to make a project listen, call `attend_listen` for this session and give the operator that line.
 
 **Your name.** A join's result says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend peer whoami --display` prints it at any time.
@@ -125,7 +127,7 @@ attend keepwarm off                  # disarm
 attend keepwarm status               # cache state, context size, cold price, window remaining, cold writes
 ```
 
-A delivery beginning `keepwarm:` asks for one word and no tools. Do not investigate it. The turn it produces is what keeps the prompt cache warm. Arming is the operator's call. Keepwarm arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic. `mods.attend.keepwarm: off` turns it off. After a judge's `stop` at a work boundary, keepwarm wakes the session only while something is pending or the session holds detail its handoff lacks, and only while that costs less than what would replace it; then the cache lapses, and attend marks the session finished until the operator's next prompt.
+A delivery beginning `keepwarm:` asks for one word and no tools. Do not investigate it. The turn it produces is what keeps the prompt cache warm. Arming is the operator's call. Keepwarm arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic. `mods.attend.keepwarm: off` turns it off. After a `stop` or a `doubt` at a work boundary, keepwarm wakes the session only while something is pending or the session holds detail its handoff lacks, and while that costs less than replacing it; then the cache lapses, and attend marks the session finished until the operator's next prompt.
 
 ### Stopping
 
