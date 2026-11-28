@@ -57,6 +57,14 @@ pub const GATE_MARGIN_SECS: u64 = 120;
 pub const TTL_5M_SECS: u64 = 5 * 60;
 /// How long `ways context` may run before its reading counts as unknown.
 pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// The size of a fresh start from the handoff: the median context at the
+/// first edit of 75 sessions that started from one, measured on 2026-11-27.
+/// An armed exit with a sufficient handoff prices its purchase at this many
+/// tokens written at the one-hour rate.
+///
+/// References:
+/// - ADR-418 item 5 and its probe findings: the fresh start is 171k tokens.
+pub const FRESH_START_TOKENS: u64 = 171_000;
 
 // ── Prices ─────────────────────────────────────────────────────
 
@@ -738,6 +746,7 @@ pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, n
         format!("not armed (attend keepwarm on arms it for {})", fmt_duration(DEFAULT_WINDOW_SECS))
     };
     lines.push(format!("keepwarm    {keepwarm}"));
+    lines.extend(policy::armed::card_line(&s, now));
     if let Some(p) = price_of(&s.model) {
         let pings = (p.write_1h / p.read).floor() as u64;
         lines.push(format!(

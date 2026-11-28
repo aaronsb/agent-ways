@@ -34,7 +34,9 @@
 //! - ADR-414: the keepalive policy, which is the idle path here.
 //! - ADR-417: one continuity policy with a relay mode and a fill path.
 //! - ADR-418: the fill path drains from `relay_at_pct` and wraps mid-work
-//!   at `hard_at_pct`.
+//!   at `hard_at_pct`; a `stop` at a boundary arms the exit ([`armed`]).
+
+pub mod armed;
 
 use crate::windows::Windows;
 use crate::{
@@ -241,6 +243,13 @@ pub struct Policy {
     /// - ADR-418 item 2: from the drain point the session starts nothing new.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drained_at: Option<u64>,
+    /// The judgment of the last boundary wrap; a `stop` arms the exit. An
+    /// operator prompt clears it.
+    ///
+    /// References:
+    /// - ADR-418 item 9: the `armed` and `finished` states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit: Option<armed::Exit>,
 }
 
 /// What the last check found of `wrap_skill` in the session's listing.
@@ -373,6 +382,35 @@ pub fn compacted(p: &mut Policy, failed: Option<String>, now: u64) {
         stop_relay(p, "compaction failed", format!("the compaction failed: {why}"));
     }
     p.compact_failed = failed;
+}
+
+/// `attend keepwarm compacted --trigger boundary`: a compaction the
+/// boundary tool started ran, or why it failed. It ends the drain as any
+/// compaction does, and waits for its resume, which counts a relay
+/// ([`boundary_resumed`]). No relay wrap is judged after it.
+///
+/// References:
+/// - ADR-418 item 13: a compaction the agent starts through the tool
+///   counts toward `max_relays` like any other relay.
+pub fn boundary_compacted(p: &mut Policy, failed: Option<String>, now: u64) {
+    if failed.is_none() {
+        p.drained_at = None;
+        p.compacted_at = Some(now);
+    }
+    p.trigger = Some("boundary".into());
+    p.compact_failed = failed;
+}
+
+/// `attend keepwarm resumed --trigger boundary`: the resume after a
+/// boundary compaction went in, which counts one relay. A report with no
+/// boundary compaction behind it, as after an operator prompt, changes
+/// nothing; false then.
+pub fn boundary_resumed(p: &mut Policy, now: u64) -> bool {
+    let compacted = p.trigger.as_deref() == Some("boundary") && p.compacted_at.is_some() && p.compact_failed.is_none();
+    if compacted {
+        resumed(p, now);
+    }
+    compacted
 }
 
 /// `attend keepwarm resumed --failed`: the resume did not go in, which
@@ -659,6 +697,10 @@ pub struct Config {
     /// The context fill the host measured at a turn's end. Not a setting:
     /// the caller fills it.
     pub fill: Option<Fill>,
+    /// What is pending while an exit is armed: threads awaiting a reply,
+    /// and the agents, shells and watchers the host reported. Not a
+    /// setting: the caller fills it.
+    pub pending: armed::Pending,
 }
 
 /// The context fill at a main-loop turn's end (`--fill`, `--window`,
@@ -740,6 +782,7 @@ impl Default for Config {
             max_relays: DEFAULT_MAX_RELAYS,
             session_skills: SessionSkills::NotChecked,
             fill: None,
+            pending: armed::Pending::default(),
         }
     }
 }
@@ -798,6 +841,7 @@ impl Config {
             max_relays: ranged("continuity.max_relays", MAX_RELAYS_RANGE, d.max_relays),
             session_skills: SessionSkills::NotChecked,
             fill: None,
+            pending: armed::Pending::default(),
         }
     }
 
@@ -1118,7 +1162,7 @@ pub fn route_notes(cfg: &Config, site: &Site, now: u64) -> Vec<String> {
     notes
 }
 
-/// `none`, `keepalive`, `drain`, `wrap` or `compact`.
+/// `none`, `keepalive`, `drain`, `wrap`, `compact` or `finish`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Action {
@@ -1135,6 +1179,13 @@ pub enum Action {
     /// relay mode the handoff's instructions, and `resume` the turn to
     /// submit after it.
     Compact,
+    /// An armed exit's tick sends no ping: the cache lapses, and attend has
+    /// marked the session finished.
+    ///
+    /// References:
+    /// - ADR-418 item 12: the first tick with no reason to stay lets the
+    ///   cache lapse and marks the session finished.
+    Finish,
 }
 
 /// Where the wrap's reply goes, as the mod routes it (ADR-414 item 6).
@@ -1180,8 +1231,8 @@ pub struct Decision {
     /// Whether the policy runs in this session; false is ADR-182's armed
     /// windows alone.
     pub policy: bool,
-    /// `running`, `wrapped`, `compacted`, `stopped`, or `off` where the
-    /// policy does not run.
+    /// `running`, `wrapped`, `compacted`, `stopped`, `armed`, `finished`,
+    /// or `off` where the policy does not run.
     pub state: &'static str,
     pub wraps_at_hm: Option<String>,
     pub wrapped_at_hm: Option<String>,
@@ -1222,6 +1273,9 @@ pub struct Decision {
     pub send_handoff: bool,
     /// The id of the wrap sent or judged.
     pub wrap_id: Option<String>,
+    /// The boundary's judgment: armed or finished, the rent paid, the
+    /// purchase price and the pings left.
+    pub exit: Option<armed::ExitView>,
 }
 
 impl Decision {
@@ -1268,6 +1322,7 @@ impl Decision {
             relay_stop: p.relay_stop.clone(),
             send_handoff: false,
             wrap_id: p.wrap_id.clone(),
+            exit: None,
         }
     }
 }
@@ -1716,6 +1771,7 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
     if let Some(l) = cfg.lines(gate) {
         (d.relay_at_tokens, d.drain_at_tokens, d.hard_at_tokens) = (Some(l.drain_at), Some(l.drain_at), Some(l.hard_at));
     }
+    d.exit = armed::view(state);
     out.changed |= d.action != Action::None;
     (out, d)
 }
@@ -1820,6 +1876,15 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
             Some(t) => t + VERDICT_SECS + 1,
             None => (state.last_seen_at + PING_AFTER_SECS).max(now + 1).min(state.deadline),
         });
+        return (out, d);
+    }
+    // An armed exit decides its ticks by the ski-rental bound while the
+    // handoff carries its wrap id; a stale handoff pings as today.
+    //
+    // References:
+    // - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
+    //   armed exit.
+    if let Some(d) = armed::judge(state, reading, cfg, site, now) {
         return (out, d);
     }
     if let Some(why) = after_wrap_ends(cfg, &p) {

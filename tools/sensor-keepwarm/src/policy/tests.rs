@@ -27,20 +27,27 @@ struct Session {
 
 impl Session {
     fn new(at: u64, ctx: u64) -> Self {
-        let mut s = Session { tail: vec![entry(at, ctx, 500)], state: State::default() };
+        Session::on("claude-opus-5", at, ctx)
+    }
+
+    /// A session on `model` whose first request at `at` reads `ctx` tokens.
+    fn on(model: &str, at: u64, ctx: u64) -> Self {
+        let first = UsageEntry { model: model.into(), ..entry(at, ctx, 500) };
+        let mut s = Session { tail: vec![first], state: State::default() };
         s.state.step(&s.reading(), None, at);
         s
     }
 
     fn reading(&self) -> Reading {
         let tokens_used = self.tail.last().map(|e| e.context()).unwrap_or(0);
-        Reading { tokens_used, model: "claude-opus-5".into(), method: "api".into(), usage_tail: self.tail.clone() }
+        let model = self.tail.last().map_or_else(|| "claude-opus-5".to_string(), |e| e.model.clone());
+        Reading { tokens_used, model, method: "api".into(), usage_tail: self.tail.clone() }
     }
 
-    /// A main-loop request at `at`, warm.
+    /// A main-loop request at `at`, warm, on the model of the last one.
     fn turn(&mut self, at: u64) {
-        let ctx = self.tail.last().map(|e| e.cache_read).unwrap_or(200_000);
-        self.tail.push(entry(at, ctx, 300));
+        let last = self.tail.last().cloned().unwrap_or_else(|| entry(at, 200_000, 0));
+        self.tail.push(UsageEntry { model: last.model, ..entry(at, last.cache_read, 300) });
     }
 
     fn check(&mut self, cfg: &Config, gate: Gate, now: u64) -> Decision {
@@ -1029,5 +1036,6 @@ fn the_card_follows_the_stretch_after_the_wrap_to_the_compaction() {
     assert!(lines[0].ends_with(" · the compaction at 05:00 failed: a turn was running"), "{}", lines[0]);
 }
 
+mod armed;
 mod drain;
 mod relay;
