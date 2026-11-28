@@ -9,13 +9,15 @@
 //! `/compact <focus>`, or the attend mod's relay compaction), the hook prints
 //! nothing, so the handoff is not given twice. Otherwise it prints the
 //! repository's handoff as instructions when the handoff is fresh, and the
-//! wrap skill's handoff outline when it is not.
+//! wrap skill's handoff outline when it is not. The outline names the
+//! payload's session in its RESUME line.
 //!
 //! The hook always exits 0 and never blocks: a block during context-limit
 //! recovery fails the request.
 //!
 //! References:
 //! - ADR-417 item 3: a PreCompact hook steers each compaction with the wrap's handoff.
+//! - ADR-418 items 11 and 13: the handoff names its session, and each decision says what it blocks, its lean and whether the lean can be undone.
 
 use std::ffi::OsStr;
 use std::path::Path;
@@ -25,6 +27,28 @@ use ways_core::handoff;
 
 /// How long attend has to name the session's last wrap id.
 const ATTEND_WAIT: Duration = Duration::from_secs(3);
+
+/// The wrap skill's handoff outline (its Step 3 sections), for a compaction
+/// with no fresh handoff: the summary is structured even when no wrap ran.
+/// `{session}` stands for the session id.
+const OUTLINE: &str = "Summarize this session as a continuation prompt a stranger could resume from, in these sections:
+- The project, its path and purpose, and how to build and test it.
+- RESUME: `claude --resume {session}`, and what only the transcript holds that this summary leaves out.
+- LANDED: what shipped this session, with PR numbers or commit refs.
+- STATE, IN FLIGHT: anything parked, such as a branch, uncommitted files, and why.
+- INVARIANTS / GOTCHAS: what git does not show, such as ordering rules and environment quirks.
+- TASKS: every task with its number, status, subject and full description.
+- DO NEXT: the immediate next step, then one to three alternatives, each specific enough to start.
+- DECISIONS: each choice left to the operator, one line each, as `N. <question> — blocks: <task ids | none> — lean: <the lean> — reversible: <yes | no>`.
+- KEY FILES / BRANCHES: the handful that matter, with paths.
+If a /goal is active, restate its condition at the top.";
+
+/// The outline naming `session`, or the placeholder `<session id>` where
+/// `session` is empty or not an id's shape (letters, digits and `-`).
+fn outline(session: &str) -> String {
+    let is_id = (1..=64).contains(&session.len()) && session.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    OUTLINE.replace("{session}", if is_id { session } else { "<session id>" })
+}
 
 /// Read the payload on stdin and print the instructions. Every failure ends
 /// in the outline or in nothing, never in an error.
@@ -48,13 +72,14 @@ pub(super) fn respond(raw: &str, attend: &OsStr, today: &dyn Fn() -> String) -> 
     if !text_at("custom_instructions").trim().is_empty() {
         return String::new();
     }
+    let fallback = || outline(text_at("session_id"));
     let cwd = text_at("cwd");
     if cwd.is_empty() {
-        return handoff::OUTLINE.to_string();
+        return fallback();
     }
-    let Some(root) = handoff::repo_root(Path::new(cwd)) else { return handoff::OUTLINE.to_string() };
+    let Some(root) = handoff::repo_root(Path::new(cwd)) else { return fallback() };
     let path = handoff::path(&root);
-    let Ok(text) = std::fs::read_to_string(&path) else { return handoff::OUTLINE.to_string() };
+    let Ok(text) = std::fs::read_to_string(&path) else { return fallback() };
     // The id attend recorded decides; where attend has none, or names
     // another wrap than the file's (one it did not hear of, such as a wrap
     // in a session without the mod), today's date and HEAD decide.
@@ -63,7 +88,7 @@ pub(super) fn respond(raw: &str, attend: &OsStr, today: &dyn Fn() -> String) -> 
     if fresh {
         handoff::instructions(&text, &path)
     } else {
-        handoff::OUTLINE.to_string()
+        fallback()
     }
 }
 
@@ -102,6 +127,7 @@ mod tests {
     use std::path::PathBuf;
 
     const ID: &str = "20261126T2140Z-3f9a1c2e";
+    const SESSION: &str = "3f9a1c2e-0000-0000-0000-000000000000";
     const TODAY: &str = "2026-11-26";
 
     fn today() -> String {
@@ -147,7 +173,7 @@ mod tests {
 
     fn payload(cwd: &Path, custom: Option<&str>) -> String {
         serde_json::json!({
-            "session_id": "3f9a1c2e-0000-0000-0000-000000000000",
+            "session_id": SESSION,
             "hook_event_name": "PreCompact",
             "trigger": "auto",
             "custom_instructions": custom,
@@ -183,7 +209,7 @@ mod tests {
         let (top, root, head) = repo("staleid");
         write_handoff(&root, &format!("2026-11-25 {head} wrap=20261126T2100Z-3f9a1c2e"));
         let attend = stub_attend(&top, ID, 0);
-        assert_eq!(respond(&payload(&root, None), attend.as_os_str(), &today), handoff::OUTLINE);
+        assert_eq!(respond(&payload(&root, None), attend.as_os_str(), &today), outline(SESSION));
     }
 
     /// The finding's sequence: attend recorded relay wrap A, then a `/wrap
@@ -212,25 +238,44 @@ mod tests {
         assert_eq!(respond(&payload(&root, None), empty.as_os_str(), &today), handoff::instructions(&text, &path));
         // Another day fails the fallback.
         let tomorrow = || "2026-11-27".to_string();
-        assert_eq!(respond(&payload(&root, None), missing.as_os_str(), &tomorrow), handoff::OUTLINE);
+        assert_eq!(respond(&payload(&root, None), missing.as_os_str(), &tomorrow), outline(SESSION));
     }
 
     #[test]
     fn no_handoff_gives_the_outline() {
         let (top, root, _) = repo("nofile");
         let attend = stub_attend(&top, ID, 0);
-        assert_eq!(respond(&payload(&root, None), attend.as_os_str(), &today), handoff::OUTLINE);
+        assert_eq!(respond(&payload(&root, None), attend.as_os_str(), &today), outline(SESSION));
+    }
+
+    /// The outline follows the wrap skill's Step 3: a RESUME line naming
+    /// the session from the payload, and DECISIONS lines that say what each
+    /// blocks, the lean, and whether the lean can be undone.
+    #[test]
+    fn the_outline_carries_the_resume_line_and_the_decisions_form() {
+        let (top, root, _) = repo("outline");
+        let attend = stub_attend(&top, ID, 0);
+        let out = respond(&payload(&root, None), attend.as_os_str(), &today);
+        assert!(out.contains(&format!("- RESUME: `claude --resume {SESSION}`, and what only the transcript holds")), "{out}");
+        assert!(out.contains("`N. <question> — blocks: <task ids | none> — lean: <the lean> — reversible: <yes | no>`"), "{out}");
+        assert!(out.find("- RESUME:") < out.find("- LANDED:"), "RESUME comes before LANDED: {out}");
+        // No session id in the payload: the outline names the placeholder.
+        let bare = serde_json::json!({ "hook_event_name": "PreCompact", "cwd": root }).to_string();
+        assert!(respond(&bare, attend.as_os_str(), &today).contains("`claude --resume <session id>`"));
+        // A session id that is not an id's shape is not copied in.
+        let odd = serde_json::json!({ "session_id": "x`; rm -rf /", "cwd": root }).to_string();
+        assert!(respond(&odd, attend.as_os_str(), &today).contains("`claude --resume <session id>`"));
     }
 
     #[test]
     fn bad_input_gives_the_outline() {
         let (top, _, _) = repo("bad");
         let attend = stub_attend(&top, ID, 0);
-        assert_eq!(respond("", attend.as_os_str(), &today), handoff::OUTLINE);
-        assert_eq!(respond("{not json", attend.as_os_str(), &today), handoff::OUTLINE);
+        assert_eq!(respond("", attend.as_os_str(), &today), outline(""));
+        assert_eq!(respond("{not json", attend.as_os_str(), &today), outline(""));
         let outside = top.join("not-a-repo");
         std::fs::create_dir_all(&outside).unwrap();
-        assert_eq!(respond(&payload(&outside, None), attend.as_os_str(), &today), handoff::OUTLINE);
+        assert_eq!(respond(&payload(&outside, None), attend.as_os_str(), &today), outline(SESSION));
     }
 
     #[test]
