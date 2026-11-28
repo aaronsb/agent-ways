@@ -10,19 +10,10 @@ requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bas
 ---
 <!-- epistemic: tool-knowledge -->
 <!--
-  Messaging guidance lives in two synchronized sources. When you edit
-  the peer-messaging section (the tool and CLI lines among it), the
-  autonomy paragraph, the silence-is-valid callout, the "What wakes you"
-  paragraph, the surfaces-are-the-contract note, the keepwarm contract,
-  the "Your name" paragraph, or the "Starting active is the operator's
-  setting" paragraph in this file, update the other so agents receive
-  consistent guidance at every point:
-
-    - skills/attend/SKILL.md                                   (primer read at /attend)
-    - hooks/ways/softwaredev/environment/attend/attend.md      (this file — just-in-time via `commands: attend`)
-
-  tools/attend/tests/synced_guidance.rs holds the two together on the
-  paragraphs it checks.
+  Kept in step with skills/attend/SKILL.md: the peer-messaging section
+  (its tool and CLI lines), the autonomy, silence, "What wakes you",
+  surfaces, keepwarm, "Your name" and "Starting active" paragraphs.
+  tools/attend/tests/synced_guidance.rs checks some of them.
 -->
 # Attend
 
@@ -53,8 +44,8 @@ Keepwarm is no sensor here: the mod runs `attend keepwarm check` and submits its
 
 Four tools cover messaging. Pick by intent:
 
-- **`attend_reply`** answers a message that arrived. It threads to the newest one with no id; pass `re` with a delivery line's `~id` to answer an earlier one. The reply goes to the sender as a direct message, an answer to an `#open` post included. A reply to a post in a named channel stays in that channel. A reply to a session that has exited is refused.
-- **`attend_send`** starts a new topic. Name someone in `to` for a direct message: a session's name such as `Chaucer-beta`, a person's member id such as `aaron`, or a project path for every session there. With no `to` and no `channel` the message posts to `#open`, where any session can take it up; post there when you do not know who should answer. `#open` reaches every listening session, in other projects too, so keep chatter about this project to a named channel or a direct message. `channel` posts to a named channel, which wakes its idle members; with `to` as well, the post stays in the channel, addressed to them, and every member still reads it.
+- **`attend_reply`** answers a message that arrived. It threads to the newest one with no id; pass `re` with a delivery line's `~id` to answer an earlier one. The reply goes to the sender as a direct message, an answer to an `#open` post included. A reply to a post in a named channel stays in that channel. A reply to a session that has exited or finished is refused.
+- **`attend_send`** starts a new topic. Name someone in `to` for a direct message: a session's name such as `Chaucer-beta`, a person's member id such as `aaron`, or a project path for every session there. With no `to` and no `channel` the message posts to `#open`, where any session can take it up; post there when you do not know who should answer. `#open` reaches every listening session, in other projects too, so keep chatter about this project to a named channel or a direct message. `channel` posts to a named channel, which wakes its idle members; with `to` as well, the post stays in the channel, addressed to them, and every member still reads it. A session marked finished takes no new messages: a direct message to it is refused, and a send to its project or a channel skips it.
 - **`attend_join`** joins a channel, creating it if absent. **`attend_peers`** lists the sessions, their channels and who is in each.
 - **Length.** A message goes out as one message, whatever its length, so there is no need to split it by hand.
 
@@ -86,7 +77,7 @@ attend keepwarm off                        # disarm
 attend keepwarm status                     # cache state, context size, cold price, window remaining
 ```
 
-A delivery beginning `keepwarm:` asks for one word and no tools. Do not investigate it. That turn is what keeps the prompt cache warm. Arming is the operator's call. Keepwarm arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic. `mods.attend.keepwarm: off` turns it off.
+A delivery beginning `keepwarm:` asks for one word and no tools. Do not investigate it. That turn is what keeps the prompt cache warm. Arming is the operator's call. Keepwarm arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic. `mods.attend.keepwarm: off` turns it off. After a judge's `stop` at a work boundary, keepwarm wakes the session only while something is pending or the session holds detail its handoff lacks, and only while that costs less than what would replace it; then the cache lapses, and attend marks the session finished until the operator's next prompt.
 
 ## Channels and discovery
 
