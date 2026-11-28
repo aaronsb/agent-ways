@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! The continuance judge's question and its closed verdict (ADR-418 §10).
+//! The continuance judge's question and its closed verdict.
 //!
 //! At a work boundary the working agent writes a handoff and asks whether
 //! the session stops, compacts or continues. A clean model call decides,
@@ -93,9 +93,11 @@ pub struct Relays {
     pub max: u32,
 }
 
-/// The conditions the mod measures for the brief (ADR-418 §10, the
-/// conditions row). Every field is required, as a value or `"unknown"`; a
-/// field this schema does not know is ignored.
+/// The conditions the mod measures for the brief. Every field is required,
+/// as a value or `"unknown"`; a field this schema does not know is ignored.
+///
+/// References:
+/// - ADR-418 §10: the conditions row of the brief table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Conditions {
     /// The context fill, in percent of the window.

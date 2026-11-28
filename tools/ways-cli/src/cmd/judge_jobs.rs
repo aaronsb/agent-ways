@@ -20,9 +20,8 @@
 //! - A session id that is not plain, or stdin that is not an answer, exits 2;
 //!   a file that cannot be written exits 1.
 //!
-//! `continuance` is the continuance judge's verb (ADR-418 §10), which the
-//! attend mod runs at a work boundary; [`crate::cmd::judge_continuance`]
-//! has its output.
+//! `continuance` is the continuance judge's verb, which the attend mod runs
+//! at a work boundary; [`crate::cmd::judge_continuance`] has its output.
 
 use std::io::Read;
 use std::path::PathBuf;

@@ -32,7 +32,7 @@ pub struct Envelope {
 pub enum Request {
     /// Judge every candidate against the turns.
     Judge(JudgeRequest),
-    /// Judge whether a session stops, compacts or continues (ADR-418 §10).
+    /// Judge whether a session stops, compacts or continues at a work boundary.
     /// An agent built before it answers [`Reply::Error`], which the caller
     /// takes as a fallback.
     Continuance(Box<ContinuanceRequest>),

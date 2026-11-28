@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
-//! `ways judge continuance` end to end (ADR-418 §10): the built binary, an
-//! isolated HOME and XDG tree, and on a key engine a stub agent on the
-//! socket in place of the ways agent.
+//! `ways judge continuance` end to end: the built binary, an isolated HOME
+//! and XDG tree, and on a key engine a stub agent on the socket in place of
+//! the ways agent.
+//!
+//! References:
+//! - ADR-418 §10: the continuance request through the judge interface.
 #![cfg(unix)]
 
 use std::io::{BufRead, BufReader, Write};

@@ -378,11 +378,14 @@ impl State {
         Ok(Prepared { req, settings, key, prompt, remaining, _slot })
     }
 
-    /// Answers a continuance request (ADR-418 §10) with the continuance
-    /// judgement of the engine the session resolved to, read from the layer
-    /// at `path`. `gate.mode` governs disclosure only, so it does not stop
-    /// this call. The disclosure statistics do not count it: its deadline is
-    /// tens of seconds, and its latency would swamp theirs.
+    /// Answers a continuance request with the continuance judgement of the
+    /// engine the session resolved to, read from the layer at `path`.
+    /// `gate.mode` governs disclosure only, so it does not stop this call.
+    /// The disclosure statistics do not count it: its deadline is tens of
+    /// seconds, and its latency would swamp theirs.
+    ///
+    /// References:
+    /// - ADR-418 §10: on a key engine the ways agent makes the call.
     fn continuance(&self, req: &ContinuanceRequest, path: &Path) -> Reply {
         let begun = Instant::now();
         let outcome = self.prepare_continuance(req, path, begun).map_err(|reason| (reason, None)).and_then(|p| p.call(self));

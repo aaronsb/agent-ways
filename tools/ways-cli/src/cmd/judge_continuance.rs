@@ -3,7 +3,7 @@
 // From agent-ways: https://github.com/aaronsb/agent-ways
 
 //! `ways judge continuance`: the continuance request through the judge
-//! interface (ADR-418 §10). The attend mod runs it at a work boundary, with
+//! interface. The attend mod runs it at a work boundary, with
 //! the handoff's path and the measured conditions on stdin.
 //!
 //! The verb resolves the session's engine as the gate does: the engine the

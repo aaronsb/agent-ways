@@ -370,8 +370,8 @@ fn complete_request(api: Api, model: &str, system: &str, prompt: &str, max_token
     (url, body)
 }
 
-/// One text completion with no tools: the continuance judge's call
-/// (ADR-418 §10). Returns the reply's text, its text blocks joined, with the
+/// One text completion with no tools: the continuance judge's call.
+/// Returns the reply's text, its text blocks joined, with the
 /// usage the provider reported. A failure carries the usage as
 /// [`judge`]'s does.
 #[allow(clippy::too_many_arguments)]
