@@ -25,11 +25,16 @@ const MAX_REPLY_BYTES: u64 = 1024 * 1024;
 /// How long the policy check reuses its read of the mods.attend settings,
 /// unless a settings file it reads from changed since.
 const SETTINGS_KEPT_SECS: u64 = 300;
+/// How long these verbs give `ways settings` to answer.
+const SETTINGS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
     let ident = attend_presence::session::identity();
     if let KeepwarmCmd::Check(args) = &sub {
         return check(&ident, args);
+    }
+    if let KeepwarmCmd::Brief(args) = &sub {
+        return super::brief::cmd_brief(&ident, args);
     }
     if !ident.session_resolved {
         eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
@@ -74,7 +79,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             update_policy(&dir, sid, policy::stop_by_operator);
             println!("keepwarm is not armed");
         }
-        KeepwarmCmd::Check(_) => unreachable!("handled above"),
+        KeepwarmCmd::Check(_) | KeepwarmCmd::Brief(_) => unreachable!("handled above"),
         KeepwarmCmd::Reset { at } => {
             let at = at.filter(|t| *t <= now).unwrap_or(now);
             if !update_policy(&dir, sid, |p| policy::reset(p, at)) {
@@ -120,7 +125,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             let id = wrap.trim();
             // With keepwarm off the check judges nothing, so no tick runs
             // the exit.
-            let settings = policy_settings(&dir, sid, &ident.origin_path, now);
+            let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
             if verdict == Verdict::Stop && keepwarm_setting_off(settings.as_deref()) {
                 println!("exit armed for wrap {id}, but mods.attend.keepwarm is off: no tick runs, so the exit does nothing while it is off");
             } else if verdict == Verdict::Stop {
@@ -245,7 +250,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             let is_mod_host = attend_presence::enrollment::host(sid) == Some(attend_presence::enrollment::Host::Mod);
             let ran_policy = ledger.as_ref().is_some_and(|l| l.policy.gate.is_some());
             if is_mod_host || ran_policy {
-                let settings = mod_settings(&ident.origin_path);
+                let settings = mod_settings(&ident.origin_path, SETTINGS_TIMEOUT);
                 if is_mod_host {
                     println!("{}", mod_setting_line(settings.as_deref()));
                 }
@@ -315,8 +320,8 @@ fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> bool) -> Op
 
 /// The effective `mods.attend` entry for `project`, as the attend mod reads
 /// it: `ways settings list mods.attend --json --effective`. `None` when ways
-/// cannot answer within five seconds.
-fn mod_settings(project: &str) -> Option<String> {
+/// cannot answer within `timeout`, in which case it is killed.
+fn mod_settings(project: &str, timeout: std::time::Duration) -> Option<String> {
     use std::io::Read;
     let mut child = std::process::Command::new("ways")
         .args(["settings", "list", "mods.attend", "--json", "--effective", "--project", project])
@@ -325,7 +330,7 @@ fn mod_settings(project: &str) -> Option<String> {
         .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -429,8 +434,9 @@ fn read_handoff_at(path: PathBuf) -> Option<Handoff> {
 /// The mods.attend settings for the policy check: a read kept beside the
 /// ledger for a few minutes, so a listening session that asks every minute
 /// does not run ways every minute, unless the user's or the project's
-/// settings file changed since. `None` when ways cannot answer.
-fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<String> {
+/// settings file changed since. `None` when ways cannot answer within
+/// `timeout`.
+pub(super) fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64, timeout: std::time::Duration) -> Option<String> {
     let path = dir.join(format!("{sid}.settings.json"));
     let stamps = settings_stamps(project);
     if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
@@ -442,7 +448,7 @@ fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<Str
             }
         }
     }
-    let doc = mod_settings(project)?;
+    let doc = mod_settings(project, timeout)?;
     let kept = serde_json::json!({ "at": now, "project": project, "files": stamps, "doc": doc });
     std::fs::create_dir_all(dir).ok();
     std::fs::write(&path, kept.to_string()).ok();
@@ -526,7 +532,7 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     let sid = ident.session_id.as_str();
     let now = sensor_trait::epoch_secs();
     let dir = keepwarm_dir();
-    let settings = policy_settings(&dir, sid, &ident.origin_path, now);
+    let settings = policy_settings(&dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
     if keepwarm_setting_off(settings.as_deref()) {
         return quiet("mods.attend.keepwarm is off", None);
     }

@@ -53,3 +53,8 @@ sensor-processes = { path = "../sensor-processes", optional = true }
 # build (ADR-406 item 2). The feature gates only the sensor and its verbs.
 sensor-keepwarm = { path = "../sensor-keepwarm" }
 
+[dev-dependencies]
+# The tests parse `attend keepwarm brief` as the judge's own `Conditions`
+# (ADR-418 §10). The binary does not link it.
+ways-agent-core = { path = "../ways-agent-core" }
+

@@ -836,6 +836,25 @@ pub enum KeepwarmCmd {
         #[arg(long, value_name = "ID")]
         record: Option<String>,
     },
+    /// Print the conditions the continuance judge reads at a work boundary,
+    /// as one JSON object: the fill and the price of a ping, the minutes
+    /// since the operator's prompt and the relay count, the messages
+    /// awaiting a reply, git status, the commits and merges since the
+    /// handoff's head, and the branch's open PRs with their checks. The mod
+    /// passes what only it sees as a JSON object on stdin: agents_in_flight,
+    /// tasks_open, tasks_in_progress and tasks_closed_since_wrap as lists of
+    /// lines, and window in tokens. The probes have about 2 s; one that
+    /// fails or runs past that prints "unknown". Exits 0
+    Brief(KeepwarmBriefArgs),
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub struct KeepwarmBriefArgs {
+    /// The handoff whose first line, <date> <short HEAD> wrap=<ID>, names
+    /// the head the commits and merges are counted from (default
+    /// .claude/handoff.wrap.md at the repository root)
+    #[arg(long, value_name = "PATH")]
+    pub handoff: Option<std::path::PathBuf>,
 }
 
 #[derive(Args, Clone, Debug, Default)]

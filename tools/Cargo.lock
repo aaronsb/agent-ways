@@ -192,6 +192,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "ways-agent-core",
  "ways-core",
 ]
 
