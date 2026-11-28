@@ -5,8 +5,10 @@
 use attend_presence::session::mark_sensor_child;
 use sensor_trait::{Focus, Sensor};
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::process::Command;
 use std::time::Duration;
+use ways_core::proc::{stdout_within, Outcome};
 
 /// Watches git state in the working directory.
 /// Tracks uncommitted changes, branch divergence, and remote updates.
@@ -239,28 +241,35 @@ fn dirty_paths(porcelain: &str) -> HashSet<String> {
         .collect()
 }
 
+/// How long one git call may run before it is killed and taken as no
+/// reading. A poll makes up to four calls in turn, so a git that hangs on
+/// every one costs the poll 8 seconds, under the 10-second floor between
+/// polls ([`GitSensor::min_interval`]). A healthy call takes milliseconds.
+const GIT_WAIT: Duration = Duration::from_secs(2);
+
 /// Run a git command and return its stdout without the trailing newline,
-/// or None on failure or empty output. The start is kept as printed:
-/// porcelain status opens with a space for a change only in the work tree.
+/// or None on failure, empty output, or a run past [`GIT_WAIT`]. The start
+/// is kept as printed: porcelain status opens with a space for a change
+/// only in the work tree.
 fn git_cmd(dir: &str, args: &[&str]) -> Option<String> {
-    let output = mark_sensor_child(&mut Command::new("git"))
+    git_cmd_by(OsStr::new("git"), dir, args, GIT_WAIT)
+}
+
+/// `program -C dir args`, killed with what it started at `limit`. It is
+/// marked as the sensor host's child, takes no optional locks, and never
+/// prompts for credentials, so it neither holds the index lock of a
+/// repository another git is using nor waits on a terminal.
+fn git_cmd_by(program: &OsStr, dir: &str, args: &[&str], limit: Duration) -> Option<String> {
+    let mut cmd = Command::new(program);
+    mark_sensor_child(&mut cmd)
         .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
         .arg("-C")
         .arg(dir)
-        .args(args)
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).trim_end().to_string();
-    if stdout.trim_start().is_empty() {
-        None
-    } else {
-        Some(stdout)
-    }
+        .args(args);
+    let Outcome::Stdout(out) = stdout_within(cmd, limit) else { return None };
+    let stdout = out.trim_end();
+    (!stdout.trim_start().is_empty()).then(|| stdout.to_string())
 }
 
 #[cfg(test)]
@@ -304,5 +313,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(out, " M tools.rs");
         assert_eq!(dirty_paths(&out), set(&["tools.rs"]));
+    }
+
+    /// A directory of its own under the system temp dir, holding a fake
+    /// `git` script with `body`, and the script's path.
+    #[cfg(unix)]
+    fn fake_git(tag: &str, body: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("attend-git-sensor-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = dir.join("git");
+        std::fs::write(&git, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, git)
+    }
+
+    /// A git that hangs gives no reading, and returns near the limit.
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_git_gives_no_reading_within_the_limit() {
+        let (dir, git) = fake_git("hung", "sleep 10\necho main");
+        let started = std::time::Instant::now();
+        let out = git_cmd_by(git.as_os_str(), dir.to_str().unwrap(), &["rev-parse", "HEAD"], Duration::from_millis(300));
+        let took = started.elapsed();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(out, None, "a timeout is no reading");
+        assert!(took < Duration::from_secs(3), "the call returns near its limit, took {took:?}");
+    }
+
+    /// A git that answers is taken with its leading space, and one that
+    /// fails or prints only whitespace gives no reading. The child takes
+    /// no optional locks and never prompts.
+    #[cfg(unix)]
+    #[test]
+    fn a_git_that_answers_fails_or_prints_nothing_keeps_its_meaning() {
+        let (dir, git) = fake_git("answers", r#"printf ' M a.rs\n%s %s\n' "$GIT_OPTIONAL_LOCKS" "$GIT_TERMINAL_PROMPT""#);
+        let d = dir.to_str().unwrap();
+        assert_eq!(git_cmd_by(git.as_os_str(), d, &["status", "--porcelain"], GIT_WAIT).as_deref(), Some(" M a.rs\n0 0"));
+        let (failing, failing_git) = fake_git("fails", "echo main\nexit 128");
+        assert_eq!(git_cmd_by(failing_git.as_os_str(), d, &["status"], GIT_WAIT), None);
+        let (blank, blank_git) = fake_git("blank", r"printf '  \n'");
+        assert_eq!(git_cmd_by(blank_git.as_os_str(), d, &["status"], GIT_WAIT), None);
+        for d in [dir, failing, blank] {
+            std::fs::remove_dir_all(&d).ok();
+        }
     }
 }
