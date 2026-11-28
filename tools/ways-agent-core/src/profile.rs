@@ -495,60 +495,18 @@ impl UserLayer {
                 return Ok((layer, vec![*f]));
             }
         };
-        let check = |doc: &serde_yaml::Value| {
-            let checked = load::check(
-                &crate::settings::SCHEMA,
-                crate::settings::FILE,
-                agent_settings::LayerScope::User,
-                doc,
-                Some(crate::settings::GATE_SECTIONS),
-            );
-            let findings = if checked.is_clean() { Vec::new() } else { checked.findings(None, path, text) };
-            (checked.accepted, findings)
-        };
-        let (doc, judgements) = split_judgements(doc);
-        let (mut accepted, mut findings) = check(&doc);
-        for (name, v) in judgements {
-            let mut one = serde_yaml::Mapping::new();
-            one.insert("judgements".into(), v.clone());
-            let (_, bad) = check(&serde_yaml::Value::Mapping(serde_yaml::Mapping::from_iter([(
-                "profiles".into(),
-                serde_yaml::Value::Mapping(serde_yaml::Mapping::from_iter([(name.as_str().into(), serde_yaml::Value::Mapping(one))])),
-            )])));
-            if !bad.is_empty() {
-                let unit = format!("gate.profiles.{name}.judgements");
-                findings.extend(bad.into_iter().map(|f| agent_settings::Finding { unit: Some(unit.clone()), ..f }));
-                continue;
-            }
-            // The entry fell back or held nothing else: the judgements load alone.
-            let profiles = accepted.entry("profiles".into()).or_insert_with(|| serde_yaml::Mapping::new().into());
-            if let Some(m) = profiles.as_mapping_mut() {
-                let entry = m.entry(name.as_str().into()).or_insert_with(|| serde_yaml::Mapping::new().into());
-                if let Some(e) = entry.as_mapping_mut() {
-                    e.insert("judgements".into(), v);
-                }
-            }
-        }
-        let layer = serde_yaml::from_value(serde_yaml::Value::Mapping(accepted))
+        let checked = load::check(
+            &crate::settings::SCHEMA,
+            crate::settings::FILE,
+            agent_settings::LayerScope::User,
+            &doc,
+            Some(crate::settings::GATE_SECTIONS),
+        );
+        let findings = if checked.is_clean() { Vec::new() } else { checked.findings(None, path, text) };
+        let layer = serde_yaml::from_value(serde_yaml::Value::Mapping(checked.accepted))
             .with_context(|| format!("parsing {}", path.map(|p| p.display().to_string()).unwrap_or_default()))?;
         Ok((layer, findings))
     }
-}
-
-/// `doc` with each profile's `judgements` taken out, and those taken out by
-/// profile name. [`UserLayer::parse`] checks each profile's judgements as a
-/// unit of their own, so a bad judgement patch falls back alone and the
-/// profile's disclosure settings load as written.
-fn split_judgements(mut doc: serde_yaml::Value) -> (serde_yaml::Value, Vec<(String, serde_yaml::Value)>) {
-    let mut out = Vec::new();
-    let Some(profiles) = doc.get_mut("profiles").and_then(serde_yaml::Value::as_mapping_mut) else { return (doc, out) };
-    for (k, v) in profiles.iter_mut() {
-        let (Some(name), Some(entry)) = (k.as_str(), v.as_mapping_mut()) else { continue };
-        if let Some(j) = entry.remove("judgements") {
-            out.push((name.to_string(), j));
-        }
-    }
-    (doc, out)
 }
 
 /// The finding that turns the relevance gate off, if any: agent.yaml does

@@ -22,11 +22,11 @@ pub const GATE_SECTIONS: &[&str] = &["gate", "gate.mode", "gate.profiles", "gate
 /// operator switched off back on; profiles fall back one profile at a time,
 /// so a typo in one never drops another's tuning.
 const SECTIONS: &[SectionSpec] = &[
-    SectionSpec { name: "gate", file: FILE, top: &["engine"], per_entry: false, entry: None, repair: None, columns: None, doc: "The engine profile the relevance gate uses." },
-    SectionSpec { name: "gate.mode", file: FILE, top: &["mode"], per_entry: false, entry: None, repair: None, columns: None, doc: "What the gate does with a verdict: enforce, shadow or off." },
-    SectionSpec { name: "gate.profiles", file: FILE, top: &["profiles"], per_entry: true, entry: None, repair: None, columns: None, doc: "Changes to the shipped engine profiles, and profiles of your own. Each profile falls back alone." },
-    SectionSpec { name: "gate.keys", file: "keys", top: &[], per_entry: false, entry: None, repair: None, columns: Some(("provider", "key")), doc: "Provider API keys, shown present or absent. `ways agent key` adds, rotates, checks and removes them." },
-    SectionSpec { name: "gate.held_sample", file: FILE, top: &["held_sample"], per_entry: false, entry: None, repair: None, columns: None, doc: "The share of held candidates judged off the hot path for the record." },
+    SectionSpec { name: "gate", file: FILE, top: &["engine"], per_entry: false, units: &[], entry: None, repair: None, columns: None, doc: "The engine profile the relevance gate uses." },
+    SectionSpec { name: "gate.mode", file: FILE, top: &["mode"], per_entry: false, units: &[], entry: None, repair: None, columns: None, doc: "What the gate does with a verdict: enforce, shadow or off." },
+    SectionSpec { name: "gate.profiles", file: FILE, top: &["profiles"], per_entry: true, units: &[&["judgements"]], entry: None, repair: None, columns: None, doc: "Changes to the shipped engine profiles, and profiles of your own. Each profile falls back alone." },
+    SectionSpec { name: "gate.keys", file: "keys", top: &[], per_entry: false, units: &[], entry: None, repair: None, columns: Some(("provider", "key")), doc: "Provider API keys, shown present or absent. `ways agent key` adds, rotates, checks and removes them." },
+    SectionSpec { name: "gate.held_sample", file: FILE, top: &["held_sample"], per_entry: false, units: &[], entry: None, repair: None, columns: None, doc: "The share of held candidates judged off the hot path for the record." },
 ];
 
 /// The profiles a tuning key is listed for with no file setting it: every
