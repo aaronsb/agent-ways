@@ -114,6 +114,7 @@ The scenarios in [`../explanation/attend-messaging/`](../explanation/attend-mess
 - `hooks/ways/attend-drain-stop.sh` — the Stop hook that drains messages at the turn boundary
 - `tools/agent-fmt/` — shared terminal formatting (banners, tables, commands)
 - `skills/attend/SKILL.md` — the skill behind `/attend`, which calls `attend_listen` or says the mod is not loaded
+- `skills/supervise/SKILL.md` — the skill behind `/supervise`, which watches a relay-mode worker every 30 minutes, nudges it with a neutral question and forwards its decisions to the operator
 - `hooks/ways/softwaredev/environment/attend/` — the way that surfaces live attend state in the steering layer
 
 ## References
