@@ -23,6 +23,7 @@
 //! nothing read. `listen` sets whether the drain delivers to this session at
 //! all (ADR-406 item 10).
 
+pub mod awaiting;
 pub mod channels;
 pub mod delete;
 pub mod inbox;

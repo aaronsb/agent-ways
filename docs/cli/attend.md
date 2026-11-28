@@ -16,6 +16,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend message reply`↴](#attend-message-reply)
 * [`attend message inbox`↴](#attend-message-inbox)
 * [`attend message unread`↴](#attend-message-unread)
+* [`attend message awaiting`↴](#attend-message-awaiting)
 * [`attend message lapse`↴](#attend-message-lapse)
 * [`attend message cleanup`↴](#attend-message-cleanup)
 * [`attend message delete`↴](#attend-message-delete)
@@ -170,6 +171,7 @@ Send, reply to, read, count and delete messages, and tombstone a session (defaul
 * `reply` — Reply to the most recent peer message: a direct message to its sender, or in its named channel
 * `inbox` — Read pending messages from peers
 * `unread` — Count this session's unread messages by room, marking none of them read
+* `awaiting` — List the direct messages this session sent that no recipient has answered yet, marking nothing read
 * `lapse` — Mark this session's pending event-lane notices read at a session boundary, delivering none of them
 * `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e).
 * `delete` — Mark for deletion the messages no live session still has to read
@@ -263,6 +265,20 @@ Read pending messages from peers
 Count this session's unread messages by room, marking none of them read
 
 **Usage:** `attend message unread [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Print the result as one JSON document
+
+
+
+## `attend message awaiting`
+
+List the direct messages this session sent that no recipient has answered yet, marking nothing read
+
+A message waits when it went to a peer session or to a person's member id and no later message from a recipient threads under it or is addressed to this session. Posts to #open and to named channels never wait. Each line gives the handle, the recipient, the age and the first words, and marks a message to a person as the operator's. --json prints {count, operator, items}.
+
+**Usage:** `attend message awaiting [OPTIONS]`
 
 ###### **Options:**
 
