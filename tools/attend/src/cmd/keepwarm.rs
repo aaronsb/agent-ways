@@ -423,13 +423,16 @@ fn take_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy) -> Result<(), 
 /// cannot answer within `timeout`, in which case it is killed.
 fn mod_settings(project: &str, timeout: std::time::Duration) -> Option<String> {
     use std::io::Read;
-    let mut child = std::process::Command::new("ways")
-        .args(["settings", "list", "mods.attend", "--json", "--effective", "--project", project])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
+    // Through the brief's spawn lock: the brief runs this beside its other
+    // probes, and on macOS a pipe made during a sibling's spawn leaks into it.
+    let mut child = sensor_keepwarm::spawn_probe(
+        std::process::Command::new("ways")
+            .args(["settings", "list", "mods.attend", "--json", "--effective", "--project", project])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null()),
+    )
+    .ok()?;
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
