@@ -299,25 +299,7 @@ pub fn judge(
     if temperature {
         body["temperature"] = serde_json::json!(0);
     }
-    let mut req = http.post(&url).config().timeout_global(Some(timeout)).build();
-    req = match api {
-        Api::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
-        Api::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
-    };
-    let mut resp = req.send_json(&body).map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
-    let status = resp.status().as_u16();
-    let text = resp.body_mut().read_to_string().map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
-    // Status first: an HTML error page from a proxy is still a provider error.
-    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-    if status != 200 {
-        // A provider that refuses a request (4xx) does not bill it. A
-        // timeout or a 5xx, from the provider or a proxy, may come after the
-        // model ran, so its cost is unknown.
-        let refused = (400..500).contains(&status) && status != 408;
-        let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
-        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
-    }
-    let usage = usage(api, &reply);
+    let (reply, usage) = post(http, api, key, &url, &body, timeout)?;
     let failed = |reason: String| JudgeFailure { reason, usage: usage.clone() };
     let input = match api {
         Api::Anthropic => reply
@@ -337,6 +319,33 @@ pub fn judge(
     };
     let p_yes = judge::parse_judgements(&input, n).map_err(|e| failed(format!("answer: {e}")))?;
     Ok((p_yes, usage))
+}
+
+/// POSTs a model request with the provider's auth headers, held to
+/// `timeout`, and returns the 200 reply with the usage it reported. Any
+/// other status is a `provider_<status>` failure; a transport failure is
+/// `deadline` or `transport: …`.
+fn post(http: &ureq::Agent, api: Api, key: &str, url: &str, body: &Value, timeout: Duration) -> std::result::Result<(Value, Option<Usage>), JudgeFailure> {
+    let mut req = http.post(url).config().timeout_global(Some(timeout)).build();
+    req = match api {
+        Api::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
+        Api::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
+    };
+    let mut resp = req.send_json(body).map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
+    let status = resp.status().as_u16();
+    let text = resp.body_mut().read_to_string().map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
+    // Status first: an HTML error page from a proxy is still a provider error.
+    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if status != 200 {
+        // A provider that refuses a request (4xx) does not bill it. A
+        // timeout or a 5xx, from the provider or a proxy, may come after the
+        // model ran, so its cost is unknown.
+        let refused = (400..500).contains(&status) && status != 408;
+        let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
+        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
+    }
+    let usage = usage(api, &reply);
+    Ok((reply, usage))
 }
 
 /// The URL and body of a completion with no tools: `system` and one user
@@ -387,22 +396,7 @@ pub fn complete(
 ) -> std::result::Result<(String, Option<Usage>), JudgeFailure> {
     let Some(api) = Api::of(provider) else { return Err(JudgeFailure::bare(NOT_CALLED.to_string())) };
     let (url, body) = complete_request(api, model, system, prompt, max_tokens);
-    let mut req = http.post(&url).config().timeout_global(Some(timeout)).build();
-    req = match api {
-        Api::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
-        Api::Openrouter => req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "agent-ways"),
-    };
-    let mut resp = req.send_json(&body).map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
-    let status = resp.status().as_u16();
-    let text = resp.body_mut().read_to_string().map_err(|e| JudgeFailure::bare(transport_reason(e)))?;
-    let reply: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-    if status != 200 {
-        // As for a judge call: a 4xx refusal is not billed, anything else may be.
-        let refused = (400..500).contains(&status) && status != 408;
-        let usage = refused.then(|| Usage { provider_cost_usd: Some(0.0), ..Default::default() });
-        return Err(JudgeFailure { reason: format!("provider_{status}: {}", error_message(&reply)), usage });
-    }
-    let usage = usage(api, &reply);
+    let (reply, usage) = post(http, api, key, &url, &body, timeout)?;
     reply_text(api, &reply).map(|t| (t, usage.clone())).ok_or_else(|| JudgeFailure {
         reason: format!("answer: no text (stop_reason {})", reply.get("stop_reason").or_else(|| reply.pointer("/choices/0/finish_reason")).unwrap_or(&Value::Null)),
         usage,
