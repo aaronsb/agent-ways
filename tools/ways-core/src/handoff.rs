@@ -19,7 +19,10 @@
 //! - ADR-417 items 3 and 4: a native compaction and a relay compaction both
 //!   take their instructions from the handoff.
 
+use crate::proc::Outcome;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// The handoff file under the repository root.
 pub const FILE: &str = ".claude/handoff.wrap.md";
@@ -31,44 +34,52 @@ pub const LEAD: &str = "Summarize this session as the handoff below; keep its TA
 /// what the relay's instructions are held to as well.
 pub const CAP: usize = 10_000;
 
+/// How long one git call may run before it is killed and taken as no
+/// answer. The PreCompact hook makes two of them within its 9 seconds,
+/// beside its wait on attend.
+const GIT_WAIT: Duration = Duration::from_secs(2);
+
 /// The handoff file of the repository at `root`.
 pub fn path(root: &Path) -> PathBuf {
     root.join(FILE)
 }
 
 /// The repository root `dir` sits in, by `git rev-parse --show-toplevel`,
-/// else the nearest ancestor holding `.git`; `None` outside a repository.
+/// else the nearest ancestor holding `.git`; `None` outside a repository,
+/// and `None` when git runs past [`GIT_WAIT`], since a hung git says
+/// nothing sure about the repository.
 pub fn repo_root(dir: &Path) -> Option<PathBuf> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(["rev-parse", "--show-toplevel"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok();
-    if let Some(o) = out.filter(|o| o.status.success()) {
-        let top = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        if !top.is_empty() {
-            return Some(PathBuf::from(top));
-        }
+    repo_root_by(OsStr::new("git"), dir, GIT_WAIT)
+}
+
+fn repo_root_by(program: &OsStr, dir: &Path, limit: Duration) -> Option<PathBuf> {
+    match git(program, dir, &["rev-parse", "--show-toplevel"], limit) {
+        Outcome::Stdout(top) if !top.trim().is_empty() => return Some(PathBuf::from(top.trim())),
+        Outcome::TimedOut => return None,
+        _ => {}
     }
     dir.ancestors().find(|a| a.join(".git").exists()).map(Path::to_path_buf)
 }
 
-/// The short HEAD commit of the repository at `root`.
+/// The short HEAD commit of the repository at `root`; `None` when git
+/// fails or runs past [`GIT_WAIT`].
 pub fn head_short(root: &Path) -> Option<String> {
-    let o = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "--short", "HEAD"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    let h = String::from_utf8_lossy(&o.stdout).trim().to_string();
-    (!h.is_empty()).then_some(h)
+    head_short_by(OsStr::new("git"), root, GIT_WAIT)
+}
+
+fn head_short_by(program: &OsStr, root: &Path, limit: Duration) -> Option<String> {
+    let Outcome::Stdout(h) = git(program, root, &["rev-parse", "--short", "HEAD"], limit) else { return None };
+    let h = h.trim();
+    (!h.is_empty()).then(|| h.to_string())
+}
+
+/// `git -C dir args`, killed at `limit`. It takes no optional locks and
+/// never prompts for credentials, so it neither waits on nor holds the
+/// index lock of a repository another git is using.
+fn git(program: &OsStr, dir: &Path, args: &[&str], limit: Duration) -> Outcome {
+    let mut cmd = std::process::Command::new(program);
+    cmd.arg("-C").arg(dir).args(args).env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
+    crate::proc::stdout_within(cmd, limit)
 }
 
 /// Whether `id` has a wrap id's shape: 8 to 64 letters, digits and `-`.
@@ -365,5 +376,55 @@ mod tests {
         assert!(is_section_start("## Tasks"));
         assert!(!is_section_start("Continue work on x"));
         assert!(!is_section_start("#1 [OPEN] x"), "a task line is no heading");
+    }
+
+    /// A directory of its own under the system temp dir, holding a fake
+    /// `git` script with `body`, and the script's path.
+    #[cfg(unix)]
+    fn fake_git(tag: &str, body: &str) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("ways-core-handoff-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = dir.join("git");
+        std::fs::write(&git, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, git)
+    }
+
+    /// A git that hangs gives no repository root and no HEAD within the
+    /// limit, though the directory sits in a repository by its `.git`.
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_git_gives_no_root_and_no_head_within_the_limit() {
+        let (dir, git) = fake_git("hung", "sleep 10\necho /from/git");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        let limit = Duration::from_millis(300);
+        let started = std::time::Instant::now();
+        let root = repo_root_by(git.as_os_str(), &dir, limit);
+        let head = head_short_by(git.as_os_str(), &dir, limit);
+        let took = started.elapsed();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(root, None, "a timeout is no root, not the .git fallback");
+        assert_eq!(head, None);
+        assert!(took < Duration::from_secs(3), "both calls return near their limit, took {took:?}");
+    }
+
+    /// A git that answers is taken, and one that fails falls back to the
+    /// nearest `.git`.
+    #[cfg(unix)]
+    #[test]
+    fn a_git_that_answers_or_fails_is_taken_within_the_limit() {
+        let (dir, git) = fake_git("answers", "echo /from/git");
+        assert_eq!(repo_root_by(git.as_os_str(), &dir, GIT_WAIT), Some(PathBuf::from("/from/git")));
+        assert_eq!(head_short_by(git.as_os_str(), &dir, GIT_WAIT).as_deref(), Some("/from/git"));
+        let (failing, false_git) = fake_git("fails", "exit 128");
+        std::fs::create_dir_all(failing.join(".git")).unwrap();
+        let sub = failing.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        assert_eq!(repo_root_by(false_git.as_os_str(), &sub, GIT_WAIT), Some(failing.clone()));
+        assert_eq!(head_short_by(false_git.as_os_str(), &sub, GIT_WAIT), None);
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&failing).ok();
     }
 }
