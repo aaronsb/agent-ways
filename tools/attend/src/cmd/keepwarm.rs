@@ -31,6 +31,9 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
     if let KeepwarmCmd::Check(args) = &sub {
         return check(&ident, args);
     }
+    if let KeepwarmCmd::Brief(args) = &sub {
+        return super::brief::cmd_brief(&ident, args);
+    }
     if !ident.session_resolved {
         eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
         std::process::exit(1);
@@ -74,7 +77,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             update_policy(&dir, sid, policy::stop_by_operator);
             println!("keepwarm is not armed");
         }
-        KeepwarmCmd::Check(_) => unreachable!("handled above"),
+        KeepwarmCmd::Check(_) | KeepwarmCmd::Brief(_) => unreachable!("handled above"),
         KeepwarmCmd::Reset { at } => {
             let at = at.filter(|t| *t <= now).unwrap_or(now);
             if !update_policy(&dir, sid, |p| policy::reset(p, at)) {
@@ -430,7 +433,7 @@ fn read_handoff_at(path: PathBuf) -> Option<Handoff> {
 /// ledger for a few minutes, so a listening session that asks every minute
 /// does not run ways every minute, unless the user's or the project's
 /// settings file changed since. `None` when ways cannot answer.
-fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<String> {
+pub(super) fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<String> {
     let path = dir.join(format!("{sid}.settings.json"));
     let stamps = settings_stamps(project);
     if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {

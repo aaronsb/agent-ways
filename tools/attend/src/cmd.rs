@@ -11,6 +11,8 @@
 //! that matches on argv and forwards to these modules. The message verbs'
 //! modules here only render: their bodies live in `crate::verbs`.
 
+#[cfg(feature = "sensor-keepwarm")]
+pub(crate) mod brief;
 pub(crate) mod cleanup;
 pub(crate) mod config_cmd;
 pub(crate) mod delete;

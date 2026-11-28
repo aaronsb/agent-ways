@@ -51,6 +51,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend keepwarm goal`↴](#attend-keepwarm-goal)
 * [`attend keepwarm stopped`↴](#attend-keepwarm-stopped)
 * [`attend keepwarm wrap-id`↴](#attend-keepwarm-wrap-id)
+* [`attend keepwarm brief`↴](#attend-keepwarm-brief)
 * [`attend chat`↴](#attend-chat)
 * [`attend sensor`↴](#attend-sensor)
 * [`attend sensor list`↴](#attend-sensor-list)
@@ -610,6 +611,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `goal` — Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended
 * `stopped` — Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt
 * `wrap-id` — Print the id of this session's last recorded wrap, or nothing and exit 1 when none is recorded. `ways hook pre-compact` reads it to tell whether .claude/handoff.wrap.md is fresh
+* `brief` — Print the conditions the continuance judge reads at a work boundary, as one JSON object: the fill and the price of a ping, the minutes since the operator's prompt and the relay count, the messages awaiting a reply, git status, the commits and merges since the handoff's head, and the branch's open PRs with their checks. The mod passes what only it sees as a JSON object on stdin: agents_in_flight, tasks_open, tasks_in_progress and tasks_closed_since_wrap as lists of lines, and window in tokens. The probes have about 2 s; one that fails or runs past that prints "unknown". Exits 0
 
 
 
@@ -811,6 +813,18 @@ Print the id of this session's last recorded wrap, or nothing and exit 1 when no
 ###### **Options:**
 
 * `--record <ID>` — Record ID as this session's last wrap instead: the wrap skill names each wrap's id this way, so a handoff-mode wrap, which ends with no relay marker, is recorded too
+
+
+
+## `attend keepwarm brief`
+
+Print the conditions the continuance judge reads at a work boundary, as one JSON object: the fill and the price of a ping, the minutes since the operator's prompt and the relay count, the messages awaiting a reply, git status, the commits and merges since the handoff's head, and the branch's open PRs with their checks. The mod passes what only it sees as a JSON object on stdin: agents_in_flight, tasks_open, tasks_in_progress and tasks_closed_since_wrap as lists of lines, and window in tokens. The probes have about 2 s; one that fails or runs past that prints "unknown". Exits 0
+
+**Usage:** `attend keepwarm brief [OPTIONS]`
+
+###### **Options:**
+
+* `--handoff <PATH>` — The handoff whose first line, <date> <short HEAD> wrap=<ID>, names the head the commits and merges are counted from (default .claude/handoff.wrap.md at the repository root)
 
 
 
