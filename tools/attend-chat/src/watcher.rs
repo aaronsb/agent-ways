@@ -602,16 +602,19 @@ mod tests {
         assert_eq!(sent(&rx), ["restored before"]);
     }
 
-    /// A burst of changes to the mark store is read once it ends, however
-    /// long it runs.
+    /// One burst of a hundred changes to a fresh mark store, each a
+    /// fiftieth of [`MARKS_SETTLE`] after the last, and whether it held: by
+    /// the clock, each change came within [`MARKS_SETTLE`] of the last.
     ///
-    /// The burst holds only while each change comes within [`MARKS_SETTLE`]
-    /// of the last, and a loaded runner can stretch a sleep past that. A
-    /// check is made only while the clock shows the burst held; once a gap
-    /// overran, the store may rightly have been read, and the test asks
-    /// only that it was read once.
-    #[test]
-    fn the_mark_store_is_read_once_its_changes_stop() {
+    /// The burst runs twice [`MARKS_SETTLE`], so a read timed from its first
+    /// change would come during it. The short step leaves each change nearly
+    /// all of [`MARKS_SETTLE`] as slack for a stalled thread.
+    ///
+    /// While the burst holds, the store is not read. A loaded runner can
+    /// stretch a sleep past [`MARKS_SETTLE`], which ends the burst, and the
+    /// store may then rightly be read; from there the burst asks only that
+    /// it was read once.
+    fn settle_burst() -> bool {
         let base = crate::test_dir::unique("settle");
         write(&base.join("_broadcast"), "a");
         let (feed, rx) = feed_at(&base);
@@ -621,11 +624,11 @@ mod tests {
         let mut got = Vec::new();
         let mut held = true;
         let mut last: Option<Instant> = None;
-        for _ in 0..10 {
+        for _ in 0..100 {
             let change = Instant::now();
             feed.marks_changed();
             held &= last.is_none_or(|l| l.elapsed() < MARKS_SETTLE);
-            thread::sleep(MARKS_SETTLE / 5);
+            thread::sleep(MARKS_SETTLE / 50);
             got.extend(sent(&rx));
             held &= change.elapsed() < MARKS_SETTLE;
             if held {
@@ -638,6 +641,23 @@ mod tests {
             got.extend(sent_until(&rx, withdrawn));
         }
         assert_eq!(got, [withdrawn]);
+        held
+    }
+
+    /// A burst of changes to the mark store is read once it ends, however
+    /// long it runs.
+    ///
+    /// A burst that did not hold never checks that the store went unread
+    /// during it, so a broken burst is run again on a fresh store, and the
+    /// test fails when no attempt held. A pass has run that check at least
+    /// once.
+    #[test]
+    fn the_mark_store_is_read_once_its_changes_stop() {
+        const ATTEMPTS: usize = 5;
+        assert!(
+            (0..ATTEMPTS).any(|_| settle_burst()),
+            "no attempt held: in each of {ATTEMPTS} bursts a change came {MARKS_SETTLE:?} or more after the last, so the read-during-the-burst check never ran"
+        );
     }
 
     /// The watcher withholds marks at backfill, and a mark or an undo
