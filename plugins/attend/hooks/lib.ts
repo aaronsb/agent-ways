@@ -766,8 +766,11 @@ export type Decision = {
   max: number
   wrapsAt: string | null
   wrappedAt: string | null
-  /** Whether the policy runs; false is ADR-182's armed windows alone, and
-   *  a stop exit's ticks where the policy is off. */
+  /** Whether the policy runs; false is an armed window's wakes alone, and
+   *  a stop exit's ticks where the policy is off.
+   *
+   *  References:
+   *  - ADR-182: the armed window's wake. */
   policy: boolean
   /** `armed` and `finished` are a stop exit's, whatever `policy` says. */
   state: 'running' | 'wrapped' | 'compacted' | 'resumed' | 'stopped' | 'armed' | 'finished' | 'off'

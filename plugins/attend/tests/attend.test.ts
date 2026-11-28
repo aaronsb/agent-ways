@@ -3156,11 +3156,13 @@ describe('relay mode', () => {
   })
 })
 
-// The policy's pure pieces in lib.ts, apart from the mod's hooks.
-// ADR-418 §9: a stop verdict arms the exit; at a keepwarm tick with nothing
-// pending the cache lapses and the session is finished; an operator prompt
-// disarms it. attend judges each tick and sets the finished mark; the mod
-// carries the decision out (#1395).
+// A stop verdict arms the exit; at a keepwarm tick with nothing pending the
+// cache lapses and the session is finished; an operator prompt disarms it.
+// attend judges each tick and sets the finished mark; the mod carries the
+// decision out (#1395).
+//
+// References:
+// - ADR-418 item 9: the armed exit's states and edges.
 describe('the armed exit', () => {
   const S = T0 / 1000
   const MIN = 60
@@ -3315,6 +3317,7 @@ describe('the armed exit', () => {
   })
 })
 
+// The policy's pure pieces in lib.ts, apart from the mod's hooks.
 describe('keepalive policy: the pure pieces', () => {
   const route = { dest: 'file', file: '/s/wrap/s1.md', to: 'aaron', after: 'lapse', afterKeepalives: 0, handoff: 'handoff: from A (p), wrapped at 07:30 while its operator was away.' } as const
   const d = (o: Record<string, unknown>) => parseKeepaliveDecision(decision(o))!
