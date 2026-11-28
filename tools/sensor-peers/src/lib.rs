@@ -41,7 +41,9 @@ struct PeerSummary {
     pid: u32,
     cwd: String,
     project_name: String,
-    context_percent: f64,
+    /// Percent of the window used; `None` when the transcript holds no
+    /// API-measured figure, which is unknown rather than empty.
+    context_percent: Option<f64>,
     model: String,
     status: PeerStatus,
 }
@@ -83,12 +85,13 @@ impl PeerSensor {
     }
 
     /// Return a list of active peer sessions as
-    /// `(session_id, cwd, project_name, status, context_percent)`.
+    /// `(session_id, cwd, project_name, status, context_percent)`, where
+    /// `context_percent` is `None` for a peer whose fill is unknown.
     ///
     /// `session_id` is included so renderers can look up the
     /// per-cwd instance suffix (ADR-129) without separately
     /// re-walking session.json files.
-    pub fn list_peers(&self) -> Vec<(String, String, String, String, f64)> {
+    pub fn list_peers(&self) -> Vec<(String, String, String, String, Option<f64>)> {
         let peers = self.discover_peers();
         let mut result: Vec<_> = peers.iter()
             .map(|(sid, p)| (
@@ -141,7 +144,7 @@ impl PeerSensor {
             let (context_percent, model) = transcript
                 .as_deref()
                 .and_then(transcript_summary)
-                .unwrap_or((0.0, "-".to_string()));
+                .unwrap_or((None, "-".to_string()));
             let status = infer_status(transcript.as_deref());
 
             peers.insert(sf.session_id, PeerSummary {
@@ -158,7 +161,7 @@ impl PeerSensor {
     }
 
     #[cfg(test)]
-    fn read_transcript_summary(&self, cwd: &str, session_id: &str) -> Option<(f64, String)> {
+    fn read_transcript_summary(&self, cwd: &str, session_id: &str) -> Option<(Option<f64>, String)> {
         transcript_summary(&self.claude.find_transcript(Some(cwd), session_id)?)
     }
 
@@ -205,8 +208,9 @@ fn usage_tail(path: &std::path::Path) -> Option<String> {
 }
 
 /// A peer's context fill (percent of its window) and model, from the tail
-/// of its transcript.
-fn transcript_summary(path: &std::path::Path) -> Option<(f64, String)> {
+/// of its transcript. The fill is `None` when the tail holds no
+/// API-measured figure.
+fn transcript_summary(path: &std::path::Path) -> Option<(Option<f64>, String)> {
     use ways_core::context_fill::{measure, Method, Owner};
     let tail = usage_tail(path)?;
 
@@ -220,13 +224,10 @@ fn transcript_summary(path: &std::path::Path) -> Option<(f64, String)> {
     let fill = measure(&tail, Owner::Foreign);
 
     // With no model there is no meaningful percentage, and a byte estimate
-    // of a tail is not the peer's fill, so either is suppressed rather than
-    // shown as a number that would look authoritative. `-` is the no-model
-    // placeholder.
-    let context_percent = match (&fill.model, fill.method) {
-        (Some(_), Method::Api) => fill.percent(),
-        _ => 0.0,
-    };
+    // of a tail is not the peer's fill, so either is left unknown rather
+    // than shown as a number that would look authoritative. `-` is the
+    // no-model placeholder.
+    let context_percent = (fill.model.is_some() && fill.method == Method::Api).then(|| fill.percent());
 
     Some((context_percent, fill.model.unwrap_or_else(|| "-".to_string())))
 }
@@ -315,9 +316,10 @@ fn changes(prior: &HashMap<String, PeerSummary>, current: &HashMap<String, PeerS
     for (sid, peer) in current {
         if !prior.contains_key(sid) {
             let (magnitude, relevance) = if same(peer) { (3.0, "same project") } else { (1.0, "other project") };
+            let ctx = peer.context_percent.map(|p| format!(", ctx {p:.0}%")).unwrap_or_default();
             observations.push((magnitude, format!(
-                "peer session started: {} [{}] ({}, {}, ctx {:.0}%)",
-                peer.project_name, peer.cwd, relevance, peer.status, peer.context_percent
+                "peer session started: {} [{}] ({}, {}{ctx})",
+                peer.project_name, peer.cwd, relevance, peer.status
             )));
         }
     }
@@ -331,13 +333,15 @@ fn changes(prior: &HashMap<String, PeerSummary>, current: &HashMap<String, PeerS
         }
     }
 
-    // A same-project peer approaching compaction.
+    // A same-project peer approaching compaction. A prior poll with no
+    // figure counts as below the mark.
+    let past_mark = |p: Option<f64>| p.is_some_and(|p| p >= 80.0);
     for (sid, peer) in current {
-        let Some(was) = prior.get(sid) else { continue };
-        if same(peer) && peer.context_percent >= 80.0 && was.context_percent < 80.0 {
+        let (Some(was), Some(pct)) = (prior.get(sid), peer.context_percent) else { continue };
+        if same(peer) && pct >= 80.0 && !past_mark(was.context_percent) {
             observations.push((2.0, format!(
-                "peer {} [{}] context at {:.0}% — approaching compaction",
-                peer.project_name, peer.cwd, peer.context_percent
+                "peer {} [{}] context at {pct:.0}% — approaching compaction",
+                peer.project_name, peer.cwd
             )));
         }
     }
@@ -381,12 +385,12 @@ mod tests {
         sensor.claude = claude_sessions::ClaudeDir::at(&root);
         let (pct, model) = sensor.read_transcript_summary("/srv/my proj", "sid-1").unwrap();
         assert_eq!(model, "claude-opus-4-8");
-        assert!(pct > 0.0);
+        assert!(pct.is_some_and(|p| p > 0.0));
         assert!(!matches!(sensor.infer_status("/srv/my proj", "sid-1"), PeerStatus::Unknown));
         fs::remove_dir_all(&root).ok();
     }
 
-    fn peer(cwd: &str, status: PeerStatus, context_percent: f64) -> PeerSummary {
+    fn peer(cwd: &str, status: PeerStatus, context_percent: Option<f64>) -> PeerSummary {
         PeerSummary {
             pid: 42,
             cwd: cwd.to_string(),
@@ -398,7 +402,7 @@ mod tests {
     }
 
     fn polls(statuses: &[PeerStatus]) -> Vec<HashMap<String, PeerSummary>> {
-        statuses.iter().map(|s| HashMap::from([("p1".to_string(), peer("/srv/proj", s.clone(), 10.0))])).collect()
+        statuses.iter().map(|s| HashMap::from([("p1".to_string(), peer("/srv/proj", s.clone(), Some(10.0)))])).collect()
     }
 
     #[test]
@@ -414,7 +418,7 @@ mod tests {
     #[test]
     fn a_peer_that_starts_or_exits_is_still_reported() {
         let none = HashMap::new();
-        let one = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Working, 12.0))]);
+        let one = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Working, Some(12.0)))]);
         assert_eq!(
             changes(&none, &one, "/srv/proj"),
             vec![(3.0, "peer session started: proj [/srv/proj] (same project, working, ctx 12%)".to_string())],
@@ -429,8 +433,8 @@ mod tests {
 
     #[test]
     fn a_same_project_peer_nearing_compaction_is_still_reported() {
-        let before = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Working, 79.0))]);
-        let after = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Waiting, 81.0))]);
+        let before = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Working, Some(79.0)))]);
+        let after = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Waiting, Some(81.0)))]);
         assert_eq!(
             changes(&before, &after, "/srv/proj"),
             vec![(2.0, "peer proj [/srv/proj] context at 81% — approaching compaction".to_string())],
@@ -463,7 +467,30 @@ mod tests {
         .unwrap();
         let (pct, model) = transcript_summary(&path).unwrap();
         assert_eq!(model, "claude-opus-4-8");
-        assert!(pct > 0.0);
+        assert!(pct.is_some_and(|p| p > 0.0));
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_peer_with_no_model_has_no_figure() {
+        // Only user turns so far: no model and no API usage. That is unknown,
+        // not an empty window, so no figure stands in for it.
+        let root = temp_claude("nomodel");
+        let path = root.join("t.jsonl");
+        fs::write(&path, "{\"type\":\"user\",\"message\":\"hello\"}\n").unwrap();
+        let (pct, model) = transcript_summary(&path).unwrap();
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(pct, None);
+        assert_eq!(model, "-");
+    }
+
+    #[test]
+    fn a_peer_with_no_figure_is_reported_without_one() {
+        let none = HashMap::new();
+        let one = HashMap::from([("p1".to_string(), peer("/srv/proj", PeerStatus::Working, None))]);
+        assert_eq!(
+            changes(&none, &one, "/srv/proj"),
+            vec![(3.0, "peer session started: proj [/srv/proj] (same project, working)".to_string())],
+        );
     }
 }

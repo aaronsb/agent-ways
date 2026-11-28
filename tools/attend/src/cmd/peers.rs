@@ -37,7 +37,7 @@ pub(crate) fn cmd_peers(json: bool) {
         "(self)".to_string(),
         render_agent_label(&p.me, &scopes[0], caps, &painter),
         p.me.status.clone(),
-        String::new(),
+        context_cell(p.me.context_pct),
     ]);
 
     // Show named groups we're focused on
@@ -62,7 +62,7 @@ pub(crate) fn cmd_peers(json: bool) {
                 focus_label,
                 render_agent_label(peer, scope, caps, &painter),
                 peer.status.clone(),
-                format!("{:.0}%", peer.context_pct.unwrap_or(0.0)),
+                context_cell(peer.context_pct),
             ]);
         }
     }
@@ -84,6 +84,12 @@ pub(crate) fn cmd_peers(json: bool) {
         p.channels.len()
     );
     agent_fmt::print_block(&out);
+}
+
+/// The "Context" cell: the fill as a whole percent, or blank when the
+/// figure is unknown, so an unknown fill does not read as an empty window.
+fn context_cell(pct: Option<f64>) -> String {
+    pct.map(|p| format!("{p:.0}%")).unwrap_or_default()
 }
 
 /// The "Agent" column's width cap. 28 holds a name and a basename; a row
@@ -162,6 +168,13 @@ mod tests {
         let scopes = peers::scopes(&roster);
         let painter = Painter::plain();
         roster.iter().zip(&scopes).map(|(a, s)| render_agent_label(a, s, painter.depth(), &painter)).collect()
+    }
+
+    #[test]
+    fn a_context_figure_renders_as_a_percent_and_no_figure_renders_blank() {
+        assert_eq!(context_cell(Some(33.6)), "34%");
+        assert_eq!(context_cell(Some(0.4)), "0%");
+        assert_eq!(context_cell(None), "");
     }
 
     #[test]
