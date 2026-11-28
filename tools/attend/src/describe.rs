@@ -20,7 +20,7 @@ pub const LEAVE: &str = "Leave a channel";
 /// channel verbs list themselves beside it in `attend channel --help`.
 pub const CHANNELS: &str = "List every channel, marking the ones this session is in";
 
-pub const LISTEN: &str = "Turn listening on or off for this session without joining a channel, or show it (default: status)";
+pub const LISTEN: &str = "Turn listening on or off for this session without joining a channel, mark it finished, or show it (default: status)";
 pub const LAPSE: &str = "Mark this session's pending event-lane notices read at a session boundary, delivering none of them";
 pub const UNREAD: &str = "Count this session's unread messages by room, marking none of them read";
 

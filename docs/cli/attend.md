@@ -73,7 +73,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 ###### **Subcommands:**
 
-* `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
+* `listen` — Turn listening on or off for this session without joining a channel, mark it finished, or show it (default: status)
 * `message` — Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
 * `channel` — Join, leave, list and manage channels and scenes (default: list)
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
@@ -86,7 +86,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 ## `attend listen`
 
-Turn listening on or off for this session without joining a channel, or show it (default: status)
+Turn listening on or off for this session without joining a channel, mark it finished, or show it (default: status)
 
 **Usage:** `attend listen [OPTIONS] [COMMAND]`
 
