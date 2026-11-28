@@ -527,14 +527,157 @@ fn a_resume_keeps_a_record_that_armed_nothing() {
 }
 
 /// A boundary's `doubt` sends the handoff on the relay stop's route, with
-/// a `handoff:` line that names the boundary judge and its reason.
+/// a `handoff:` line that names the boundary judge and its reason. Only
+/// with relay on does the line say the relay stopped, and in a turn the
+/// operator's prompt started it does not say the operator was away.
 #[test]
 fn a_doubt_route_reads_like_the_relay_stop_s() {
+    use super::relay::relay;
     let site = site();
-    let r = doubt_route(&cfg(), &site, Some("the plan  is unclear"), MONDAY);
+    let r = doubt_route(&relay(), &site, Some("the plan  is unclear"), false, MONDAY);
     assert!(r.handoff.starts_with("handoff: continuation prompt from "), "{}", r.handoff);
-    assert!(r.handoff.ends_with(" The relay stopped: the boundary judge said doubt, the plan is unclear."), "{}", r.handoff);
+    assert!(r.handoff.ends_with(" while its operator was away. The relay stopped: the boundary judge said doubt, the plan is unclear."), "{}", r.handoff);
     assert_eq!(r.to, site.operator, "an empty wrap_to falls back to the operator");
-    let r = doubt_route(&cfg(), &site, None, MONDAY);
+    let r = doubt_route(&relay(), &site, None, false, MONDAY);
     assert!(r.handoff.ends_with(" The relay stopped: the boundary judge said doubt."), "{}", r.handoff);
+    let r = doubt_route(&cfg(), &site, Some("the plan is unclear"), false, MONDAY);
+    assert!(r.handoff.ends_with(" while its operator was away. The boundary judge said doubt, the plan is unclear."), "{}", r.handoff);
+    assert!(!r.handoff.contains("relay"), "relay off: {}", r.handoff);
+    let r = doubt_route(&cfg(), &site, None, true, MONDAY);
+    assert!(r.handoff.ends_with(" at 00:00. The boundary judge said doubt."), "{}", r.handoff);
+    assert!(!r.handoff.contains("away"), "the operator prompted this turn: {}", r.handoff);
+}
+
+/// A ledger from before wave 4 with a `doubt` verdict and no move armed
+/// nothing then, since only a stop armed, and reads as arming nothing now.
+#[test]
+fn an_old_doubt_record_without_a_move_arms_nothing() {
+    let old = format!(r#"{{"wrap_id":"{WRAP}","verdict":"doubt","handoff":"sufficient","own":"stop","judged_at":1,"path":"{HANDOFF}"}}"#);
+    let e: exit::Exit = serde_json::from_str(&old).unwrap();
+    assert_eq!((e.moved, e.arms(), e.armed()), (None, false, false));
+    let mut s = Session::on(OPUS, MONDAY, 350_000);
+    s.state.policy.exit = Some(e);
+    let d = s.check_at(&cfg(), Gate::Off, &carrying(Some(WRAP)), MONDAY + 50 * MIN);
+    assert_eq!(d.action, Action::Keepalive, "pings as today: {d:?}");
+    let e: exit::Exit = serde_json::from_str(&old.replace(r#""verdict":"doubt""#, r#""verdict":"doubt","move":"doubt""#)).unwrap();
+    assert!(e.armed(), "a recorded doubt move arms");
+}
+
+/// `judged` for a judge's `verdict` with the mod's `moved`, recorded
+/// through [`exit::record`] under `c`.
+fn record_move(p: &mut Policy, verdict: Verdict, moved: Verdict, c: &Config, operator_turn: bool) -> exit::Recorded {
+    let j = Judgement { moved, ..judgement(verdict, Sufficiency::Sufficient) };
+    exit::record(p, j, Some(&handoff(WRAP)), c, operator_turn, MONDAY).unwrap()
+}
+
+/// With room, a compact is recorded as asked and arms nothing.
+#[test]
+fn a_compact_with_room_is_recorded_as_compact() {
+    use super::relay::relay;
+    let mut p = Policy::default();
+    let r = record_move(&mut p, Verdict::Compact, Verdict::Compact, &relay(), false);
+    assert_eq!(r, exit::Recorded { moved: Verdict::Compact, compact_refused: None });
+    assert!(!p.exit.as_ref().unwrap().armed());
+    assert_eq!((p.stopped.as_deref(), p.relay_stop.as_deref()), (None, None));
+}
+
+/// attend refuses a compact with no room, records it as a stop, which
+/// arms, and says why: relay off, the relay stopped, a relay wrap on
+/// record, `max_relays` reached, the operator in the turn.
+///
+/// References:
+/// - ADR-418 item 10: the `max_relays` cap ends the chain.
+/// - ADR-418 item 13: no self-compaction while the operator is talking.
+#[test]
+fn a_compact_without_room_is_recorded_as_stop_and_says_why() {
+    use super::relay::{filled, relay};
+    let refused = |p: &mut Policy, c: &Config, operator_turn: bool| {
+        let r = record_move(p, Verdict::Compact, Verdict::Compact, c, operator_turn);
+        assert_eq!(r.moved, Verdict::Stop, "{r:?}");
+        assert!(p.exit.as_ref().unwrap().armed(), "the stop arms");
+        assert_eq!(exit::boundary(p).map(|b| (b.verdict, b.moved)), Some(("compact", "stop")));
+        r.compact_refused.unwrap()
+    };
+    // The relay stopped on `relay: stop decision`.
+    let mut p = Policy { relays: 1, ..Policy::default() };
+    assert!(stopped_by_agent(&mut p, "decision", "which database"));
+    assert_eq!(refused(&mut p, &relay(), false), "the relay stopped: decision");
+    // A relay wrap the policy sent waits for its answer.
+    let mut s = Session::new(MONDAY, 700_000);
+    assert_eq!(s.check_at(&filled(relay(), 860_000), Gate::Off, &site(), MONDAY + MIN).action, Action::Wrap);
+    assert_eq!(refused(&mut s.state.policy, &relay(), false), "a relay wrap is pending");
+    // Five self-relays since the operator's prompt.
+    let mut p = Policy { relays: 5, ..Policy::default() };
+    assert_eq!(refused(&mut p, &relay(), false), "max_relays reached");
+    let mut p = Policy { relays: 4, ..Policy::default() };
+    assert_eq!(record_move(&mut p, Verdict::Compact, Verdict::Compact, &relay(), false).compact_refused, None, "4 of 5 has room");
+    // The operator's prompt started this turn.
+    let mut p = Policy::default();
+    assert_eq!(refused(&mut p, &relay(), true), "the operator is in this turn");
+    // Relay off: compaction stays with the operator.
+    let mut p = Policy::default();
+    assert_eq!(refused(&mut p, &cfg(), false), "relay is off");
+    let unread = Config { settings_ok: false, ..relay() };
+    assert_eq!(refused(&mut Policy::default(), &unread, false), "the mods.attend settings could not be read");
+}
+
+/// A doubt with relay on stops the relay as `relay: stop doubt` does, so a
+/// later boundary in the same absence cannot compact. The mod sends the
+/// doubt's handoff itself, so the next check hands nothing over again. A
+/// doubt with relay off stops nothing.
+///
+/// References:
+/// - ADR-418 item 11: in relay mode, `doubt` becomes `relay: stop doubt`.
+#[test]
+fn a_doubt_with_relay_on_stops_the_relay_and_a_later_compact_is_refused() {
+    use super::relay::relay;
+    let mut s = Session::on(OPUS, MONDAY, 350_000);
+    let r = record_move(&mut s.state.policy, Verdict::Doubt, Verdict::Doubt, &relay(), false);
+    assert_eq!(r, exit::Recorded { moved: Verdict::Doubt, compact_refused: None });
+    let p = &s.state.policy;
+    assert_eq!(p.relay_stop.as_deref(), Some("doubt"));
+    assert_eq!(p.stopped.as_deref(), Some("the boundary judge said doubt, the release landed"));
+    let d = s.check_at(&relay(), Gate::Off, &carrying(Some(WRAP)), MONDAY + MIN);
+    assert!(!d.send_handoff, "the mod sent the doubt's handoff already: {d:?}");
+    assert_eq!(
+        relay_line(&s.state.policy, &relay()),
+        "relay       stopped: the boundary judge said doubt, the release landed; your next prompt starts it again"
+    );
+    let j = Judgement { wrap_id: "20261127T1000Z-3f9a1c2e".into(), ..judgement(Verdict::Compact, Sufficiency::Sufficient) };
+    let later = Handoff { wrap_id: Some(j.wrap_id.clone()), ..handoff(WRAP) };
+    let r = exit::record(&mut s.state.policy, j, Some(&later), &relay(), false, MONDAY + 2 * MIN).unwrap();
+    assert_eq!(r, exit::Recorded { moved: Verdict::Stop, compact_refused: Some("the relay stopped: doubt".into()) });
+    let mut p = Policy::default();
+    record_move(&mut p, Verdict::Doubt, Verdict::Doubt, &cfg(), false);
+    assert_eq!((p.stopped, p.relay_stop), (None, None), "relay off stops no relay");
+}
+
+/// The relay stop a doubt records does not end its armed exit's wait: the
+/// exit runs whatever relay says, so a thread awaiting a reply keeps it
+/// pinging by the bound.
+///
+/// References:
+/// - ADR-418 item 11: a question awaiting an answer keeps the session warm
+///   up to the price of a fresh start.
+#[test]
+fn a_doubt_with_relay_on_pings_while_a_reply_is_awaited() {
+    use super::relay::relay;
+    let mut s = Session::on(OPUS, MONDAY, 350_000);
+    record_move(&mut s.state.policy, Verdict::Doubt, Verdict::Doubt, &relay(), false);
+    let c = Config { pending: Pending { awaiting: 1, ..Pending::default() }, ..relay() };
+    let seen = ride(&mut s, &c, &carrying(Some(WRAP)), MONDAY);
+    assert_eq!(count(&seen, Action::Keepalive), 19, "{seen:?}");
+    assert_eq!(seen.last().map(|x| x.0), Some(Action::Finish), "{seen:?}");
+}
+
+/// The resume after a boundary compaction keeps the relay's escape and
+/// asks for `/wrap boundary` at the next boundary.
+#[test]
+fn the_boundary_resume_keeps_the_relay_s_escape() {
+    let r = boundary_resume_text(std::path::Path::new(HANDOFF), 2, 5);
+    assert!(r.starts_with("relay: the conversation was compacted at a work boundary; this is relay 2 of 5 since the operator's last prompt. "), "{r}");
+    assert!(r.contains(&format!("Read {HANDOFF}.")), "{r}");
+    assert!(r.contains("then start its DO NEXT"), "{r}");
+    assert!(r.contains("end your reply with one line, relay: stop decision or relay: stop doubt, followed by the reason"), "{r}");
+    assert!(r.ends_with("At the next boundary, where a piece of work lands, run /wrap boundary."), "{r}");
 }

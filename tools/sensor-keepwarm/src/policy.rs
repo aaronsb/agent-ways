@@ -392,16 +392,16 @@ pub fn compacted(p: &mut Policy, failed: Option<String>, now: u64) {
 /// `attend keepwarm compacted --trigger boundary`: a compaction the
 /// boundary tool started ran, or why it failed. It ends the drain as any
 /// compaction does, and waits for its resume, which counts a relay
-/// ([`boundary_resumed`]). While a relay wrap the policy sent is on record,
-/// its compaction is the relay's to judge, so the report is refused and
-/// records nothing: [`judge_relay`] would read the compaction as a lost
-/// resume. False then.
+/// ([`boundary_resumed`]). While a relay wrap is on record
+/// ([`relay_wrap_on_record`]), its compaction is the relay's to judge, so
+/// the report is refused and records nothing: [`judge_relay`] would read
+/// the compaction as a lost resume. False then.
 ///
 /// References:
 /// - ADR-418 item 13: a compaction the agent starts through the tool
 ///   counts toward `max_relays` like any other relay.
 pub fn boundary_compacted(p: &mut Policy, failed: Option<String>, now: u64) -> bool {
-    if p.relay && p.wrapped_at.is_some() {
+    if relay_wrap_on_record(p).is_some() {
         return false;
     }
     if failed.is_none() {
@@ -411,6 +411,20 @@ pub fn boundary_compacted(p: &mut Policy, failed: Option<String>, now: u64) -> b
     p.trigger = Some("boundary".into());
     p.compact_failed = failed;
     true
+}
+
+/// Why a relay wrap is on record, or `None` with none: a wrap in relay
+/// mode, sent by the policy or a `/wrap`, waits to be judged, compacted on
+/// or resumed, or its relay stopped and the operator has not prompted
+/// since. A boundary compaction is refused while one is.
+pub fn relay_wrap_on_record(p: &Policy) -> Option<String> {
+    if !(p.relay && p.wrapped_at.is_some()) {
+        return None;
+    }
+    Some(match &p.stopped {
+        Some(why) => format!("a relay wrap is on record and the relay stopped: {why}"),
+        None => "a relay wrap is pending".into(),
+    })
 }
 
 /// `attend keepwarm resumed --trigger boundary`: the resume after a
@@ -1548,30 +1562,54 @@ fn route(cfg: &Config, site: &Site, now: u64) -> WrapRoute {
         to,
         after: if cfg.relay { "relay" } else { cfg.after_wrap.as_str() },
         after_keepalives: cfg.after_max,
-        handoff: format!(
-            "handoff: continuation prompt from {} ({}), wrapped at {} while its operator was away.",
-            site.name,
-            site.project_name(),
-            cfg.windows.hm(now),
-        ),
+        handoff: handoff_line(cfg, site, true, now),
     }
 }
 
+/// The `handoff:` line a sent handoff opens with. `away` says the operator
+/// was away when the session wrapped.
+fn handoff_line(cfg: &Config, site: &Site, away: bool, now: u64) -> String {
+    format!(
+        "handoff: continuation prompt from {} ({}), wrapped at {}{}.",
+        site.name,
+        site.project_name(),
+        cfg.windows.hm(now),
+        if away { " while its operator was away" } else { "" },
+    )
+}
+
+/// `said doubt`, with the judge's `reason` when one is given: the relay
+/// stop a doubt records with relay on, and the doubt's `handoff:` line.
+fn said_doubt(reason: Option<&str>) -> String {
+    match reason.map(|r| r.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|r| !r.is_empty()) {
+        Some(r) => format!("said doubt, {r}"),
+        None => "said doubt".to_string(),
+    }
+}
+
+/// The relay stop a boundary's `doubt` records with relay on.
+pub(crate) fn doubt_stop(reason: Option<&str>) -> String {
+    format!("the boundary judge {}", said_doubt(reason))
+}
+
 /// Where a boundary's `doubt` sends the handoff: the relay stop's route,
-/// built as [`hand`] builds it, whose `handoff:` line says the boundary
-/// judge said doubt, followed by the judge's `reason` when one is given.
+/// built as [`hand`] builds it. With relay on its `handoff:` line says the
+/// relay stopped because the boundary judge said doubt; with relay off it
+/// says the judge said doubt. The judge's `reason` follows when one is
+/// given. In a turn the operator's prompt started (`operator_turn`), the
+/// line does not say the operator was away.
 ///
 /// References:
 /// - ADR-418 item 11: in relay mode, `doubt` becomes `relay: stop doubt`,
 ///   and the handoff goes to the operator over attend.
-pub fn doubt_route(cfg: &Config, site: &Site, reason: Option<&str>, now: u64) -> WrapRoute {
-    let reason = reason.map(|r| r.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|r| !r.is_empty());
-    let why = match reason {
-        Some(r) => format!("the boundary judge said doubt, {r}"),
-        None => "the boundary judge said doubt".to_string(),
-    };
+pub fn doubt_route(cfg: &Config, site: &Site, reason: Option<&str>, operator_turn: bool, now: u64) -> WrapRoute {
+    let line = handoff_line(cfg, site, !operator_turn, now);
     let mut r = route(cfg, site, now);
-    r.handoff = format!("{} The relay stopped: {why}.", r.handoff);
+    r.handoff = if cfg.relay {
+        format!("{line} The relay stopped: {}.", doubt_stop(reason))
+    } else {
+        format!("{line} The boundary judge {}.", said_doubt(reason))
+    };
     r
 }
 
@@ -1586,13 +1624,30 @@ fn issue_wrap_id(site: &Site, now: u64) -> String {
     format!("{at}-{}", if sid.is_empty() { "session" } else { &sid })
 }
 
-/// The resume turn's text, for relay `n` of `max`.
+/// The resume turn's text after a relay wrap, for relay `n` of `max`.
 ///
 /// References:
 /// - ADR-417 item 4: the exact text of the resume.
 fn resume_text(handoff: &Path, n: u32, max: u32) -> String {
+    relay_resume("after a wrap", handoff, n, max)
+}
+
+/// The resume turn's text after a compaction the boundary tool started,
+/// for relay `n` of `max`: the relay's resume, with its escape, that asks
+/// for `/wrap boundary` at the next boundary.
+///
+/// References:
+/// - ADR-418 item 14, item 2(b): the agent's own wrap ends with the
+///   boundary tool.
+pub fn boundary_resume_text(handoff: &Path, n: u32, max: u32) -> String {
+    format!("{} At the next boundary, where a piece of work lands, run /wrap boundary.", relay_resume("at a work boundary", handoff, n, max))
+}
+
+/// The resume after a compaction `when` happened, with the escape that
+/// stops the relay on a decision or a doubt.
+fn relay_resume(when: &str, handoff: &Path, n: u32, max: u32) -> String {
     format!(
-        "relay: the conversation was compacted after a wrap; this is relay {n} of {max} since the operator's last prompt. Read {}. The task list survived the compaction; work from it and the handoff's TASKS, then start its DO NEXT. The operator is away: ask no questions. If a step needs a decision only the operator can make, or your doubt about the direction is high, do not start it; end your reply with one line, relay: stop decision or relay: stop doubt, followed by the reason, and the mod sends the handoff to the operator over attend.",
+        "relay: the conversation was compacted {when}; this is relay {n} of {max} since the operator's last prompt. Read {}. The task list survived the compaction; work from it and the handoff's TASKS, then start its DO NEXT. The operator is away: ask no questions. If a step needs a decision only the operator can make, or your doubt about the direction is high, do not start it; end your reply with one line, relay: stop decision or relay: stop doubt, followed by the reason, and the mod sends the handoff to the operator over attend.",
         handoff.display(),
     )
 }
