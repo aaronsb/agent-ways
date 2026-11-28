@@ -34,7 +34,7 @@ The wrap runs in one of two modes. **Handoff mode** ends the wrap with a `/compa
 2. A wrap turn from the attend mod that names relay mode and a wrap id is in relay mode. Use that wrap id (Step 3).
 3. Otherwise the setting decides. `on` is relay mode. Any other output, `off` or an error, is handoff mode. A wrap turn from the attend mod that names no relay mode is decided here too.
 
-**In relay mode the skill runs with `stay` semantics, whoever invoked it.** It lands nothing: Step 1 records stranded work in the handoff and offers no merge. It asks nothing: do not call AskUserQuestion, because the operator may be away. It starts no new work. A choice that only the operator can make goes into the handoff's DECISIONS section, and the wrap ends with the `stop decision` marker (Step 4).
+**In relay mode the skill runs with `stay` semantics, whoever invoked it.** It lands nothing: Step 1 records stranded work in the handoff and offers no merge. It asks nothing: do not call AskUserQuestion, because the operator may be away. It starts no new work. A choice that only the operator can make goes into the handoff's DECISIONS section, and Step 4 says when it ends the relay with the `stop decision` marker.
 
 The fill level calibrates the entire wrap, and is worth saying out loud — the user may be wrapping early *on purpose*, and that's valid. Locate it against the ways trigger curves (the `todos` way fires ~75%, `compaction-checkpoint` ~85%):
 
@@ -221,7 +221,7 @@ Fill in the fields:
 Pick the first reason that holds:
 
 - `stop empty` when no open work remains (`tasks=0`).
-- `stop decision` when the next step needs a decision that only the operator can make. The decision is in the handoff's DECISIONS section.
+- `stop decision` when every open task waits on a decision whose lean is one-way (`reversible: no` in the handoff's DECISIONS section). A decision that blocks only some tasks is no reason to stop: work goes on with the rest, and the question goes to the operator over attend. A decision whose lean is reversible is no reason to stop either: work goes ahead on the lean, and the handoff logs the call for the operator to overrule.
 - `stop doubt` when your doubt about the direction is high, as core.md defines doubt.
 - `continue` otherwise: open tasks remain and DO NEXT can start without the operator.
 
