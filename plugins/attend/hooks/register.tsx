@@ -71,6 +71,7 @@ import {
   relayMarkerOf,
   relayStopOf,
   resumedArgv,
+  rowAfterDoubt,
   rowAfterResume,
   stoppedArgv,
   wrapSendArgv,
@@ -99,7 +100,7 @@ import {
   agentsInFlight,
   stopExitOf,
   stopExitOfStatus,
-  isJudgedStop,
+  isJudgedArming,
   keepaliveApplies,
   keepaliveRowOf,
   parseDecision,
@@ -117,7 +118,40 @@ import {
   sendArgv,
   shortId,
 } from './lib.ts'
-import type { Decision, Exit, Fill, Gate, Keepalive, Listed, Mod, ModConfig, WrapOutcome, WrapRoute } from './lib.ts'
+import type { BoundaryCompaction, Decision, Exit, Fill, Gate, Keepalive, Listed, Mod, ModConfig, RelayTrigger, WrapOutcome, WrapRoute } from './lib.ts'
+import {
+  BOUNDARY_TOOL,
+  BRIEF_ARGV,
+  HANDOFF_FILE,
+  ROOT_ARGV,
+  TYPED_WRAP_REFUSAL,
+  agentLines,
+  answerOf,
+  boundaryInput,
+  boundaryResult,
+  compactInstructions,
+  hasRoom,
+  hasTasks,
+  briefInput,
+  doubtOf,
+  handoffCarries,
+  inFlightOf,
+  isBoundaryWrap,
+  judgeArgv,
+  judgedArgv,
+  parseArgv,
+  parseBrief,
+  parseJudgeOut,
+  parseRecorded,
+  refusalOf,
+  refusedResult,
+  relaysOf,
+  requestOf,
+  resumeText,
+  settle,
+  taskLines,
+} from './boundary.ts'
+import type { HandoffSent, Judged } from './boundary.ts'
 import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit, HOST_EXIT_WAIT_MS, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
 import type { HostChild, HostEnd, HostSpec } from './host.ts'
 
@@ -180,6 +214,12 @@ const WRAP_LAPSE_MS = 60 * 60_000
 // A relay wrap's answer, a fill past relay's threshold, or a stop line is
 // judged this long after the turn's end, between turns.
 const RELAY_CHECK_MS = 1_000
+// The boundary tool's calls: the brief's probes take about 2 s and 250 ms
+// of grace for each that hangs; ways waits out the judgement's deadline on
+// a key engine; the parse reads one answer.
+const BRIEF_TIMEOUT_MS = 8_000
+const JUDGE_TIMEOUT_MS = 60_000
+const PARSE_TIMEOUT_MS = 15_000
 
 // agent-ways theme (tools/agent-theme/themes/agent-ways.theme).
 const SUBTLE = '#3a3a3c'
@@ -1076,7 +1116,7 @@ async function checkKeepalive($: $, mod: Mod) {
         return
       }
       if (plan.submit.kind === 'compact' && d.relay) {
-        await relayCompact($, mod, d, plan.submit.text)
+        await relayCompact($, mod, wrapRelay($, mod, d, plan.submit.text))
         return
       }
       if (plan.submit.kind === 'compact') {
@@ -1261,52 +1301,98 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
 }
 
 /** A relay's compaction with the handoff as its instructions, then, where
- *  attend gave one and no operator prompt came meanwhile, the resume turn.
+ *  a resume is due and no operator prompt came meanwhile, the resume turn.
  *  Only a compaction that ran without a skip is followed by the resume.
- *  attend hears how each went; a failure stops the relay, and the next
- *  check hands the reply over. A compaction that rejects because a turn
- *  started meanwhile is deferred, not failed. The caller holds the
- *  keepalive chain.
+ *  attend hears how each went; after a wrap's relay a failure stops the
+ *  relay, and the next check hands the reply over. A compaction that
+ *  rejects because a turn started meanwhile is deferred, not failed. The
+ *  caller holds the keepalive chain.
+ *
+ *  The boundary tool's compact and doubt run the same path (`trigger`
+ *  boundary): attend hears of each with `--trigger boundary`, so the resume
+ *  counts toward `max_relays`; the resume is read once the compaction ran,
+ *  and a compaction that ran with no resume due, or that failed, goes to
+ *  the run's own `onNoResume` and `onFail`.
  *
  *  References:
- *  - ADR-417 item 4: the compaction and the resume after a relay wrap. */
-async function relayCompact($: $, mod: Mod, d: Decision, instructions: string) {
+ *  - ADR-417 item 4: the compaction and the resume after a relay wrap.
+ *  - ADR-418 §13: self-relays count toward `max_relays`. */
+async function relayCompact($: $, mod: Mod, r: RelayRun) {
   const ka = mod.ka
   const operatorThen = ka.operatorEpoch
   const epochThen = ka.epoch
-  ka.isRelayPending = false
+  const isWrapRelay = r.trigger === undefined
+  if (isWrapRelay) ka.isRelayPending = false
   let failed: string | undefined
   try {
-    const r = await $.session.compact({ instructions })
-    if (r.skip !== undefined) failed = `skipped: ${String(r.skip)}`
+    const c = await $.session.compact({ instructions: r.instructions })
+    if (c.skip !== undefined) failed = `skipped: ${String(c.skip)}`
   } catch (err) {
     // A turn that started after attend's word rejects the compaction:
     // attend recorded none, and that turn's end judges again.
     if (mod.running.size > 0 || ka.epoch !== epochThen) {
-      if (ka.operatorEpoch === operatorThen) deferRelay($, ka, 'a turn started while it ran')
+      if (ka.operatorEpoch === operatorThen) r.defer('a turn started while it ran')
       return
     }
     failed = String(err)
   }
   if (failed !== undefined) {
     $.ui.log(`attend: the relay's compaction failed: ${failed}`)
-    await run($, compactedArgv(failed))
-    $.clock.after(RELAY_CHECK_MS, () => void checkKeepalive($, mod))
+    await run($, compactedArgv(failed, r.trigger))
+    await r.onFail()
     return
   }
   await markCompacted($)
-  await run($, compactedArgv())
-  if (d.resume === null || ka.operatorEpoch !== operatorThen) return
+  await run($, compactedArgv(undefined, r.trigger))
+  if (ka.operatorEpoch !== operatorThen) return
+  const resume = await r.resume()
+  if (resume === null) {
+    await r.onNoResume()
+    return
+  }
   const isEntered = await $.prompt
-    .submit({ text: d.resume })
+    .submit({ text: resume })
     .then(x => x.drop === undefined)
     .catch(() => false)
-  await run($, resumedArgv(isEntered ? undefined : 'the resume prompt did not enter'))
+  await run($, resumedArgv(isEntered ? undefined : 'the resume prompt did not enter', r.trigger))
   if (isEntered) {
-    ka.relayReply = undefined
-    await setKeepaliveRow($, k => rowAfterResume(k, d.relayCount + 1, d.maxRelays))
+    if (isWrapRelay) ka.relayReply = undefined
+    await setKeepaliveRow($, k => rowAfterResume(k, r.relayCount + 1, r.maxRelays))
   } else {
+    await r.onFail()
+  }
+}
+
+/** One relay compaction ([`relayCompact`]): its instructions; the resume,
+ *  read once the compaction ran, null for none; the count before it; what
+ *  started it; how a turn that started defers it; and what follows a
+ *  compaction or resume that failed, and one that ran with no resume. */
+type RelayRun = {
+  instructions: string
+  resume: () => Promise<string | null>
+  relayCount: number
+  maxRelays: number
+  trigger: RelayTrigger
+  defer: (why: string) => void
+  onFail: () => Promise<void>
+  onNoResume: () => Promise<void>
+}
+
+/** A relay after a wrap, at attend's word in `d`: a failure stops the relay,
+ *  and the next check hands the reply over. */
+function wrapRelay($: $, mod: Mod, d: Decision, instructions: string): RelayRun {
+  const judgeAgain = async () => {
     $.clock.after(RELAY_CHECK_MS, () => void checkKeepalive($, mod))
+  }
+  return {
+    instructions,
+    resume: async () => d.resume,
+    relayCount: d.relayCount,
+    maxRelays: d.maxRelays,
+    trigger: undefined,
+    defer: why => deferRelay($, mod.ka, why),
+    onFail: judgeAgain,
+    onNoResume: async () => {},
   }
 }
 
@@ -1325,16 +1411,23 @@ function deferRelay($: $, ka: Keepalive, why: string) {
  *  opening with its handoff line, which names why the relay stopped; a
  *  refused send is written to the wrap file instead. Where this module
  *  holds no reply (it reloaded since the wrap), attend's `handoff`, the
- *  handoff file's text, is sent in its place.
+ *  handoff file's text, is sent in its place. The boundary tool's doubt
+ *  passes the handoff file's text as `text`, which is sent whatever reply
+ *  the module holds. Returns where it went.
  *
  *  References:
- *  - ADR-417 item 5: a stopped relay hands its reply to the operator. */
-async function sendRelayHandoff($: $, ka: Keepalive, route: WrapRoute, handoff: string | null) {
-  const reply = ka.relayReply ?? handoff ?? 'The reply is in the session transcript.'
-  ka.relayReply = undefined
-  if (isOpenChannel(route.to)) return
+ *  - ADR-417 item 5: a stopped relay hands its reply to the operator.
+ *  - ADR-418 §11: doubt sends the handoff to the operator over attend. */
+async function sendRelayHandoff($: $, ka: Keepalive, route: WrapRoute, handoff: string | null, text?: string): Promise<HandoffSent> {
+  const reply = text ?? ka.relayReply ?? handoff ?? 'The reply is in the session transcript.'
+  if (text === undefined) ka.relayReply = undefined
+  if (isOpenChannel(route.to)) return { kind: 'unsent', why: `${route.to} reaches every listening session` }
   const r = await run($, wrapSendArgv(route, reply))
-  if (r.exitCode !== 0 && route.file !== '') await run($, saveArgv('refused', refusalDetail(route.to, r), route.file), undefined, reply)
+  if (r.exitCode === 0) return { kind: 'sent', to: route.to }
+  const why = refusalDetail(route.to, r)
+  if (route.file === '') return { kind: 'unsent', why }
+  const saved = await run($, saveArgv('refused', why, route.file), undefined, reply)
+  return saved.exitCode === 0 ? { kind: 'saved', to: route.to, file: route.file } : { kind: 'unsent', why }
 }
 
 /** The compaction after the wrap, with the wrap's focus; attend records
@@ -1361,6 +1454,195 @@ async function compactAfterWrap($: $, instructions: string) {
 async function reportUnrouted($: $, ka: Keepalive, why: string) {
   ka.wrap = undefined
   await serialize(ka, () => run($, wrappedArgv('unfinished', why)))
+}
+
+// ── the boundary tool (ADR-418) ─────────────────────────────────────────
+//
+// The agent's `/wrap boundary` ends with attend_boundary. The handler checks
+// the handoff, gathers the brief, applies the mod's refusals, and only then
+// asks the judge; it settles the judge's verdict with the agent's call and
+// records the move with attend, which arms the exit on stop and doubt. A
+// doubt sends the handoff to the operator at once; a compact, and a doubt
+// with relay on, compact once the tool's turn has ended, through the relay's
+// compaction path. boundary.ts holds the rules.
+
+/** One boundary call: a refusal, or the verdict and the move.
+ *
+ *  References:
+ *  - ADR-418 §10: the refusals come first and none reaches the judge.
+ *  - ADR-418 §11: doubt sends the handoff to the operator over attend.
+ *  - ADR-418 §12: the stop, compact and continue rows.
+ *  - ADR-418 §13: the mod refuses to arm the exit until the handoff with
+ *    the wrap's id exists; self-relays count toward `max_relays`. */
+async function boundary($: $, mod: Mod, e: unknown) {
+  const input = boundaryInput(e)
+  if ('error' in input) return { result: input.error, isError: true as const }
+  if (mod.turnStart.isTypedWrap) return TYPED_WRAP_REFUSAL
+  // The relay setting as it stands now, as a wrap reads it; ways that
+  // cannot answer reads relay off, the side that never compacts.
+  //
+  // References:
+  // - ADR-417 item 1: the relay setting is read when a wrap starts.
+  const relay = (await readConfig($, mod.cwd)).relay
+  const handoff = await readHandoff($, input.wrapId)
+  if ('refusal' in handoff) return { result: handoff.refusal, isError: true as const }
+  const agents = await inFlightAgents($)
+  const r = await run($, BRIEF_ARGV, BRIEF_TIMEOUT_MS, briefInput({
+    agents,
+    tasks: await taskList($),
+    window: mod.contextWindow,
+    operatorPromptAtMs: mod.ka.operatorPromptAtMs,
+  }))
+  const brief = r.exitCode === 0 ? parseBrief(r.stdout) : undefined
+  const facts = { inFlight: inFlightOf(brief, agents), draining: relay && mod.ka.isDraining, operatorTurn: mod.turnStart.isOperator }
+  const refused = refusalOf(input.own, facts)
+  if (refused) return refusedResult(refused, relay)
+  const judged = brief ? await judgeBoundary($, handoff.path, r.stdout) : doubtOf(`the brief could not be gathered (attend keepwarm brief exited ${r.exitCode})`)
+  // The relay count before this boundary: a compaction is refused once it
+  // reaches max_relays, or where the brief could not read it.
+  const relays = relaysOf(brief)
+  const plan = settle(input.own, judged.verdict, facts, relay, hasRoom(relays), relays)
+  const recorded = await serialize(mod.ka, () => run($, judgedArgv(input.wrapId, plan.record, judged, input.own)))
+  if (recorded.exitCode !== 0) return boundaryResult({ judged, plan, relay, recorded, isArmed: false })
+  const rec = parseRecorded(recorded.stdout)
+  const isArmed = rec?.isArmed ?? (plan.record === 'stop' || plan.record === 'doubt')
+  if (isArmed) await armJudged($, mod)
+  // attend resolves where the doubt's handoff goes and its handoff line.
+  let sent: HandoffSent | undefined
+  if (plan.isHandoffSent) sent = rec?.route ? await sendRelayHandoff($, mod.ka, rec.route, null, handoff.text) : { kind: 'no-route' }
+  if (plan.move === 'compact' || plan.move === 'doubt') {
+    mod.ka.boundary = {
+      move: plan.move,
+      instructions: compactInstructions(handoff.text, handoff.path),
+      resume: plan.move === 'compact' && relays ? resumeText(handoff.path, relays.n + 1, relays.max) : null,
+      relayCount: relays?.n ?? 0,
+      maxRelays: relays?.max ?? 0,
+      stopArgv: plan.move === 'compact' ? judgedArgv(input.wrapId, 'stop', judged, input.own) : null,
+    }
+  }
+  if (plan.move === 'doubt') await setKeepaliveRow($, rowAfterDoubt)
+  return boundaryResult({ judged, plan, relay, recorded, isArmed, relays: plan.move === 'compact' ? relays : undefined, sent })
+}
+
+/** attend armed the exit: the policy check carries it out, in a session
+ *  whose settings run none too, as for a stop recorded by hand. While a
+ *  main-loop turn runs, its end sets the timer. */
+async function armJudged($: $, mod: Mod) {
+  if (mod.ka.exit !== undefined) return
+  setExit(mod, 'judged')
+  if (mod.running.size === 0) await armKeepalive($, mod, (await $.clock.now()) + firstCheckMs(mod.config))
+}
+
+/** A main-loop turn ended with a boundary compaction waiting: it runs
+ *  between turns, unless a turn starts first, which defers it to that
+ *  turn's end. An operator prompt clears it (prompt.submit).
+ *
+ *  References:
+ *  - ADR-417 item 4: the mod compacts and resumes only between turns.
+ *  - ADR-418 §13: no self-compaction while the operator is talking. */
+function scheduleBoundary($: $, mod: Mod) {
+  const b = mod.ka.boundary
+  if (!b || mod.running.size > 0) return
+  const epoch = mod.ka.epoch
+  $.clock.after(RELAY_CHECK_MS, () => {
+    if (mod.ka.boundary !== b) return
+    if (mod.running.size > 0 || mod.ka.epoch !== epoch) {
+      $.ui.log("attend: the boundary's compaction waits for the turn that started before it; it runs once that turn ends")
+      return
+    }
+    mod.ka.boundary = undefined
+    void serialize(mod.ka, () => compactBoundary($, mod, b))
+  })
+}
+
+/** The boundary's compaction through the relay's path. After a compact the
+ *  resume goes in while tasks remain; with none left, or where the
+ *  compaction or the resume failed, attend records the same wrap as a stop,
+ *  which arms the exit. A doubt submits no resume: its exit is armed and
+ *  its handoff sent already. The caller holds the keepalive chain.
+ *
+ *  References:
+ *  - ADR-418 §12: the compact row: the mod compacts with the handoff, then
+ *    resumes when tasks remain or stops when none do. */
+async function compactBoundary($: $, mod: Mod, b: BoundaryCompaction) {
+  const stop = async () => {
+    if (b.stopArgv === null) return
+    const r = await run($, b.stopArgv)
+    if (r.exitCode === 0 && (parseRecorded(r.stdout)?.isArmed ?? true)) await armJudged($, mod)
+  }
+  await relayCompact($, mod, {
+    instructions: b.instructions,
+    resume: async () => (b.resume !== null && hasTasks(await taskList($)) ? b.resume : null),
+    relayCount: b.relayCount,
+    maxRelays: b.maxRelays,
+    trigger: 'boundary',
+    defer: why => {
+      mod.ka.boundary = b
+      $.ui.log(`attend: the boundary's compaction waits for the turn that started: ${why}; it runs once that turn ends`)
+    },
+    onFail: stop,
+    onNoResume: stop,
+  })
+}
+
+/** The handoff at the repository root, with its text, when its first line
+ *  carries the wrap's id; otherwise the refusal. */
+async function readHandoff($: $, wrapId: string): Promise<{ path: string; text: string } | { refusal: string }> {
+  const again = `Write the handoff with wrap=${wrapId} on its first line (the wrap skill's Step 3), then call attend_boundary again. Nothing was judged and nothing is armed.`
+  const root = await run($, ROOT_ARGV, 5_000)
+  if (root.exitCode !== 0 || root.stdout.trim() === '') return { refusal: `Refused: this session is not in a git repository, so it has no ${HANDOFF_FILE}. ${again}` }
+  const path = `${root.stdout.trim()}/${HANDOFF_FILE}`
+  let text: string
+  try {
+    text = await $.fs.read(path)
+  } catch {
+    return { refusal: `Refused: ${path} is missing. ${again}` }
+  }
+  return handoffCarries(text, wrapId) ? { path, text } : { refusal: `Refused: the first line of ${path} does not carry wrap=${wrapId}. ${again}` }
+}
+
+/** The agent loops in flight, one line each; undefined where the list
+ *  cannot be read, so the brief's Stop record answers. */
+async function inFlightAgents($: $): Promise<string[] | undefined> {
+  try {
+    return agentLines(await $.agent.list())
+  } catch {
+    return undefined
+  }
+}
+
+/** The session's task list through the TaskList tool; undefined where it
+ *  cannot be read, and the brief reports it unknown. */
+async function taskList($: $) {
+  try {
+    const r = await $.tool.call({ tool: 'TaskList' } as never)
+    return taskLines((r as { result?: unknown }).result)
+  } catch {
+    return undefined
+  }
+}
+
+/** The judge's verdict: ways answers on a key engine; on claude-code it
+ *  prints the job, which goes through `$.model.complete` with no tools and
+ *  no history, and ways parses the answer. Anything else is doubt.
+ *
+ *  References:
+ *  - ADR-418 §10: the judge decides and never works; the mod keeps only
+ *    the verdict line. */
+async function judgeBoundary($: $, handoff: string, conditions: string): Promise<Judged> {
+  const session = await $.session.id()
+  const out = parseJudgeOut(await run($, judgeArgv(session, handoff), JUDGE_TIMEOUT_MS, conditions))
+  if (out.kind === 'verdict') return out.judged
+  if (out.kind === 'fallback') return doubtOf(out.reason)
+  let answer: string
+  try {
+    answer = answerOf(await $.model.complete(requestOf(out.job)))
+  } catch {
+    // The engine refused to send the call (a blocked model, a bad cap).
+    answer = JSON.stringify({ reason: 'error' })
+  }
+  const parsed = parseJudgeOut(await run($, parseArgv(session), PARSE_TIMEOUT_MS, answer))
+  return parsed.kind === 'verdict' ? parsed.judged : doubtOf(parsed.kind === 'fallback' ? parsed.reason : 'the parse printed a job')
 }
 
 export const register: Register = on => {
@@ -1424,7 +1706,11 @@ export const register: Register = on => {
       operatorPromptAtMs: undefined,
       relay: false,
       exit: undefined,
+      boundary: undefined,
     },
+    contextWindow: undefined,
+    nextTurn: { isOperator: false, isTypedWrap: false },
+    turnStart: { isOperator: false, isTypedWrap: false },
   }
 
   on('session.start', async ($, e, next) => {
@@ -1449,6 +1735,13 @@ export const register: Register = on => {
     // may be warm) and records the gate for the status card.
     if (mod.ka.applies) await armKeepalive($, mod, (await $.clock.now()) + POLICY_START_MS)
     await registerListen($)
+    // The boundary tool, whatever the relay setting: with relay off it
+    // offers stop and continue only. A -p run or an SDK session runs no
+    // policy check, so no exit could be carried out there.
+    //
+    // References:
+    // - ADR-418 §12: the tool the agent calls.
+    if (e.isInteractive) await $.tool.register(BOUNDARY_TOOL)
     mod.isStarted = true
     // The move's watch runs on this hook's `$`: session.end's bound aborts
     // the waits of its own.
@@ -1531,6 +1824,7 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     const before = mod.contextTokens
     mod.contextTokens = e.context.tokens
+    mod.contextWindow = e.context.window > 0 ? e.context.window : mod.contextWindow
     if (isContextReset(before, e.context.tokens)) await markCompacted($)
     // Relay's fill path: a turn's end past the drain point asks attend,
     // once no turn runs, which judges the drain and the hard line. The
@@ -1571,10 +1865,26 @@ export const register: Register = on => {
     return done
   })
 
-  // A stop verdict recorded by hand (`attend keepwarm judged --verdict
-  // stop`) may arm an exit, which attend carries out at its ticks. The
-  // policy check runs from here, in a session whose settings run none too,
-  // and the turn's end sets its timer; a check that finds no exit ends it.
+  // A `/wrap` the operator types stays the operator's own: the boundary
+  // tool refuses in its turn, unless it asked for the boundary mode.
+  //
+  // References:
+  // - ADR-418 §14 item 2(b): a `/wrap` the operator types is not judged.
+  on('command.run', { command: 'wrap' }, async ($, e, next) => {
+    if (OPERATOR_ORIGINS.has(e.origin?.kind ?? '') && !isBoundaryWrap(e.args ?? '')) {
+      mod.nextTurn = { isOperator: true, isTypedWrap: true }
+    }
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'mcp__attend__attend_boundary' }, async ($, e) => boundary($, mod, e))
+
+  // A boundary recorded by hand (`attend keepwarm judged --move stop`, or a
+  // `--verdict stop` with no `--move`) may arm an exit, which attend carries
+  // out at its ticks; a stop or a doubt arms, and a continue or a compact
+  // does not. The policy check runs from here, in a session whose settings
+  // run none too, and the turn's end sets its timer; a check that finds no
+  // exit ends it.
   //
   // References:
   // - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
@@ -1582,12 +1892,9 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const done = await next(e)
     const command = (e as { command?: unknown }).command
-    if (mod.isStarted && mod.ka.exit === undefined && typeof command === 'string' && isJudgedStop(command)) {
-      setExit(mod, 'judged')
-      // No main-loop turn runs, a subagent's call say, so no turn's end
-      // sets the timer: it is set here.
-      if (mod.running.size === 0) await armKeepalive($, mod, (await $.clock.now()) + firstCheckMs(mod.config))
-    }
+    // Where no main-loop turn runs, a subagent's call say, no turn's end
+    // sets the timer: armJudged sets it.
+    if (mod.isStarted && typeof command === 'string' && isJudgedArming(command)) await armJudged($, mod)
     return done
   })
 
@@ -1601,7 +1908,17 @@ export const register: Register = on => {
     // starts the count again.
     mod.ka.epoch += 1
     if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    mod.nextTurn.isOperator = true
     mod.ka.operatorPromptAtMs = await $.clock.now()
+    // The operator is back: a boundary compaction still waiting does not
+    // run, since the agent does not compact while the operator is talking.
+    //
+    // References:
+    // - ADR-418 §13: no self-compaction while the operator is talking.
+    if (mod.ka.boundary) {
+      mod.ka.boundary = undefined
+      $.ui.log("attend: the operator prompted, so the boundary's compaction does not run; the handoff stands as a checkpoint")
+    }
     await keepaliveOperator($, mod)
     const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold
     if (mod.heldNote === undefined && !isHeldCold) return next(e)
@@ -1616,6 +1933,8 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
     mod.running.add(e.turnId)
+    mod.turnStart = mod.nextTurn
+    mod.nextTurn = { isOperator: false, isTypedWrap: false }
     // Nothing is due while a main-loop turn runs, and a check in flight
     // submits nothing. The turn the wrap's own text started is the wrap's.
     mod.ka.epoch += 1
@@ -1650,6 +1969,7 @@ export const register: Register = on => {
     mod.running.delete(e.turnId)
     mod.lastActivityMs = await $.clock.now()
     await keepaliveTurnEnded($, mod, e)
+    scheduleBoundary($, mod)
     // Whatever the Stop hook left (or all of it, where no Stop hook runs).
     if (mod.canPoll) $.clock.after(250, () => void tick($, mod, true))
     return done

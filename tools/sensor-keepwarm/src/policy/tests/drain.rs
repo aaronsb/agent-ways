@@ -31,7 +31,10 @@ fn a_fill_at_the_drain_point_drains_once_and_the_hard_line_wraps() {
     let mut lines = text.lines();
     assert_eq!(lines.next(), Some("drain: context at 76% (760k of 1M), past the drain point of 75%."));
     assert!(text.contains("start nothing new, finish the work in flight and collect your agents' reports"), "{text}");
-    assert!(text.contains("Run the wrap skill with the argument stay at the next boundary"), "{text}");
+    assert!(
+        text.contains("Run the wrap skill with the argument boundary at the next boundary, where a piece of work lands; the wrap ends with the attend_boundary tool, which refuses continue while the session drains."),
+        "{text}"
+    );
     assert!(text.contains("The mod wraps mid-work at the hard line of 85%."), "{text}");
     // Once per generation: once the mod reports the turn went in, a later
     // fill under the hard line asks nothing.

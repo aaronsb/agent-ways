@@ -1092,4 +1092,186 @@ fn judged_continue_arms_nothing_and_pending_is_checked() {
     let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "off", "--pending", "pets=1"]);
     assert_eq!(out.status.code(), Some(2), "{}", String::from_utf8_lossy(&out.stderr));
 }
+
+const WRAP: &str = "20261127T0900Z-3f9a1c2e";
+
+/// `attend keepwarm judged` for [`WRAP`] with the judge's `verdict` and the
+/// mod's `move`, where one is given, and any `extra` flags.
+fn judged_move(w: &Warm, verdict: &str, moved: Option<&str>, extra: &[&str]) -> std::process::Output {
+    let mut args = vec!["keepwarm", "judged", "--wrap", WRAP, "--verdict", verdict, "--handoff", "sufficient", "--own", "continue", "--reason", "the release landed"];
+    if let Some(m) = moved {
+        args.extend(["--move", m]);
+    }
+    args.extend(extra);
+    let out = w.run(&args);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    out
+}
+
+/// `attend keepwarm status --json`, and any `extra` flags.
+fn status_json(w: &Warm, extra: &[&str]) -> serde_json::Value {
+    let mut args = vec!["keepwarm", "status", "--json"];
+    args.extend(extra);
+    let out = w.run(&args);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+/// The last boundary as `status --json` shows it, for a judge's `verdict`
+/// carried out as `moved`.
+fn boundary(verdict: &str, moved: &str) -> serde_json::Value {
+    serde_json::json!({ "wrap": WRAP, "verdict": verdict, "handoff": "sufficient", "own": "continue", "move": moved, "reason": "the release landed" })
+}
+
+/// With no `--move`, the move is the verdict, as hand-run calls from
+/// before the flag expect: a stop arms, a continue arms nothing.
+#[test]
+fn the_move_defaults_to_the_verdict() {
+    let w = Warm::new("kw-move-default");
+    handoff_for(&w, Some(WRAP));
+    judged_move(&w, "stop", None, &[]);
+    let s = status_json(&w, &[]);
+    assert_eq!(s["boundary"], boundary("stop", "stop"), "{s}");
+    assert_eq!((s["exit"]["state"].as_str(), s["exit"]["move"].as_str()), (Some("armed"), Some("stop")), "{s}");
+    judged_move(&w, "continue", None, &[]);
+    let s = status_json(&w, &[]);
+    assert_eq!(s["boundary"], boundary("continue", "continue"), "{s}");
+    assert_eq!(s["exit"]["state"], "continue", "{s}");
+}
+
+/// A judge's `compact` carried out as `stop`, as with relay off, arms the
+/// exit, and the record keeps the verdict beside the move. The first due
+/// point with nothing pending finishes.
+///
+/// References:
+/// - ADR-418 item 12: the stop row arms the exit.
+#[test]
+fn a_compact_verdict_carried_out_as_stop_arms_and_keeps_both() {
+    let w = Warm::new("kw-move-compact-stop");
+    handoff_for(&w, Some(WRAP));
+    let out = judged_move(&w, "compact", Some("stop"), &[]);
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with(&format!("exit armed for wrap {WRAP}: ")), "{}", String::from_utf8_lossy(&out.stdout));
+    let s = status_json(&w, &[]);
+    assert_eq!(s["boundary"], boundary("compact", "stop"), "{s}");
+    let e = &s["exit"];
+    assert_eq!(
+        (e["state"].as_str(), e["wrap_id"].as_str(), e["verdict"].as_str(), e["own"].as_str(), e["move"].as_str()),
+        (Some("armed"), Some(WRAP), Some("compact"), Some("continue"), Some("stop")),
+        "{s}"
+    );
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["exit"]["move"].as_str()), (Some("finish"), Some("stop")), "{d}");
+}
+
+/// Your own `continue` against the judge's `stop` continues: the move arms
+/// nothing, and the due point pings as today.
+#[test]
+fn a_continue_move_arms_nothing_against_a_stop_verdict() {
+    let w = Warm::new("kw-move-continue");
+    handoff_for(&w, Some(WRAP));
+    let out = judged_move(&w, "stop", Some("continue"), &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("judged wrap {WRAP}: stop, carried out continue, the handoff sufficient; no exit is armed\n")
+    );
+    let s = status_json(&w, &[]);
+    assert_eq!(s["boundary"], boundary("stop", "continue"), "{s}");
+    assert_eq!(s["exit"]["state"], "continue", "{s}");
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("keepalive"), Some("running")), "{d}");
+}
+
+/// Recording the same wrap again replaces its record: the mod records
+/// `--move compact`, and once no tasks remain after the compaction,
+/// `--move stop`, which then arms. The ledger holds one record.
+#[test]
+fn recording_the_wrap_again_replaces_its_record() {
+    let w = Warm::new("kw-move-again");
+    handoff_for(&w, Some(WRAP));
+    judged_move(&w, "compact", Some("compact"), &[]);
+    assert_eq!(status_json(&w, &[])["exit"]["state"], "compact");
+    assert!(w.run(&["keepwarm", "compacted", "--trigger", "boundary"]).status.success());
+    judged_move(&w, "compact", Some("stop"), &[]);
+    let s = status_json(&w, &[]);
+    assert_eq!(s["boundary"], boundary("compact", "stop"), "{s}");
+    assert_eq!(s["exit"]["state"], "armed", "{s}");
+    let ledger: serde_json::Value = serde_json::from_slice(&std::fs::read(w.ledger()).unwrap()).unwrap();
+    let exit = &ledger["policy"]["exit"];
+    assert!(exit.is_object(), "one record: {ledger}");
+    assert_eq!((exit["verdict"].as_str(), exit["move"].as_str(), exit["pings"].as_u64()), (Some("compact"), Some("stop"), Some(0)), "{exit}");
+}
+
+/// `judged --json` prints one object: whether it recorded and armed, the
+/// move, and for `doubt` the route its handoff takes, the relay stop's,
+/// with a `handoff:` line naming the boundary judge and its reason. A stop
+/// has no route. A refusal prints no JSON.
+///
+/// References:
+/// - ADR-418 item 11: in relay mode, `doubt` becomes `relay: stop doubt`,
+///   and the handoff goes to the operator over attend.
+#[test]
+fn judged_json_gives_the_doubt_handoff_s_route() {
+    let w = Warm::new("kw-judged-json");
+    handoff_for(&w, Some(WRAP));
+    let out = judged_move(&w, "doubt", None, &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((v["recorded"].as_bool(), v["armed"].as_bool(), v["move"].as_str()), (Some(true), Some(true), Some("doubt")), "{v}");
+    let r = &v["wrap"];
+    assert_eq!(r["to"], "fixture-human", "an empty wrap_to falls back to the operator: {v}");
+    let line = r["handoff"].as_str().unwrap();
+    assert!(line.starts_with("handoff: continuation prompt from "), "{line}");
+    assert!(line.ends_with(" The relay stopped: the boundary judge said doubt, the release landed."), "{line}");
+    for key in ["dest", "file", "after", "after_keepalives", "notes"] {
+        assert!(r.get(key).is_some(), "the route carries {key}: {v}");
+    }
+    let out = judged_move(&w, "compact", Some("stop"), &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v, serde_json::json!({ "recorded": true, "armed": true, "move": "stop", "wrap": null }));
+    let out = judged_move(&w, "stop", Some("continue"), &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v, serde_json::json!({ "recorded": true, "armed": false, "move": "continue", "wrap": null }));
+    let w = Warm::new("kw-judged-json-refused");
+    handoff_for(&w, None);
+    let out = w.run(&["keepwarm", "judged", "--wrap", WRAP, "--verdict", "doubt", "--handoff", "sufficient", "--own", "stop", "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("keepwarm judged refused: no handoff"), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// `status --session <id>` reads the named session's ledger from a shell
+/// no Claude Code process owns, as a tmux pane or the operator's terminal
+/// is; without it, that shell has no session. An id with no session
+/// record is refused with exit 3, and one no record could name with
+/// exit 2.
+#[test]
+fn status_session_reads_another_session_from_any_shell() {
+    let w = Warm::new("kw-status-session");
+    handoff_for(&w, Some(WRAP));
+    judged_move(&w, "compact", Some("stop"), &[]);
+    w.reading(&[(5 * MIN, 200_000, 500)]);
+    let sid = w.f.sid.clone();
+    let record = w.f.home.join(".claude").join("sessions").join("3999999.json");
+    w.f.without_session(|| {
+        assert_eq!(w.run(&["keepwarm", "status", "--json"]).status.code(), Some(1), "no session owns this shell");
+        std::fs::write(&record, w.f.record("3999999", &sid, None)).unwrap();
+        let s = status_json(&w, &["--session", &sid]);
+        assert_eq!(s["boundary"], boundary("compact", "stop"), "{s}");
+        assert_eq!(s["exit"]["state"], "armed", "{s}");
+        let out = w.run(&["keepwarm", "status", "--session", &sid]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let card = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<&str> = card.lines().filter(|l| l.contains(WRAP)).collect();
+        assert_eq!(lines.len(), 1, "one line for the last boundary: {card}");
+        assert!(
+            lines[0].starts_with(&format!("exit        armed · wrap {WRAP}, the judge said compact, the handoff is sufficient, own call continue, carried out stop · "))
+                && lines[0].ends_with(" · the judge's reason: the release landed"),
+            "{card}"
+        );
+        assert_eq!(w.run(&["keepwarm", "status", "--json", "--session", "sess-nobody"]).status.code(), Some(3));
+        assert_eq!(w.run(&["keepwarm", "status", "--json", "--session", "no good"]).status.code(), Some(2));
+        std::fs::remove_file(&record).unwrap();
+    });
+}
 }
