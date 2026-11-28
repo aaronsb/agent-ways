@@ -476,6 +476,15 @@ pub fn card_line(state: &State, now: u64) -> Option<String> {
     })
 }
 
+/// When the armed exit's next tick falls, as [`judge`] times it, or `None`
+/// once the exit finished or before the session's first request.
+pub(super) fn tick_at(state: &State, reading: &Reading, cfg: &Config) -> Option<u64> {
+    if state.policy.exit.as_ref()?.finished_at.is_some() {
+        return None;
+    }
+    reading.usage_tail.last().filter(|l| l.at_epoch > 0).map(|l| super::tick_of(l, cfg))
+}
+
 /// Whether a stop exit is in force: the move armed the exit and the
 /// session finished, or the handoff still carries the wrap id. A stale or
 /// missing handoff leaves the session to the checks of today.
@@ -537,7 +546,7 @@ pub(super) fn judge(state: &mut State, reading: &Reading, cfg: &Config, site: &S
         return Some(d);
     };
     let ttl = last.ttl_secs();
-    let tick = last.at_epoch + ttl.saturating_sub(cfg.margin_secs);
+    let tick = super::tick_of(last, cfg);
     if now < tick {
         let mut d = Decision::new(cfg, p, true, "armed", format!("armed: the next tick is at {}", cfg.windows.hm(tick)));
         d.next_at = Some(tick);

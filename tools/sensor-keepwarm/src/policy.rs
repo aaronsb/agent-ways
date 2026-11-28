@@ -1403,8 +1403,70 @@ fn due_point(state: &State, reading: &Reading, cfg: &Config) -> Result<(u64, u64
     if state.ctx < BIG_TOKENS {
         return Err(Idle::SmallContext);
     }
-    let ttl = last.ttl_secs();
-    Ok((last.at_epoch + ttl.saturating_sub(cfg.margin_secs), ttl, last.at_epoch))
+    Ok((tick_of(last, cfg), last.ttl_secs(), last.at_epoch))
+}
+
+/// The idle tick after the request `last`: its cache's lifetime less
+/// `margin_minutes`, counted from that request.
+fn tick_of(last: &crate::UsageEntry, cfg: &Config) -> u64 {
+    last.at_epoch + last.ttl_secs().saturating_sub(cfg.margin_secs)
+}
+
+/// When the next keepwarm check that can wake the session, or let its
+/// cache lapse, falls, in the order [`step`] judges them: an armed
+/// window's wake, an armed exit's tick, then the keepalive count's next due
+/// point. While a wake waits for its turn, the time it went out. `None`
+/// where no check is armed: a relay stopped until the operator's next
+/// prompt, a finished exit, a keepalive count that stopped or wrapped, or a
+/// policy that does not run here and no window or exit in force. `site`
+/// carries the handoff an armed exit names.
+///
+/// References:
+/// - ADR-419 item 2: the supervisor reads when the next tick falls.
+pub fn next_tick_at(state: &State, reading: &Reading, arm: Option<&ArmFile>, cfg: &Config, site: &Site, now: u64) -> Option<u64> {
+    let p = &state.policy;
+    let cfg = &cfg.with_seen(p);
+    if !cfg.keepwarm_on {
+        return None;
+    }
+    let runs = p.gate.as_deref().is_some_and(|g| cfg.why_off(Gate::parse(g)).is_none());
+    if runs && relay_held(p) {
+        return None;
+    }
+    // A wake whose turn has not come yet; one the transcript answered is
+    // over, as the next check's step finds it.
+    if let Some(t) = state.pinged_at.filter(|t| state.last_seen_at < *t) {
+        return Some(t);
+    }
+    // The policy reads the sensor's own arm after a cold write as no window.
+    let window = arm.is_some_and(|a| !(runs && a.auto)) && state.deadline > now;
+    let state = &State { pinged_at: None, ..state.clone() };
+    if window {
+        return crate::window_wake_at(state, now);
+    }
+    if cfg.settings_ok && armed::in_force(state, site) {
+        return armed::tick_at(state, reading, cfg);
+    }
+    if !runs || p.stopped.is_some() || after_wrap_ends(cfg, p).is_some() || !cfg.enabled {
+        return None;
+    }
+    due_point(state, reading, cfg).ok().map(|(due, _, _)| due)
+}
+
+/// A relay wrap's stop holds every check until the operator's next prompt:
+/// no keepalive, no exit tick, no further compaction.
+///
+/// References:
+/// - ADR-417 item 5: the stops that end the relay.
+fn relay_held(p: &Policy) -> bool {
+    p.relay && p.wrapped_at.is_some() && p.stopped.is_some()
+}
+
+/// The relay's stop reason in a few words (`decision`, `doubt`, `empty`,
+/// `10 of 10`), or `None` while it has not stopped since the operator's
+/// last prompt.
+pub fn relay_stopped(p: &Policy) -> Option<&str> {
+    p.relay_stop.as_deref().filter(|_| p.stopped.is_some())
 }
 
 /// When the wrap goes out if nothing else happens: the first due point,
@@ -1731,7 +1793,7 @@ fn judge_relay(state: &mut State, cfg: &Config, site: &Site, now: u64) -> Option
     if !p.relay || p.wrapped_at.is_none() {
         return None;
     }
-    if p.stopped.is_some() {
+    if relay_held(p) {
         let mut d = Decision::new(cfg, p, true, "stopped", format!("stopped: {}; nothing more until the operator's next prompt", p.stopped.as_deref().unwrap_or_default()));
         d.wrap = Some(route(cfg, site, now));
         // A stop's compaction the mod has not run yet (a turn came first)
@@ -2211,7 +2273,7 @@ fn relay_line(p: &Policy, cfg: &Config) -> String {
     if !cfg.relay {
         return "relay       off: a wrap ends with a /compact line for the operator (handoff mode)".into();
     }
-    if let (Some(_), Some(why)) = (&p.relay_stop, &p.stopped) {
+    if let (Some(_), Some(why)) = (relay_stopped(p), &p.stopped) {
         return format!("relay       stopped: {why}; your next prompt starts it again");
     }
     let mut line = format!("relay       on · {} of {}{} · ", p.relays, cfg.max_relays, since_text(p, cfg));

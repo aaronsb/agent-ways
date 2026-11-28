@@ -740,25 +740,58 @@ pub fn card_state(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledg
     s
 }
 
+/// The card's verdict on the prompt cache: `unknown` before the session's
+/// first request, else `cold` an hour after its last request and `warm`
+/// before that.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheState {
+    Warm,
+    Cold,
+    Unknown,
+}
+
+/// The card's verdict on `s`'s cache at `now`.
+pub fn cache_state(s: &State, now: u64) -> CacheState {
+    if s.last_seen_at == 0 {
+        CacheState::Unknown
+    } else if s.is_cold(now) {
+        CacheState::Cold
+    } else {
+        CacheState::Warm
+    }
+}
+
+/// When `s`'s cache lapses, as the card counts it: the last request plus
+/// the cache's hour. `None` before the first request.
+pub fn lapses_at(s: &State) -> Option<u64> {
+    (s.last_seen_at > 0).then(|| s.last_seen_at + TTL_SECS)
+}
+
+/// When an armed window's next wake falls, as the card shows it: fifty
+/// idle minutes after the last request. `None` with no window armed, no
+/// request yet, or a wake that still waits for its turn.
+pub fn window_wake_at(s: &State, now: u64) -> Option<u64> {
+    (s.deadline > now && s.pinged_at.is_none() && s.last_seen_at > 0).then(|| s.last_seen_at + PING_AFTER_SECS)
+}
+
 /// The lines `attend keepwarm status` prints.
 pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, now: u64) -> Vec<String> {
     let s = card_state(reading, arm, ledger);
     let mut lines = Vec::new();
     lines.push(format!("model       {}", if s.model.is_empty() { "not seen yet" } else { &s.model }));
-    if s.last_seen_at == 0 {
-        lines.push("state       no request yet this session".to_string());
-    } else if s.is_cold(now) {
-        lines.push(format!("state       COLD, last request {} ago", fmt_duration(now - s.last_seen_at)));
-    } else {
-        lines.push(format!("state       warm, {} left", fmt_duration(s.last_seen_at + TTL_SECS - now)));
+    match (cache_state(&s, now), lapses_at(&s)) {
+        (CacheState::Warm, Some(at)) => lines.push(format!("state       warm, {} left", fmt_duration(at.saturating_sub(now)))),
+        (CacheState::Cold, _) => lines.push(format!("state       COLD, last request {} ago", fmt_duration(now.saturating_sub(s.last_seen_at)))),
+        _ => lines.push("state       no request yet this session".to_string()),
     }
     lines.push(format!("context     {} tokens", s.ctx));
     lines.push(format!("cold cost   {} to re-write it (warm turn {})", fmt_usd(s.cold_usd()), fmt_usd(s.warm_usd())));
     let keepwarm = if s.deadline > now {
         let next = if s.pinged_at.is_some() {
             " · waiting for the wake's turn".to_string()
-        } else if s.last_seen_at > 0 {
-            format!(" · wake in {}", fmt_duration((s.last_seen_at + PING_AFTER_SECS).saturating_sub(now)))
+        } else if let Some(at) = window_wake_at(&s, now) {
+            format!(" · wake in {}", fmt_duration(at.saturating_sub(now)))
         } else {
             String::new()
         };

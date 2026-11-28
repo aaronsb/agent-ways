@@ -715,12 +715,16 @@ pub enum KeepwarmCmd {
     /// Disarm and forget the window
     Off,
     /// Cache state, context size, cold price, window left, this session's
-    /// cold writes, and one line for the last boundary. With --json, the
-    /// ledger's boundary alone, with no transcript read: `exit` is the stop
-    /// exit's state (armed or finished, or the move's name for a move that
-    /// arms nothing), wrap id, verdict, move, pings, rent and purchase, and
-    /// `boundary` is the last boundary's wrap, verdict, handoff, own, move
-    /// and reason; each is null with none
+    /// cold writes, and one line for the last boundary. With --json, one
+    /// object: `exit` is the stop exit's state (armed or finished, or the
+    /// move's name for a move that arms nothing), wrap id, verdict, move,
+    /// pings, rent and purchase, and `boundary` is the last boundary's wrap,
+    /// verdict, handoff, own, move and reason, each null with none; `cache`
+    /// is the card's state (warm, cold or unknown), last_request_at,
+    /// lapses_at and next_tick_at; `relays` is count, max, relay and
+    /// stopped (the stop reason, such as decision or "10 of 10");
+    /// `operator_prompt_at` is the operator's last prompt. Times are epoch
+    /// seconds, and a value that cannot be read is null
     Status(KeepwarmStatusArgs),
     /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
     /// one is due, else nothing (exit 0 either way). The attend mod polls
@@ -885,7 +889,8 @@ pub enum KeepwarmCmd {
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct KeepwarmStatusArgs {
-    /// Print the ledger's boundary as one JSON object
+    /// Print the exit, the last boundary, the cache, the relays and the
+    /// operator's last prompt as one JSON object
     #[arg(long)]
     pub json: bool,
     /// The session to read, from any shell; unset, the session this shell

@@ -299,21 +299,29 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
     }
 }
 
-/// `attend keepwarm status` for the session `ident` names. With `json`, the
-/// ledger's boundary alone, for the attend mod: a process that resumes a
-/// session learns of an exit an earlier one recorded, and resets it at the
-/// operator's prompt.
+/// `attend keepwarm status` for the session `ident` names. With `json`, one
+/// object: the ledger's exit and boundary, for the attend mod, so a process
+/// that resumes a session learns of an exit an earlier one recorded and
+/// resets it at the operator's prompt; and the card's cache verdict, relay
+/// count and the operator's last prompt, for a supervisor.
 ///
 /// References:
 /// - ADR-418 item 9: an operator prompt disarms the exit.
 /// - ADR-418 item 14, item 4: the ledger records each boundary's calls.
+/// - ADR-419 item 2: the cache with its next tick, the relay count, and the
+///   operator's last prompt.
 fn status(ident: &attend_presence::session::SessionIdentity, json: bool) {
     let sid = ident.session_id.as_str();
     let dir = keepwarm_dir();
     let now = sensor_trait::epoch_secs();
     if json {
-        let state = State::resume(read_ledger(&dir, sid));
-        println!("{}", serde_json::json!({ "exit": armed::view(&state), "boundary": armed::boundary(&state.policy) }));
+        let ledger = read_ledger(&dir, sid);
+        let state = State::resume(ledger.clone());
+        let mut doc = serde_json::json!({ "exit": armed::view(&state), "boundary": armed::boundary(&state.policy) });
+        if let (Some(doc), serde_json::Value::Object(more)) = (doc.as_object_mut(), status_fields(ident, ledger.as_ref(), &dir, now)) {
+            doc.extend(more);
+        }
+        println!("{doc}");
         return;
     }
     let Some(reading) = read_context(sid, &ident.origin_path) else {
@@ -342,6 +350,41 @@ fn status(ident: &attend_presence::session::SessionIdentity, json: bool) {
             println!("{line}");
         }
     }
+}
+
+/// The `cache`, `relays` and `operator_prompt_at` keys of `status --json`,
+/// from what the card reads: the transcript through `ways context`, the arm
+/// file, the ledger, and the session's project settings. A value that
+/// cannot be read is null: the cache's without a transcript reading, the
+/// count, stop and prompt without a ledger, and the cap and relay mode
+/// without the settings.
+fn status_fields(ident: &attend_presence::session::SessionIdentity, ledger: Option<&sensor_keepwarm::Ledger>, dir: &Path, now: u64) -> serde_json::Value {
+    let sid = ident.session_id.as_str();
+    let arm = read_arm(dir, sid);
+    let settings = policy_settings(dir, sid, &ident.origin_path, now, SETTINGS_TIMEOUT);
+    let cfg = Config::from_settings(settings.as_deref());
+    let cache = read_context(sid, &ident.origin_path).map(|reading| {
+        let s = card_state(&reading, arm.as_ref(), ledger);
+        let mut site = site(ident);
+        site.handoff = s.policy.exit.as_ref().filter(|e| e.armed()).and_then(|e| read_handoff_at(e.path.clone()));
+        serde_json::json!({
+            "state": sensor_keepwarm::cache_state(&s, now),
+            "last_request_at": (s.last_seen_at > 0).then_some(s.last_seen_at),
+            "lapses_at": sensor_keepwarm::lapses_at(&s),
+            "next_tick_at": policy::next_tick_at(&s, &reading, arm.as_ref(), &cfg, &site, now),
+        })
+    });
+    let p = ledger.map(|l| &l.policy);
+    serde_json::json!({
+        "cache": cache.unwrap_or_else(|| serde_json::json!({ "state": "unknown", "last_request_at": null, "lapses_at": null, "next_tick_at": null })),
+        "relays": {
+            "count": p.map(|p| p.relays),
+            "max": cfg.settings_ok.then_some(cfg.max_relays),
+            "relay": cfg.settings_ok.then_some(cfg.relay),
+            "stopped": p.and_then(policy::relay_stopped),
+        },
+        "operator_prompt_at": p.and_then(|p| p.operator_at),
+    })
 }
 
 /// The session `id` names, for `status --session` from any shell, resolved

@@ -1438,4 +1438,154 @@ fn status_session_reads_another_session_from_any_shell() {
         std::fs::remove_file(&record).unwrap();
     });
 }
+
+/// The three keys a supervisor reads from `status --json`.
+fn supervised(s: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "cache": s["cache"], "relays": s["relays"], "operator_prompt_at": s["operator_prompt_at"] })
+}
+
+/// The last request's time as `status --json` reports it, checked against
+/// the reading written `ago` seconds before.
+fn last_request(s: &serde_json::Value, ago: u64) -> u64 {
+    let last = s["cache"]["last_request_at"].as_u64().unwrap_or_else(|| panic!("no last request: {s}"));
+    assert!(last.abs_diff(now() - ago) <= 5, "{s}");
+    last
+}
+
+/// The settings checks keep for a few minutes; a test that changes the
+/// settings mid-run drops the kept read.
+fn forget_settings(w: &Warm) {
+    std::fs::remove_file(w.f.cache().join("keepwarm").join(format!("{}.settings.json", w.f.sid))).ok();
+}
+
+/// A warm cache with an armed exit: the card's verdict, the last request,
+/// the lapse an hour after it, and the exit's tick fifty idle minutes after
+/// it, the time the policy check itself waits for. The operator's prompt
+/// is the one `keepwarm reset` recorded.
+///
+/// References:
+/// - ADR-419 item 2: the cache with its next tick, the relay count, and
+///   the operator's last prompt.
+#[test]
+fn status_json_gives_a_warm_cache_and_the_armed_exit_s_tick() {
+    let w = Warm::new("kw-status-warm");
+    let prompt = now() - 20 * MIN;
+    assert!(w.run(&["keepwarm", "reset", "--at", &prompt.to_string()]).status.success());
+    handoff_for(&w, Some(WRAP));
+    judged_move(&w, "stop", None, &[]);
+    w.reading(&[(5 * MIN, 200_000, 500)]);
+    let s = status_json(&w, &[]);
+    let last = last_request(&s, 5 * MIN);
+    assert_eq!(s["exit"]["state"], "armed", "{s}");
+    assert_eq!(
+        supervised(&s),
+        serde_json::json!({
+            "cache": { "state": "warm", "last_request_at": last, "lapses_at": last + 60 * MIN, "next_tick_at": last + 50 * MIN },
+            "relays": { "count": 0, "max": 5, "relay": false, "stopped": null },
+            "operator_prompt_at": prompt,
+        }),
+        "{s}"
+    );
+    let d = policy(&w, "off");
+    assert_eq!((d["state"].as_str(), d["next_at"].as_u64()), (Some("armed"), Some(last + 50 * MIN)), "{d}");
+    assert_eq!(status_json(&w, &[])["cache"], s["cache"], "the check's own tick");
+}
+
+/// Two idle hours: the card says cold, the cache lapsed an hour after the
+/// last request, and no check is armed to wake the session.
+#[test]
+fn status_json_gives_a_cold_cache_and_no_tick() {
+    let w = Warm::new("kw-status-cold");
+    w.reading(&[(120 * MIN, 200_000, 500)]);
+    policy(&w, "off");
+    let s = status_json(&w, &[]);
+    let last = last_request(&s, 120 * MIN);
+    assert_eq!(s["cache"], serde_json::json!({ "state": "cold", "last_request_at": last, "lapses_at": last + 60 * MIN, "next_tick_at": null }), "{s}");
+}
+
+/// A resumed generation's `relay: stop decision`: the relay is on, one
+/// relay ran of the default five, it stopped on `decision`, and nothing
+/// ticks until the operator's next prompt.
+#[test]
+fn status_json_gives_a_relay_stopped_on_decision() {
+    let w = Warm::new("kw-status-decision");
+    w.settings(RELAY_ON);
+    handoff_for(&w, Some(WRAP));
+    judged_json(&w, "compact", Some("compact"), &[]);
+    assert!(w.run(&["keepwarm", "compacted", "--trigger", "boundary"]).status.success());
+    assert!(w.run(&["keepwarm", "resumed", "--trigger", "boundary"]).status.success());
+    assert!(w.run(&["keepwarm", "stopped", "decision", "--detail", "which database"]).status.success());
+    w.reading(&[(5 * MIN, 200_000, 500)]);
+    policy(&w, "off");
+    let s = status_json(&w, &[]);
+    assert_eq!(s["relays"], serde_json::json!({ "count": 1, "max": 5, "relay": true, "stopped": "decision" }), "{s}");
+    assert_eq!((s["cache"]["state"].as_str(), s["cache"]["next_tick_at"].clone()), (Some("warm"), serde_json::Value::Null), "{s}");
+}
+
+/// With `max_relays` 1, one boundary relay leaves the count at 1 of 1 and
+/// the relay not yet stopped. The next relay wrap is judged at the cap and
+/// stops the relay with `1 of 1`, and nothing ticks after it.
+#[test]
+fn status_json_gives_the_relays_at_n_of_max_and_the_stop_at_the_cap() {
+    let w = Warm::new("kw-status-cap");
+    handoff_for(&w, Some(WRAP));
+    assert!(w.run(&["keepwarm", "compacted", "--trigger", "boundary"]).status.success());
+    assert!(w.run(&["keepwarm", "resumed", "--trigger", "boundary"]).status.success());
+    let _ = relay_wrap_judged(&w, "continue");
+    w.settings(r#"{"mods.attend.continuity.keepalive":{"value":true},"mods.attend.continuity.relay":{"value":"on"},"mods.attend.continuity.max_relays":{"value":1}}"#);
+    forget_settings(&w);
+    let s = status_json(&w, &[]);
+    assert_eq!(s["relays"], serde_json::json!({ "count": 1, "max": 1, "relay": true, "stopped": null }), "{s}");
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["relay_stop"].as_str()), (Some("compact"), Some("1 of 1")), "{d}");
+    let s = status_json(&w, &[]);
+    assert_eq!(s["relays"], serde_json::json!({ "count": 1, "max": 1, "relay": true, "stopped": "1 of 1" }), "{s}");
+    assert_eq!(s["cache"]["next_tick_at"], serde_json::Value::Null, "{s}");
+}
+
+/// No ledger, no transcript ways can read, and settings ways cannot give:
+/// every key is present and every value is null, the cache `unknown`.
+#[test]
+fn status_json_with_nothing_on_record_is_all_null() {
+    let w = Warm::new("kw-status-none");
+    std::fs::write(w.f.home.join("settings.json"), "not json").unwrap();
+    let s = status_json(&w, &[]);
+    assert_eq!(
+        s,
+        serde_json::json!({
+            "exit": null,
+            "boundary": null,
+            "cache": { "state": "unknown", "last_request_at": null, "lapses_at": null, "next_tick_at": null },
+            "relays": { "count": null, "max": null, "relay": null, "stopped": null },
+            "operator_prompt_at": null,
+        })
+    );
+    assert!(!w.ledger().exists(), "status writes no ledger");
+}
+
+/// `status --json --session <id>` from a shell no Claude Code process owns
+/// gives the same cache, relays and operator's prompt as the session's own
+/// process: each comes from a file or a `ways` read any shell can make.
+#[test]
+fn status_json_session_gives_the_same_fields_from_any_shell() {
+    let w = Warm::new("kw-status-fields-session");
+    w.settings(RELAY_ON);
+    let prompt = now() - 20 * MIN;
+    assert!(w.run(&["keepwarm", "reset", "--at", &prompt.to_string()]).status.success());
+    handoff_for(&w, Some(WRAP));
+    judged_move(&w, "stop", None, &[]);
+    w.reading(&[(5 * MIN, 200_000, 500)]);
+    policy(&w, "off");
+    let own = supervised(&status_json(&w, &[]));
+    let last = own["cache"]["last_request_at"].as_u64().unwrap();
+    assert_eq!(own["cache"]["next_tick_at"].as_u64(), Some(last + 50 * MIN), "{own}");
+    assert_eq!((own["relays"]["relay"].as_bool(), own["operator_prompt_at"].as_u64()), (Some(true), Some(prompt)), "{own}");
+    let sid = w.f.sid.clone();
+    let record = w.f.home.join(".claude").join("sessions").join("3999998.json");
+    w.f.without_session(|| {
+        std::fs::write(&record, w.f.record("3999998", &sid, None)).unwrap();
+        assert_eq!(supervised(&status_json(&w, &["--session", &sid])), own);
+        std::fs::remove_file(&record).unwrap();
+    });
+}
 }
