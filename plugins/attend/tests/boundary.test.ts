@@ -4,8 +4,8 @@
 
 // The boundary tool's pure pieces (hooks/boundary.ts): the refusals, the
 // verdict's parse and the prose around it, the move the mod carries out,
-// the argv and attend's record, and the compaction's instructions. The
-// handler is tested through the mod in attend.test.ts.
+// the argv, attend's record and the move it leaves. The handler is tested
+// through the mod in attend.test.ts.
 //
 // References:
 // - ADR-418 §10: the refusals come first; when the two calls disagree, the
@@ -17,18 +17,18 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
-  COMPACT_CAP,
-  COMPACT_LEAD,
   agentLines,
   boundaryInput,
+  boundaryResult,
   briefInput,
-  compactInstructions,
   doubtOf,
+  followRecord,
   handoffCarries,
   hasRoom,
   hasTasks,
   inFlightOf,
   isBoundaryWrap,
+  isBusy,
   judgedArgv,
   parseJudgeOut,
   parseRecorded,
@@ -39,7 +39,7 @@ import {
   verdictOf,
   verdictText,
 } from '../hooks/boundary.ts'
-import type { Facts, InFlight } from '../hooks/boundary.ts'
+import type { Facts, InFlight, Recorded } from '../hooks/boundary.ts'
 
 const NONE: InFlight = { agents: [], shells: [], watchers: [] }
 const QUIET: Facts = { inFlight: NONE, draining: false, operatorTurn: false }
@@ -108,6 +108,14 @@ describe('the move', () => {
     expect([busy.move, busy.record, busy.isHandoffSent, busy.refused?.call]).toEqual(['continue', 'continue', false, 'doubt'])
   })
 
+  test('a fallback doubt, which no verdict produced, stops without compacting even with relay on, and records doubt', () => {
+    const f = settle('stop', 'doubt', QUIET, true, true, { n: 0, max: 5 }, true)
+    expect([f.move, f.record, f.isHandoffSent]).toEqual(['stop', 'doubt', true])
+    expect(f.notes).toEqual(['The judge gave no verdict, so this doubt stops without compacting, and the handoff in .claude/handoff.wrap.md goes to the operator over attend.'])
+    // Relay off names relay off, as before.
+    expect(settle('stop', 'doubt', QUIET, false, true, undefined, true).notes[0]).toMatch(/^Relay is off in this session/)
+  })
+
   test('the disagreement rule: own continue against stop or compact continues and fixes the handoff; own stop against compact stops', () => {
     for (const v of ['stop', 'compact'] as const) {
       const p = settle('continue', v, QUIET, true)
@@ -133,38 +141,70 @@ describe('the move', () => {
     ])
     const d = verdictOf({ ...V, verdict: 'doubt', reason: 'two\nlines' })!
     expect(judgedArgv('20261127T0900Z-3f9a1c2e', 'doubt', d, 'stop').slice(-6)).toEqual(['--own', 'stop', '--move', 'doubt', '--reason', 'two lines'])
+    // In the operator's turn attend hears so, and records no compaction.
+    expect(judgedArgv('20261127T0900Z-3f9a1c2e', 'doubt', d, 'stop', true).slice(-3)).toEqual(['--reason', 'two lines', '--operator-turn'])
   })
 
-  test('attend\'s record: whether it armed, and the doubt\'s route; anything else is no record', () => {
+  const RECORD = { recorded: true, armed: false, acted_on: true, move: 'compact', compact_refused: null, wrap: null, instructions: 'compact as the relay does', resume: 'relay: resume' }
+  const rec = (o: Record<string, unknown> = {}): Recorded => parseRecorded(JSON.stringify({ ...RECORD, ...o }))!
+
+  test('attend\'s record: the move it recorded, whether it armed and acts, why it refused a compaction, the doubt\'s route, and its instructions and resume', () => {
     const route = { dest: 'send', file: '/state/wrap/s1.md', to: 'aaron', after: 'relay', after_keepalives: 0, handoff: 'handoff: the boundary judge said doubt.' }
-    expect(parseRecorded(JSON.stringify({ recorded: true, armed: true, move: 'doubt', wrap: route }))).toEqual({
-      isArmed: true, route: { dest: 'send', file: '/state/wrap/s1.md', to: 'aaron', after: 'relay', afterKeepalives: 0, handoff: 'handoff: the boundary judge said doubt.' },
+    expect(parseRecorded(JSON.stringify({ ...RECORD, armed: true, move: 'doubt', wrap: route, resume: null }))).toEqual({
+      move: 'doubt', isArmed: true, isActedOn: true, compactRefused: null, instructions: 'compact as the relay does', resume: null,
+      route: { dest: 'send', file: '/state/wrap/s1.md', to: 'aaron', after: 'relay', afterKeepalives: 0, handoff: 'handoff: the boundary judge said doubt.' },
     })
-    expect(parseRecorded('{"recorded":true,"armed":false,"move":"compact","wrap":null}\n')).toEqual({ isArmed: false, route: null })
+    expect(rec({ move: 'stop', armed: true, acted_on: false, compact_refused: 'max_relays is reached', instructions: null, resume: null })).toEqual({
+      move: 'stop', isArmed: true, isActedOn: false, compactRefused: 'max_relays is reached', route: null, instructions: null, resume: null,
+    })
     // A route that does not parse is none.
-    expect(parseRecorded(JSON.stringify({ recorded: true, armed: true, move: 'doubt', wrap: { to: 'aaron' } }))?.route).toBeNull()
+    expect(rec({ move: 'doubt', wrap: { to: 'aaron' } }).route).toBeNull()
     expect(parseRecorded('exit armed for wrap 20261127T0900Z-3f9a1c2e')).toBeUndefined()
-    expect(parseRecorded('{"armed":true}')).toBeUndefined()
+    expect(parseRecorded('{"recorded":true,"armed":true}')).toBeUndefined()
+    // A record from before acted_on, or with a move attend has no word for, is no record.
+    expect(parseRecorded('{"recorded":true,"armed":false,"move":"compact","wrap":null}\n')).toBeUndefined()
+    expect(parseRecorded(JSON.stringify({ ...RECORD, move: 'pause' }))).toBeUndefined()
+  })
+
+  test('the move attend recorded wins: its stop for a compact stops and says why, and a compaction without its instructions does not run', () => {
+    const compact = settle('compact', 'compact', QUIET, true, true, { n: 1, max: 5 })
+    expect(followRecord(compact, rec())).toEqual({ plan: compact, isStopDue: false })
+    const refused = followRecord(compact, rec({ move: 'stop', armed: true, compact_refused: 'a relay wrap is pending', instructions: null, resume: null }))
+    expect([refused.plan.move, refused.plan.record, refused.isStopDue]).toEqual(['stop', 'stop', false])
+    expect(refused.plan.notes).toEqual(['attend recorded stop, not compact: a relay wrap is pending.'])
+    expect(refused.plan.todo).toBe('End the turn and start nothing new. An operator prompt disarms the exit.')
+    // No instructions or no resume: the compact stops, and the stop is recorded again.
+    for (const o of [{ instructions: null }, { resume: null }]) {
+      const none = followRecord(compact, rec(o))
+      expect([none.plan.move, none.plan.record, none.isStopDue]).toEqual(['stop', 'stop', true])
+    }
+    expect(followRecord(compact, undefined).isStopDue).toBe(true)
+    // A doubt with no instructions stops; its doubt record has armed already.
+    const doubt = settle('stop', 'doubt', QUIET, true, true)
+    const bare = followRecord(doubt, rec({ move: 'doubt', armed: true, instructions: null, resume: null }))
+    expect([bare.plan.move, bare.plan.record, bare.plan.isHandoffSent, bare.isStopDue]).toEqual(['stop', 'doubt', true, false])
+    expect(followRecord(doubt, rec({ move: 'doubt', armed: true, resume: null })).plan.move).toBe('doubt')
+    // A stop or a continue is carried out as planned.
+    const stop = settle('stop', 'stop', QUIET, true)
+    expect(followRecord(stop, rec({ move: 'stop', armed: true, instructions: null, resume: null })).plan).toBe(stop)
+  })
+
+  test('with keepwarm off the result says the exit is recorded but does nothing', () => {
+    const j = verdictOf(V)!
+    const ok = { exitCode: 0, stdout: '', stderr: '' }
+    const r = boundaryResult({ judged: j, plan: settle('stop', 'stop', QUIET, false), relay: false, recorded: ok, isArmed: true, isActedOn: false })
+    expect(r.result).toContain('Outcome: stop. attend recorded the exit, but it does nothing while keepwarm is off (mods.attend.keepwarm), since no keepwarm tick runs to carry it out.')
+    expect(r.result).not.toContain('The exit is armed')
   })
 })
 
 describe('the compaction', () => {
-  const PATH = '/work/agent-ways/.claude/handoff.wrap.md'
-
-  test('the instructions open with the lead and hold the handoff whole within the cap', () => {
-    expect(compactInstructions('2026-11-27 e6bbfbdd wrap=x\nDO NEXT: go.\n\n', PATH)).toBe(`${COMPACT_LEAD}\n\n2026-11-27 e6bbfbdd wrap=x\nDO NEXT: go.`)
-    const long = Array.from({ length: 400 }, (_, i) => `- task ${i} ${'x'.repeat(40)}`).join('\n')
-    const cut = compactInstructions(long, PATH)
-    expect(cut.length).toBeLessThanOrEqual(COMPACT_CAP)
-    expect(cut.startsWith(`${COMPACT_LEAD}\n\n- task 0 `)).toBe(true)
-    expect(cut.endsWith(`x\n\n(The handoff continues in ${PATH}; read it there.)`)).toBe(true)
-  })
-
-  test('the relay count comes from the brief, and a task list that cannot be read counts as work left', () => {
+  test('the relay count comes from the brief, and a task list that cannot be read, or anything in flight, counts as work left', () => {
     expect(relaysOf({ relays: { n: 2, max: 5 } })).toEqual({ n: 2, max: 5 })
     expect(relaysOf({ relays: 'unknown' })).toBeUndefined()
     expect(relaysOf(undefined)).toBeUndefined()
     expect([hasTasks({ open: [], inProgress: [] }), hasTasks({ open: ['#1 a'], inProgress: [] }), hasTasks(undefined)]).toEqual([false, true, true])
+    expect([isBusy(NONE), isBusy(BUSY.inFlight), isBusy({ agents: [], shells: [], watchers: ['gh pr checks 1406 --watch'] })]).toEqual([false, true, true])
   })
 })
 

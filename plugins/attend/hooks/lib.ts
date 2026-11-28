@@ -439,11 +439,16 @@ export type Keepalive = {
    *  next check judges it, and a turn that comes first defers it to that
    *  turn's end. */
   isRelayPending: boolean
+  /** A relay wrap's compaction or its resume is running. A boundary
+   *  compaction stands down while this or `isRelayPending` holds, so one
+   *  turn's end never compacts twice. */
+  isRelayRunning: boolean
   /** The reply the relay hands to the operator when it stops: the wrap's,
    *  or a resumed turn's that ended with a stop line. */
   relayReply: string | undefined
-  /** Moves at each operator prompt: a resume whose compaction an operator
-   *  prompt followed is not submitted. */
+  /** Moves at each operator prompt, whether or not the policy applies: a
+   *  resume whose compaction an operator prompt followed is not submitted,
+   *  and a boundary compaction waiting on the chain does not run. */
   operatorEpoch: number
   /** When the operator last prompted, in epoch ms, whatever the policy and
    *  the gate: the mod sees every prompt, where attend's ledger hears of one
@@ -480,11 +485,12 @@ export type Keepalive = {
   boundary: BoundaryCompaction | undefined
 }
 
-/** A boundary compaction ([`Keepalive.boundary`]): its instructions, from
- *  the handoff. For a compact, the resume turn, the relay count it is
- *  relay `relayCount + 1` of, and attend's record of the same wrap as a
- *  stop, for a compaction that leaves no tasks or fails. A doubt has
- *  neither. */
+/** A boundary compaction ([`Keepalive.boundary`]): attend's compaction
+ *  instructions from `judged --json`. For a compact, attend's resume turn,
+ *  the relay count it is relay `relayCount + 1` of, and attend's record of
+ *  the same wrap as a stop, for a compaction that leaves no work or fails.
+ *  A doubt has neither. `continueArgv` records the same wrap as continue,
+ *  for an operator prompt that cancels the compaction. */
 export type BoundaryCompaction = {
   move: 'compact' | 'doubt'
   instructions: string
@@ -492,6 +498,7 @@ export type BoundaryCompaction = {
   relayCount: number
   maxRelays: number
   stopArgv: string[] | null
+  continueArgv: string[]
 }
 
 /** A stop exit as the mod knows it ([`Keepalive.exit`]). */
