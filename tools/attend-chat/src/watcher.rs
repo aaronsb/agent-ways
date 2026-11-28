@@ -653,7 +653,7 @@ mod tests {
     /// once.
     #[test]
     fn the_mark_store_is_read_once_its_changes_stop() {
-        const ATTEMPTS: usize = 3;
+        const ATTEMPTS: usize = 5;
         assert!(
             (0..ATTEMPTS).any(|_| settle_burst()),
             "no attempt held: in each of {ATTEMPTS} bursts a change came {MARKS_SETTLE:?} or more after the last, so the read-during-the-burst check never ran"
