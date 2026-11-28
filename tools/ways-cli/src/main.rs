@@ -241,7 +241,8 @@ enum Commands {
     /// `ways manage update` runs this; the installer calls it.
     #[command(hide = true)]
     JudgeSetup,
-    /// The verbs a Claude Code judge host runs: host, take, answer (ADR-708)
+    /// The judge verbs: a Claude Code judge host's host, take and answer,
+    /// and the continuance judge's continuance
     #[command(hide = true)]
     Judge {
         #[command(subcommand)]

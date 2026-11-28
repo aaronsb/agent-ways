@@ -1,0 +1,19 @@
+{
+  "fill_pct": 62.5,
+  "fill_tokens": 625000,
+  "price_per_ping_usd": 0.125,
+  "agents_in_flight": [],
+  "shells_in_flight": [],
+  "watchers_in_flight": ["gh run watch 1234 (CI on card/1393-continuance-judge)"],
+  "threads_awaiting_reply": 1,
+  "operator_questions": 0,
+  "tasks_open": ["[gh#1396] attend: gather the measured conditions for the brief"],
+  "tasks_in_progress": [],
+  "git_status": " M tools/ways-agent-core/src/continuance.rs\n?? scratch.txt\n",
+  "open_prs": [{"number": 1401, "title": "build: ADR-418 wave 1", "checks": "pass"}],
+  "minutes_since_operator_prompt": 42,
+  "relays": {"n": 2, "max": 5},
+  "commits_since_wrap": ["42bb7dfa Merge pull request #1401 from aaronsb/build/adr-418-wave1"],
+  "merges_since_wrap": ["42bb7dfa Merge pull request #1401 from aaronsb/build/adr-418-wave1"],
+  "tasks_closed_since_wrap": ["[gh#1390] judge: a judgement profile per purpose"]
+}

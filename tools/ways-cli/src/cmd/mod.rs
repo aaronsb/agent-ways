@@ -12,6 +12,7 @@ pub mod hook;
 pub mod init;
 pub mod introspect;
 pub mod judge;
+pub mod judge_continuance;
 pub mod judge_jobs;
 pub mod lifecycle;
 pub mod language;

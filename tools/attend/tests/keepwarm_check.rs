@@ -897,4 +897,162 @@ fn a_deferred_relay_compaction_is_asked_for_again_and_a_lost_resume_stops() {
     let d = policy(&w, "off");
     assert_eq!((d["state"].as_str(), d["relay_count"].as_u64(), d["send_handoff"].as_bool()), (Some("stopped"), Some(0), Some(false)), "a late resume report counts nothing: {d}");
 }
+
+/// A repository at the fixture's project with the handoff the wrap `id`
+/// wrote, or none.
+fn handoff_for(w: &Warm, id: Option<&str>) -> PathBuf {
+    let init = std::process::Command::new("git").args(["init", "-q"]).current_dir(&w.f.origin).status().unwrap();
+    assert!(init.success());
+    let handoff = PathBuf::from(&w.f.origin).join(".claude").join("handoff.wrap.md");
+    if let Some(id) = id {
+        std::fs::create_dir_all(handoff.parent().unwrap()).unwrap();
+        std::fs::write(&handoff, format!("2026-11-27 e6bbfbdd wrap={id}\nContinue work.\n\nDO NEXT — start.\n")).unwrap();
+    }
+    handoff
+}
+
+fn judged(w: &Warm, id: &str, verdict: &str) -> std::process::Output {
+    w.run(&["keepwarm", "judged", "--wrap", id, "--verdict", verdict, "--handoff", "sufficient", "--own", "stop", "--reason", "the release landed"])
+}
+
+/// `judged --verdict stop` with no handoff, or one whose first line
+/// carries another id, is refused with exit 1 and records nothing.
+///
+/// References:
+/// - ADR-418 item 13: the mod refuses to arm the exit until the handoff
+///   exists.
+#[test]
+fn judged_stop_without_the_wrap_s_handoff_is_refused() {
+    let w = Warm::new("kw-judged-refused");
+    let id = "20261127T0900Z-3f9a1c2e";
+    handoff_for(&w, None);
+    let out = judged(&w, id, "stop");
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("keepwarm judged refused: no handoff"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!w.ledger().exists(), "nothing recorded");
+    handoff_for(&w, Some("20261127T1000Z-0badc0de"));
+    let out = judged(&w, id, "stop");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&format!("does not carry wrap={id}")), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!w.ledger().exists(), "nothing recorded");
+}
+
+/// The armed exit end to end: `judged --verdict stop` arms it, the first
+/// due point with nothing pending returns `finish` and attend marks the
+/// session finished in the same process, and `attend keepwarm reset`, the
+/// operator's prompt, clears both.
+///
+/// References:
+/// - ADR-418 items 12 and 13: the finished mark, and an operator prompt
+///   that disarms.
+#[test]
+fn an_armed_exit_finishes_the_session_and_reset_clears_it() {
+    let w = Warm::new("kw-armed-exit");
+    let id = "20261127T0900Z-3f9a1c2e";
+    handoff_for(&w, Some(id));
+    assert!(w.run(&["listen", "on"]).status.success());
+    let out = judged(&w, id, "stop");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with(&format!("exit armed for wrap {id}: ")), "{}", String::from_utf8_lossy(&out.stdout));
+    let finished = || {
+        let out = w.run(&["listen", "status", "--json"]);
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        v["finished"].is_u64()
+    };
+    w.reading(&[(30 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str(), d["exit"]["state"].as_str()), (Some("none"), Some("armed"), Some("armed")), "{d}");
+    assert!(!finished());
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str(), d["text"].as_str()), (Some("finish"), Some("finished"), None), "{d}");
+    assert!(finished(), "the check that returns finish sets the mark");
+    let status = w.run(&["keepwarm", "status"]);
+    let card = String::from_utf8_lossy(&status.stdout);
+    assert!(card.lines().any(|l| l.starts_with("exit        finished ")), "{card}");
+    let out = w.run(&["keepwarm", "reset"]);
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "keepalive count reset\nthe session is no longer finished\n");
+    assert!(!finished(), "reset clears the mark");
+    let d = policy(&w, "off");
+    assert!(d["exit"].is_null(), "reset clears the exit: {d}");
+    assert_eq!(d["action"], "keepalive", "the next due point pings as today: {d}");
+}
+
+/// A session that is not listening finishes with no finished mark, and the
+/// operator's prompt leaves it not listening: only `attend listen on`
+/// starts listening.
+#[test]
+fn a_session_not_listening_finishes_unmarked_and_reset_does_not_listen() {
+    let w = Warm::new("kw-exit-unlistened");
+    let id = "20261127T0900Z-3f9a1c2e";
+    handoff_for(&w, Some(id));
+    let listen = || -> serde_json::Value { serde_json::from_slice(&w.run(&["listen", "status", "--json"]).stdout).unwrap() };
+    assert_eq!(listen()["listening"], false);
+    assert!(judged(&w, id, "stop").status.success());
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("finish"), Some("finished")), "{d}");
+    assert!(listen()["finished"].is_null(), "no mark on a session that is not listening: {}", listen());
+    let out = w.run(&["keepwarm", "reset"]);
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "keepalive count reset\n");
+    assert_eq!((listen()["listening"].as_bool(), listen()["finished"].is_null()), (Some(false), true), "{}", listen());
+}
+
+/// With relay off and autocompact on, the default, the exit still finishes
+/// at its due point; with keepwarm off it does nothing, and `judged` says so.
+///
+/// References:
+/// - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
+///   armed exit.
+#[test]
+fn a_stop_exit_runs_with_autocompact_on_and_says_when_keepwarm_is_off() {
+    let w = Warm::new("kw-exit-autocompact");
+    let id = "20261127T0900Z-3f9a1c2e";
+    handoff_for(&w, Some(id));
+    assert!(judged(&w, id, "stop").status.success());
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "on");
+    assert_eq!((d["action"].as_str(), d["state"].as_str(), d["policy"].as_bool()), (Some("finish"), Some("finished"), Some(false)), "{d}");
+    let w = Warm::new("kw-exit-keepwarm-off");
+    w.settings(r#"{"mods.attend.keepwarm":{"value":"off"}}"#);
+    handoff_for(&w, Some(id));
+    let out = judged(&w, id, "stop");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("exit armed for wrap {id}, but mods.attend.keepwarm is off: no tick runs, so the exit does nothing while it is off\n")
+    );
+}
+
+/// `compacted --trigger boundary` while a relay wrap waits is refused with
+/// exit 1 and writes nothing.
+#[test]
+fn a_refused_boundary_compaction_exits_1_and_writes_nothing() {
+    let w = Warm::new("kw-boundary-refused");
+    relay_wrap_judged(&w, "continue");
+    let before = std::fs::read(w.ledger()).unwrap();
+    let out = w.run(&["keepwarm", "compacted", "--trigger", "boundary"]);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("the boundary compaction is not recorded"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read(w.ledger()).unwrap(), before, "the ledger is not written");
+    let w = Warm::new("kw-boundary-taken");
+    assert!(w.run(&["keepwarm", "compacted", "--trigger", "boundary"]).status.success());
+    assert!(w.run(&["keepwarm", "resumed", "--trigger", "boundary"]).status.success());
+}
+
+/// A verdict other than stop is recorded and arms nothing; a malformed
+/// `--pending` is refused by the parser.
+#[test]
+fn judged_continue_arms_nothing_and_pending_is_checked() {
+    let w = Warm::new("kw-judged-continue");
+    let id = "20261127T0900Z-3f9a1c2e";
+    handoff_for(&w, Some(id));
+    let out = judged(&w, id, "continue");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), format!("judged wrap {id}: continue, the handoff sufficient; no exit is armed\n"));
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["exit"]["state"].as_str()), (Some("keepalive"), Some("continue")), "{d}");
+    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", "off", "--pending", "pets=1"]);
+    assert_eq!(out.status.code(), Some(2), "{}", String::from_utf8_lossy(&out.stderr));
+}
 }

@@ -46,6 +46,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend keepwarm wrapped`↴](#attend-keepwarm-wrapped)
 * [`attend keepwarm compacted`↴](#attend-keepwarm-compacted)
 * [`attend keepwarm resumed`↴](#attend-keepwarm-resumed)
+* [`attend keepwarm judged`↴](#attend-keepwarm-judged)
 * [`attend keepwarm drained`↴](#attend-keepwarm-drained)
 * [`attend keepwarm goal`↴](#attend-keepwarm-goal)
 * [`attend keepwarm stopped`↴](#attend-keepwarm-stopped)
@@ -604,6 +605,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
 * `compacted` — Record the compaction after the wrap, for the status card and so nothing more follows. The attend mod runs it once the compaction ends
 * `resumed` — Record that a relay's resume turn went in: the relay count goes up by one and the keepalive count starts again. The attend mod runs it once the compaction after a relay wrap has run
+* `judged` — Record the judge's verdict for a boundary wrap, its answer on the handoff and the agent's own call. With --verdict stop it arms the exit: each idle tick then pings while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise lets the cache lapse and marks the session finished. Refused, changing nothing, when .claude/handoff.wrap.md is missing or its first line does not carry wrap=<ID>
 * `drained` — Record that relay's drain turn went in, which starts this generation's drain: no further drain turn is offered until a compaction, a resume or a fill under the drain point ends it. The attend mod runs it once the drain turn has entered
 * `goal` — Record a `/goal` the attend mod saw typed: active, or none for `/goal clear`. The relay stops once a goal that was active has ended
 * `stopped` — Record that a resumed turn ended with a `relay: stop <reason>` line, which stops the relay until the operator's next prompt
@@ -648,7 +650,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 ###### **Options:**
 
 * `--policy` — Apply the continuity policy: from each turn's end, one wake the margin before the cache lapses, counted from the operator's last prompt and bounded by mods.attend.continuity, then one wrap turn; in relay mode, a compaction and a resume after it
-* `--json` — Print the decision as one JSON object: action (none, keepalive, wrap or compact), text, next_at, count, max, wraps_at and reason
+* `--json` — Print the decision as one JSON object: action (none, keepalive, drain, wrap, compact or finish), text, next_at, count, max, wraps_at, reason, and exit for an armed or finished exit
 * `--autocompact <AUTOCOMPACT>` — The autocompact gate as the host read it: on, off or unknown. The policy runs only with off; unknown counts as on
 
   Default value: `unknown`
@@ -661,6 +663,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 * `--fill <FILL>` — The context's tokens at a main-loop turn's end, for relay's fill path: with relay on, a fill past mods.attend.continuity.relay_at_pct of --window starts the drain with one drain turn, a fill past mods.attend.continuity.hard_at_pct sends a wrap, and a fill under the drain point ends the drain
 * `--window <WINDOW>` — The model's whole context window, in tokens
 * `--native-at <NATIVE_AT>` — Claude Code's own autocompact threshold, in tokens; with autocompact on, the hard line sits five points of the window under it where that is lower
+* `--pending <COUNTS>` — What still runs, as the host counted it: agents=N,shells=N,watchers=N. While an exit is armed, these and the threads awaiting a reply keep the cache warm up to the price of what replaces the session
 
 
 
@@ -707,6 +710,10 @@ Record the compaction after the wrap, for the status card and so nothing more fo
 ###### **Options:**
 
 * `--failed <FAILED>` — Why the compaction failed; absent when it ran
+* `--trigger <TRIGGER>` — boundary: the boundary tool started the compaction, and its resume counts toward mods.attend.continuity.max_relays. Refused with exit 1, recording nothing, while a relay wrap waits to be judged
+
+  Possible values: `boundary`
+
 
 
 
@@ -719,6 +726,35 @@ Record that a relay's resume turn went in: the relay count goes up by one and th
 ###### **Options:**
 
 * `--failed <FAILED>` — Why the resume did not go in, which stops the relay
+* `--trigger <TRIGGER>` — boundary: the resume after a compaction the boundary tool started, which counts one relay like any other
+
+  Possible values: `boundary`
+
+
+
+
+## `attend keepwarm judged`
+
+Record the judge's verdict for a boundary wrap, its answer on the handoff and the agent's own call. With --verdict stop it arms the exit: each idle tick then pings while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise lets the cache lapse and marks the session finished. Refused, changing nothing, when .claude/handoff.wrap.md is missing or its first line does not carry wrap=<ID>
+
+**Usage:** `attend keepwarm judged [OPTIONS] --wrap <ID> --verdict <VERDICT> --handoff <HANDOFF> --own <OWN>`
+
+###### **Options:**
+
+* `--wrap <ID>` — The boundary wrap's id, as the handoff's first line carries it
+* `--verdict <VERDICT>` — The judge's verdict
+
+  Possible values: `stop`, `compact`, `continue`, `doubt`
+
+* `--handoff <HANDOFF>` — Whether a fresh start from the handoff replaces the session (sufficient) or getting it back takes a cold reload (holds-detail)
+
+  Possible values: `sufficient`, `holds-detail`
+
+* `--own <OWN>` — The working agent's own call, recorded beside the judge's
+
+  Possible values: `stop`, `compact`, `continue`
+
+* `--reason <REASON>` — The judge's one line of reason
 
 
 

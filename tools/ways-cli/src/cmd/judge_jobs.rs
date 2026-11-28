@@ -19,8 +19,12 @@
 //!   stopped waiting and the answer is dropped.
 //! - A session id that is not plain, or stdin that is not an answer, exits 2;
 //!   a file that cannot be written exits 1.
+//!
+//! `continuance` is the continuance judge's verb, which the attend mod runs
+//! at a work boundary; [`crate::cmd::judge_continuance`] has its output.
 
 use std::io::Read;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -63,6 +67,23 @@ pub enum JudgeCommand {
         #[arg(long)]
         job: String,
     },
+    /// Judge whether the session stops, compacts or continues, from the
+    /// handoff and the conditions JSON on stdin
+    Continuance {
+        /// The session id
+        #[arg(long)]
+        session: String,
+        /// The handoff the wrap wrote
+        #[arg(long, required_unless_present = "parse")]
+        handoff: Option<PathBuf>,
+        /// Read the `$.model.complete` answer to a job on stdin, and print its verdict
+        #[arg(long)]
+        parse: bool,
+        /// The caller hosts `$.model.complete`, so the claude-code engine
+        /// runs whether or not the ways mod registered; the attend mod passes it
+        #[arg(long)]
+        host: bool,
+    },
     /// Judge the candidates a lane handed off on stdin and log the verdicts
     /// (shadow mode, and the sample of held candidates); the lanes start it
     #[command(hide = true)]
@@ -80,6 +101,9 @@ pub fn run(command: JudgeCommand) -> Result<()> {
                 println!("{line}");
             }
             Ok(())
+        }
+        JudgeCommand::Continuance { session, handoff, parse, host } => {
+            crate::cmd::judge_continuance::run(&session, handoff.as_deref(), parse, host)
         }
         JudgeCommand::Detached => {
             let mut input = String::new();
