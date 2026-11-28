@@ -129,9 +129,10 @@ import {
   answerOf,
   boundaryInput,
   boundaryResult,
-  compactInstructions,
+  followRecord,
   hasRoom,
   hasTasks,
+  isBusy,
   briefInput,
   doubtOf,
   handoffCarries,
@@ -147,11 +148,10 @@ import {
   refusedResult,
   relaysOf,
   requestOf,
-  resumeText,
   settle,
   taskLines,
 } from './boundary.ts'
-import type { HandoffSent, Judged } from './boundary.ts'
+import type { HandoffSent, InFlight, Judged } from './boundary.ts'
 import { claudePid, cuesIn, hostArgv, hostEndText, hostOfRecord, hostRecord, hostSpecFor, isHostRefused, respawnAfterExit, HOST_EXIT_WAIT_MS, HOST_RESPAWN_MS, HOST_RESPAWNS } from './host.ts'
 import type { HostChild, HostEnd, HostSpec } from './host.ts'
 
@@ -1171,9 +1171,9 @@ async function keepaliveOperator($: $, mod: Mod) {
   const ka = mod.ka
   if (!ka.applies) return
   ka.epoch += 1
-  // The operator is back: a relay waiting for its compaction or its
-  // resume submits nothing more.
-  ka.operatorEpoch += 1
+  // The operator is back: a relay waiting for its compaction submits
+  // nothing more (prompt.submit has moved the operator epoch, which stops
+  // a resume).
   ka.isRelayPending = false
   ka.fillDue = undefined
   ka.relayReply = undefined
@@ -1312,17 +1312,33 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
  *  boundary): attend hears of each with `--trigger boundary`, so the resume
  *  counts toward `max_relays`; the resume is read once the compaction ran,
  *  and a compaction that ran with no resume due, or that failed, goes to
- *  the run's own `onNoResume` and `onFail`.
+ *  the run's own `onNoResume` and `onFail`. attend refuses to count a
+ *  boundary compaction while a relay wrap is pending (`compacted` exits
+ *  non-zero): no resume follows it, and it goes to `onFail`. A relay
+ *  wrap's run sets `isRelayRunning`, which a boundary compaction stands
+ *  down for.
  *
  *  References:
  *  - ADR-417 item 4: the compaction and the resume after a relay wrap.
  *  - ADR-418 §13: self-relays count toward `max_relays`. */
 async function relayCompact($: $, mod: Mod, r: RelayRun) {
+  if (r.trigger !== undefined) return compactAndResume($, mod, r)
+  // A relay wrap's own run: a boundary compaction stands down meanwhile.
+  mod.ka.isRelayPending = false
+  mod.ka.isRelayRunning = true
+  try {
+    await compactAndResume($, mod, r)
+  } finally {
+    mod.ka.isRelayRunning = false
+  }
+}
+
+/** The body of [`relayCompact`]. */
+async function compactAndResume($: $, mod: Mod, r: RelayRun) {
   const ka = mod.ka
   const operatorThen = ka.operatorEpoch
   const epochThen = ka.epoch
   const isWrapRelay = r.trigger === undefined
-  if (isWrapRelay) ka.isRelayPending = false
   let failed: string | undefined
   try {
     const c = await $.session.compact({ instructions: r.instructions })
@@ -1343,7 +1359,12 @@ async function relayCompact($: $, mod: Mod, r: RelayRun) {
     return
   }
   await markCompacted($)
-  await run($, compactedArgv(undefined, r.trigger))
+  const counted = await run($, compactedArgv(undefined, r.trigger))
+  if (!isWrapRelay && counted.exitCode !== 0) {
+    $.ui.log(`attend: attend did not count the boundary's compaction (${oneLine(counted.stderr || counted.stdout) || `exit ${counted.exitCode}`}), so no resume follows it`)
+    await r.onFail()
+    return
+  }
   if (ka.operatorEpoch !== operatorThen) return
   const resume = await r.resume()
   if (resume === null) {
@@ -1456,15 +1477,17 @@ async function reportUnrouted($: $, ka: Keepalive, why: string) {
   await serialize(ka, () => run($, wrappedArgv('unfinished', why)))
 }
 
-// ── the boundary tool (ADR-418) ─────────────────────────────────────────
+// ── the boundary tool ───────────────────────────────────────────────────
 //
 // The agent's `/wrap boundary` ends with attend_boundary. The handler checks
 // the handoff, gathers the brief, applies the mod's refusals, and only then
 // asks the judge; it settles the judge's verdict with the agent's call and
-// records the move with attend, which arms the exit on stop and doubt. A
-// doubt sends the handoff to the operator at once; a compact, and a doubt
-// with relay on, compact once the tool's turn has ended, through the relay's
-// compaction path. boundary.ts holds the rules.
+// records the move with attend, which decides whether a compaction may run
+// and arms the exit on stop and doubt. The mod carries out the move attend
+// recorded. A doubt sends the handoff to the operator at once; a compact,
+// and a doubt with relay on, compact once the tool's turn has ended, with
+// attend's instructions, through the relay's compaction path. boundary.ts
+// holds the rules.
 
 /** One boundary call: a refusal, or the verdict and the move.
  *
@@ -1479,11 +1502,14 @@ async function boundary($: $, mod: Mod, e: unknown) {
   if ('error' in input) return { result: input.error, isError: true as const }
   if (mod.turnStart.isTypedWrap) return TYPED_WRAP_REFUSAL
   // The relay setting as it stands now, as a wrap reads it; ways that
-  // cannot answer reads relay off, the side that never compacts.
+  // cannot answer reads relay off, the side that never compacts. Relay
+  // runs only where keepwarm does: with keepwarm off no tick carries a
+  // relay out, so the boundary runs as relay off.
   //
   // References:
   // - ADR-417 item 1: the relay setting is read when a wrap starts.
-  const relay = (await readConfig($, mod.cwd)).relay
+  const config = await readConfig($, mod.cwd)
+  const relay = isRelayOn(mod, config)
   const handoff = await readHandoff($, input.wrapId)
   if ('refusal' in handoff) return { result: handoff.refusal, isError: true as const }
   const agents = await inFlightAgents($)
@@ -1494,34 +1520,59 @@ async function boundary($: $, mod: Mod, e: unknown) {
     operatorPromptAtMs: mod.ka.operatorPromptAtMs,
   }))
   const brief = r.exitCode === 0 ? parseBrief(r.stdout) : undefined
-  const facts = { inFlight: inFlightOf(brief, agents), draining: relay && mod.ka.isDraining, operatorTurn: mod.turnStart.isOperator }
+  // An operator prompt that started this turn, or one queued while it
+  // runs, which starts the next.
+  const operatorTurn = mod.turnStart.isOperator || mod.nextTurn.isOperator
+  const facts = { inFlight: inFlightOf(brief, agents), draining: relay && mod.ka.isDraining, operatorTurn }
   const refused = refusalOf(input.own, facts)
   if (refused) return refusedResult(refused, relay)
-  const judged = brief ? await judgeBoundary($, handoff.path, r.stdout) : doubtOf(`the brief could not be gathered (attend keepwarm brief exited ${r.exitCode})`)
+  const { judged, isFallback } = brief
+    ? await judgeBoundary($, handoff.path, r.stdout)
+    : { judged: doubtOf(`the brief could not be gathered (attend keepwarm brief exited ${r.exitCode})`), isFallback: true }
   // The relay count before this boundary: a compaction is refused once it
   // reaches max_relays, or where the brief could not read it.
   const relays = relaysOf(brief)
-  const plan = settle(input.own, judged.verdict, facts, relay, hasRoom(relays), relays)
-  const recorded = await serialize(mod.ka, () => run($, judgedArgv(input.wrapId, plan.record, judged, input.own)))
-  if (recorded.exitCode !== 0) return boundaryResult({ judged, plan, relay, recorded, isArmed: false })
+  const settled = settle(input.own, judged.verdict, facts, relay, hasRoom(relays), relays, isFallback)
+  if (config.relay && !relay) settled.notes.unshift('Relay is on, but keepwarm is off, so no tick carries a relay out: this boundary runs as relay off.')
+  const argvOf = (move: Parameters<typeof judgedArgv>[1]) => judgedArgv(input.wrapId, move, judged, input.own, operatorTurn)
+  const recorded = await serialize(mod.ka, () => run($, argvOf(settled.record)))
+  if (recorded.exitCode !== 0) return boundaryResult({ judged, plan: settled, relay, recorded, isArmed: false })
   const rec = parseRecorded(recorded.stdout)
-  const isArmed = rec?.isArmed ?? (plan.record === 'stop' || plan.record === 'doubt')
-  if (isArmed) await armJudged($, mod)
+  // attend's recorded move wins, and its instructions and resume are the
+  // only ones the mod compacts and resumes with.
+  const { plan, isStopDue } = followRecord(settled, rec)
+  let isArmed = rec?.isArmed ?? (plan.record === 'stop' || plan.record === 'doubt')
+  let isActedOn = rec?.isActedOn ?? true
+  if (isStopDue) {
+    const again = await serialize(mod.ka, () => run($, argvOf('stop')))
+    const rec2 = again.exitCode === 0 ? parseRecorded(again.stdout) : undefined
+    isArmed = again.exitCode === 0 && (rec2?.isArmed ?? true)
+    isActedOn = rec2?.isActedOn ?? isActedOn
+  }
+  // With keepwarm off no tick acts on the exit, and the mod runs no check.
+  if (isArmed && isActedOn) await armJudged($, mod)
   // attend resolves where the doubt's handoff goes and its handoff line.
   let sent: HandoffSent | undefined
   if (plan.isHandoffSent) sent = rec?.route ? await sendRelayHandoff($, mod.ka, rec.route, null, handoff.text) : { kind: 'no-route' }
-  if (plan.move === 'compact' || plan.move === 'doubt') {
+  if ((plan.move === 'compact' || plan.move === 'doubt') && rec?.instructions) {
     mod.ka.boundary = {
       move: plan.move,
-      instructions: compactInstructions(handoff.text, handoff.path),
-      resume: plan.move === 'compact' && relays ? resumeText(handoff.path, relays.n + 1, relays.max) : null,
+      instructions: rec.instructions,
+      resume: plan.move === 'compact' ? rec.resume : null,
       relayCount: relays?.n ?? 0,
       maxRelays: relays?.max ?? 0,
-      stopArgv: plan.move === 'compact' ? judgedArgv(input.wrapId, 'stop', judged, input.own) : null,
+      stopArgv: plan.move === 'compact' ? argvOf('stop') : null,
+      continueArgv: judgedArgv(input.wrapId, 'continue', judged, input.own),
     }
   }
   if (plan.move === 'doubt') await setKeepaliveRow($, rowAfterDoubt)
-  return boundaryResult({ judged, plan, relay, recorded, isArmed, relays: plan.move === 'compact' ? relays : undefined, sent })
+  return boundaryResult({ judged, plan, relay, recorded, isArmed, isActedOn, relays: plan.move === 'compact' ? relays : undefined, sent })
+}
+
+/** Whether relay runs for the boundary tool: the relay setting, where
+ *  keepwarm runs the policy that carries a relay out. */
+function isRelayOn(mod: Mod, config: ModConfig): boolean {
+  return config.relay && keepaliveApplies(config, mod.isInteractive)
 }
 
 /** attend armed the exit: the policy check carries it out, in a session
@@ -1535,7 +1586,9 @@ async function armJudged($: $, mod: Mod) {
 
 /** A main-loop turn ended with a boundary compaction waiting: it runs
  *  between turns, unless a turn starts first, which defers it to that
- *  turn's end. An operator prompt clears it (prompt.submit).
+ *  turn's end. An operator prompt clears it (prompt.submit). It stands down
+ *  while a relay wrap is pending or running, since that relay compacts and
+ *  resumes at the same turn's end.
  *
  *  References:
  *  - ADR-417 item 4: the mod compacts and resumes only between turns.
@@ -1543,7 +1596,15 @@ async function armJudged($: $, mod: Mod) {
 function scheduleBoundary($: $, mod: Mod) {
   const b = mod.ka.boundary
   if (!b || mod.running.size > 0) return
+  // The relay's own check runs at this turn's end too: it is the one that
+  // compacts.
+  if (isRelayBusy(mod.ka)) {
+    mod.ka.boundary = undefined
+    standDown($)
+    return
+  }
   const epoch = mod.ka.epoch
+  const operatorThen = mod.ka.operatorEpoch
   $.clock.after(RELAY_CHECK_MS, () => {
     if (mod.ka.boundary !== b) return
     if (mod.running.size > 0 || mod.ka.epoch !== epoch) {
@@ -1551,38 +1612,88 @@ function scheduleBoundary($: $, mod: Mod) {
       return
     }
     mod.ka.boundary = undefined
-    void serialize(mod.ka, () => compactBoundary($, mod, b))
+    if (isRelayBusy(mod.ka)) {
+      standDown($)
+      return
+    }
+    void serialize(mod.ka, () => compactBoundary($, mod, b, operatorThen))
   })
 }
 
-/** The boundary's compaction through the relay's path. After a compact the
- *  resume goes in while tasks remain; with none left, or where the
- *  compaction or the resume failed, attend records the same wrap as a stop,
- *  which arms the exit. A doubt submits no resume: its exit is armed and
- *  its handoff sent already. The caller holds the keepalive chain.
+/** A relay wrap is pending or running: it owns the compaction. */
+function isRelayBusy(ka: Keepalive): boolean {
+  return ka.isRelayPending || ka.isRelayRunning
+}
+
+function standDown($: $) {
+  $.ui.log("attend: a relay wrap is pending, so the boundary's compaction stands down; the relay compacts and resumes")
+}
+
+/** The boundary's compaction through the relay's path, with attend's
+ *  instructions and resume. It runs only where nothing changed since its
+ *  turn ended: an operator prompt meanwhile cancels it and records the same
+ *  wrap as continue; a relay wrap that became pending takes it over; and
+ *  relay, read again, must still run. After a compact the resume goes in
+ *  while tasks remain or anything is in flight; with no work left, or
+ *  where the compaction or the resume failed, attend records the same wrap
+ *  as a stop, which arms the exit. A doubt submits no resume: its exit is
+ *  armed and its handoff sent already. The caller holds the keepalive
+ *  chain.
  *
  *  References:
  *  - ADR-418 §12: the compact row: the mod compacts with the handoff, then
- *    resumes when tasks remain or stops when none do. */
-async function compactBoundary($: $, mod: Mod, b: BoundaryCompaction) {
+ *    resumes when tasks remain or stops when none do.
+ *  - ADR-418 §13: no self-compaction while the operator is talking. */
+async function compactBoundary($: $, mod: Mod, b: BoundaryCompaction, operatorThen: number) {
+  const ka = mod.ka
+  if (ka.operatorEpoch !== operatorThen) {
+    await cancelBoundary($, b)
+    return
+  }
+  if (isRelayBusy(ka)) {
+    standDown($)
+    return
+  }
   const stop = async () => {
     if (b.stopArgv === null) return
     const r = await run($, b.stopArgv)
-    if (r.exitCode === 0 && (parseRecorded(r.stdout)?.isArmed ?? true)) await armJudged($, mod)
+    const rec = r.exitCode === 0 ? parseRecorded(r.stdout) : undefined
+    if (r.exitCode === 0 && (rec?.isArmed ?? true) && (rec?.isActedOn ?? true)) await armJudged($, mod)
+  }
+  if (!isRelayOn(mod, await readConfig($, mod.cwd))) {
+    $.ui.log("attend: relay no longer runs in this session, so the boundary's compaction does not run")
+    await stop()
+    return
   }
   await relayCompact($, mod, {
     instructions: b.instructions,
-    resume: async () => (b.resume !== null && hasTasks(await taskList($)) ? b.resume : null),
+    resume: async () => (b.resume !== null && (hasTasks(await taskList($)) || isBusy(await inFlightNow($))) ? b.resume : null),
     relayCount: b.relayCount,
     maxRelays: b.maxRelays,
     trigger: 'boundary',
     defer: why => {
-      mod.ka.boundary = b
+      ka.boundary = b
       $.ui.log(`attend: the boundary's compaction waits for the turn that started: ${why}; it runs once that turn ends`)
     },
     onFail: stop,
     onNoResume: stop,
   })
+}
+
+/** An operator prompt cancelled a boundary compaction that had not run:
+ *  attend records the same wrap again as continue, so its ledger and the
+ *  status card claim no compaction. */
+async function cancelBoundary($: $, b: BoundaryCompaction) {
+  $.ui.log("attend: the operator prompted, so the boundary's compaction does not run; the handoff stands as a checkpoint")
+  await run($, b.continueArgv)
+}
+
+/** What is in flight now: the agents from `$.agent.list()`, and the shells
+ *  and watchers through a fresh brief. */
+async function inFlightNow($: $): Promise<InFlight> {
+  const agents = await inFlightAgents($)
+  const r = await run($, BRIEF_ARGV, BRIEF_TIMEOUT_MS, briefInput({ agents }))
+  return inFlightOf(r.exitCode === 0 ? parseBrief(r.stdout) : undefined, agents)
 }
 
 /** The handoff at the repository root, with its text, when its first line
@@ -1624,16 +1735,17 @@ async function taskList($: $) {
 
 /** The judge's verdict: ways answers on a key engine; on claude-code it
  *  prints the job, which goes through `$.model.complete` with no tools and
- *  no history, and ways parses the answer. Anything else is doubt.
+ *  no history, and ways parses the answer. Anything else is a fallback
+ *  doubt (`isFallback`).
  *
  *  References:
  *  - ADR-418 §10: the judge decides and never works; the mod keeps only
  *    the verdict line. */
-async function judgeBoundary($: $, handoff: string, conditions: string): Promise<Judged> {
+async function judgeBoundary($: $, handoff: string, conditions: string): Promise<{ judged: Judged; isFallback: boolean }> {
   const session = await $.session.id()
   const out = parseJudgeOut(await run($, judgeArgv(session, handoff), JUDGE_TIMEOUT_MS, conditions))
-  if (out.kind === 'verdict') return out.judged
-  if (out.kind === 'fallback') return doubtOf(out.reason)
+  if (out.kind === 'verdict') return { judged: out.judged, isFallback: false }
+  if (out.kind === 'fallback') return { judged: doubtOf(out.reason), isFallback: true }
   let answer: string
   try {
     answer = answerOf(await $.model.complete(requestOf(out.job)))
@@ -1642,7 +1754,8 @@ async function judgeBoundary($: $, handoff: string, conditions: string): Promise
     answer = JSON.stringify({ reason: 'error' })
   }
   const parsed = parseJudgeOut(await run($, parseArgv(session), PARSE_TIMEOUT_MS, answer))
-  return parsed.kind === 'verdict' ? parsed.judged : doubtOf(parsed.kind === 'fallback' ? parsed.reason : 'the parse printed a job')
+  if (parsed.kind === 'verdict') return { judged: parsed.judged, isFallback: false }
+  return { judged: doubtOf(parsed.kind === 'fallback' ? parsed.reason : 'the parse printed a job'), isFallback: true }
 }
 
 export const register: Register = on => {
@@ -1701,6 +1814,7 @@ export const register: Register = on => {
       fillDue: undefined,
       isDraining: false,
       isRelayPending: false,
+      isRelayRunning: false,
       relayReply: undefined,
       operatorEpoch: 0,
       operatorPromptAtMs: undefined,
@@ -1909,15 +2023,21 @@ export const register: Register = on => {
     mod.ka.epoch += 1
     if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
     mod.nextTurn.isOperator = true
+    // Whether or not the policy applies: a compaction already running
+    // submits no resume after it, and one waiting on the chain stands down.
+    mod.ka.operatorEpoch += 1
     mod.ka.operatorPromptAtMs = await $.clock.now()
     // The operator is back: a boundary compaction still waiting does not
-    // run, since the agent does not compact while the operator is talking.
+    // run, since the agent does not compact while the operator is talking,
+    // and attend records the wrap as continue. Never awaited: the prompt
+    // must not wait on the chain a check holds.
     //
     // References:
     // - ADR-418 §13: no self-compaction while the operator is talking.
-    if (mod.ka.boundary) {
+    const b = mod.ka.boundary
+    if (b) {
       mod.ka.boundary = undefined
-      $.ui.log("attend: the operator prompted, so the boundary's compaction does not run; the handoff stands as a checkpoint")
+      void serialize(mod.ka, () => cancelBoundary($, b))
     }
     await keepaliveOperator($, mod)
     const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold

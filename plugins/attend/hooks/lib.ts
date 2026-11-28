@@ -124,17 +124,76 @@ export function agentsInFlight(list: readonly { status: string }[]): number {
  *  (`attend keepwarm judged ...`). The move decides: `--move stop` or
  *  `--move doubt` arms, and `--move continue` or `--move compact` arms
  *  nothing, whatever `--verdict` says. With no `--move`, a `--verdict` of
- *  stop or doubt arms. The whole command is matched, newlines included, so
- *  a line split with a backslash or a quoted `--reason` holding `;`, `|` or
- *  `&` still counts. A command that only mentions one costs a policy check,
- *  which finds no exit and ends it. */
+ *  stop or doubt arms. The command is read as shell words, so a quoted
+ *  `--reason` is one word: the flags it mentions are text, and the `;`,
+ *  `|` or `&` it holds end no command. A line split with a backslash reads
+ *  as one. Every `judged` in a compound command counts, and one that arms
+ *  is enough. A command that only mentions one costs a policy check, which
+ *  finds no exit and ends it. */
 export function isJudgedArming(command: string): boolean {
-  const at = /\battend\s+keepwarm\s+judged\b/.exec(command)
-  if (at === null) return false
-  const rest = command.slice(at.index)
-  const word = (flag: string) => new RegExp(`--${flag}[=\\s]+["']?([a-z-]+)`).exec(rest)?.[1]
-  const move = word('move') ?? word('verdict')
-  return move === 'stop' || move === 'doubt'
+  const words = shellWords(command)
+  for (let i = 0; i + 2 < words.length; i++) {
+    const w = words[i]!
+    if (w.isSeparator || !/(^|\/)attend$/.test(w.text) || words[i + 1]!.text !== 'keepwarm' || words[i + 2]!.text !== 'judged') continue
+    let end = i + 3
+    while (end < words.length && !words[end]!.isSeparator) end++
+    const args = words.slice(i + 3, end).map(x => x.text)
+    const flag = (name: string) => {
+      const at = args.indexOf(`--${name}`)
+      if (at !== -1) return args[at + 1]
+      return args.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3)
+    }
+    const move = flag('move') ?? flag('verdict')
+    if (move === 'stop' || move === 'doubt') return true
+    i = end
+  }
+  return false
+}
+
+/** A command split into shell words: quotes join and are dropped, a
+ *  backslash escapes the next character (a backslash-newline joins two
+ *  lines), and `;`, `&`, `|` and a newline outside quotes are separators of
+ *  their own. Enough of the shell's grammar to read flags, not more. */
+function shellWords(command: string): { text: string; isSeparator: boolean }[] {
+  const words: { text: string; isSeparator: boolean }[] = []
+  let word = ''
+  let isWord = false
+  let quote: '"' | "'" | undefined
+  const flush = () => {
+    if (isWord) words.push({ text: word, isSeparator: false })
+    word = ''
+    isWord = false
+  }
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]!
+    if (quote === "'") {
+      if (c === "'") quote = undefined
+      else word += c
+    } else if (quote === '"') {
+      if (c === '"') quote = undefined
+      else if (c === '\\' && i + 1 < command.length) word += command[++i]
+      else word += c
+    } else if (c === '\\') {
+      const next = command[++i]
+      if (next !== undefined && next !== '\n') {
+        word += next
+        isWord = true
+      }
+    } else if (c === "'" || c === '"') {
+      quote = c
+      isWord = true
+    } else if (c === ';' || c === '&' || c === '|' || c === '\n') {
+      flush()
+      words.push({ text: c, isSeparator: true })
+    } else if (/\s/.test(c)) {
+      flush()
+    } else {
+      word += c
+      isWord = true
+    }
+  }
+  flush()
+  return words
 }
 
 /** The context at a main-loop turn's end, as `session.measure` reported
@@ -380,11 +439,16 @@ export type Keepalive = {
    *  next check judges it, and a turn that comes first defers it to that
    *  turn's end. */
   isRelayPending: boolean
+  /** A relay wrap's compaction or its resume is running. A boundary
+   *  compaction stands down while this or `isRelayPending` holds, so one
+   *  turn's end never compacts twice. */
+  isRelayRunning: boolean
   /** The reply the relay hands to the operator when it stops: the wrap's,
    *  or a resumed turn's that ended with a stop line. */
   relayReply: string | undefined
-  /** Moves at each operator prompt: a resume whose compaction an operator
-   *  prompt followed is not submitted. */
+  /** Moves at each operator prompt, whether or not the policy applies: a
+   *  resume whose compaction an operator prompt followed is not submitted,
+   *  and a boundary compaction waiting on the chain does not run. */
   operatorEpoch: number
   /** When the operator last prompted, in epoch ms, whatever the policy and
    *  the gate: the mod sees every prompt, where attend's ledger hears of one
@@ -421,11 +485,12 @@ export type Keepalive = {
   boundary: BoundaryCompaction | undefined
 }
 
-/** A boundary compaction ([`Keepalive.boundary`]): its instructions, from
- *  the handoff. For a compact, the resume turn, the relay count it is
- *  relay `relayCount + 1` of, and attend's record of the same wrap as a
- *  stop, for a compaction that leaves no tasks or fails. A doubt has
- *  neither. */
+/** A boundary compaction ([`Keepalive.boundary`]): attend's compaction
+ *  instructions from `judged --json`. For a compact, attend's resume turn,
+ *  the relay count it is relay `relayCount + 1` of, and attend's record of
+ *  the same wrap as a stop, for a compaction that leaves no work or fails.
+ *  A doubt has neither. `continueArgv` records the same wrap as continue,
+ *  for an operator prompt that cancels the compaction. */
 export type BoundaryCompaction = {
   move: 'compact' | 'doubt'
   instructions: string
@@ -433,6 +498,7 @@ export type BoundaryCompaction = {
   relayCount: number
   maxRelays: number
   stopArgv: string[] | null
+  continueArgv: string[]
 }
 
 /** A stop exit as the mod knows it ([`Keepalive.exit`]). */

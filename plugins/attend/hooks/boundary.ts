@@ -327,6 +327,20 @@ export function doubtOf(reason: string): Judged {
  *  submits no resume. */
 export type Move = 'stop' | 'compact' | 'continue' | 'doubt'
 
+/** Whether a fallback doubt compacts as the judge's own doubt does with
+ *  relay on. A fallback doubt is one no verdict produced: the brief could
+ *  not be gathered, the judge failed or timed out, or its reply did not
+ *  parse. It does not compact: the mod arms the exit and sends the handoff,
+ *  relay on or off, since no judge has read the handoff. attend records it
+ *  as `--move doubt`, and the mod ignores the compaction instructions
+ *  attend returns for it.
+ *
+ *  References:
+ *  - ADR-418 §10: doubt when the judge cannot tell.
+ *  - ADR-418 §11: in relay mode doubt stops, and the handoff goes to the
+ *    operator over attend. */
+export const FALLBACK_DOUBT_COMPACTS = false
+
 /** The relay count the brief reports: resumes since the operator's last
  *  prompt, of `max_relays`. */
 export type Relays = { n: number; max: number }
@@ -373,6 +387,8 @@ export function relaysOf(brief: Record<string, unknown> | undefined): Relays | u
  *    unknown, and `relays` names the count in the note.
  *  - A doubt in a turn the operator's prompt started stops without
  *    compacting, since the agent does not compact while the operator talks.
+ *  - A fallback doubt (`isFallback`: no verdict came back) stops without
+ *    compacting, relay on or off ([`FALLBACK_DOUBT_COMPACTS`]).
  *  - The refusals then hold for the move: a stop or a doubt with things in
  *    flight arms nothing, and the agent collects their reports.
  *
@@ -384,7 +400,7 @@ export function relaysOf(brief: Record<string, unknown> | undefined): Relays | u
  *  - ADR-418 §12: the stop, compact and continue rows.
  *  - ADR-418 §13: no self-compaction while the operator is talking;
  *    self-relays count toward `max_relays`. */
-export function settle(own: Call, v: Verdict, f: Facts, relay: boolean, canCompact = false, relays?: Relays): Plan {
+export function settle(own: Call, v: Verdict, f: Facts, relay: boolean, canCompact = false, relays?: Relays, isFallback = false): Plan {
   if (own === 'continue' && (v === 'stop' || v === 'compact')) {
     return {
       move: 'continue',
@@ -417,14 +433,17 @@ export function settle(own: Call, v: Verdict, f: Facts, relay: boolean, canCompa
     )
     move = 'stop'
   }
-  // A doubt stops either way, and compacts only with relay on and the
-  // operator away.
+  // A doubt stops either way, and compacts only with relay on, the
+  // operator away, and a verdict from the judge.
   let record: Move = move
-  if (move === 'doubt' && (!relay || f.operatorTurn)) {
+  const isFallbackStop = isFallback && !FALLBACK_DOUBT_COMPACTS
+  if (move === 'doubt' && (!relay || f.operatorTurn || isFallbackStop)) {
     notes.push(
-      relay
-        ? `The operator prompted this turn: doubt stops without compacting, and the handoff in ${HANDOFF_FILE} goes to the operator over attend.`
-        : `Relay is off in this session: doubt stops without compacting, and the handoff in ${HANDOFF_FILE} goes to the operator over attend.`,
+      !relay
+        ? `Relay is off in this session: doubt stops without compacting, and the handoff in ${HANDOFF_FILE} goes to the operator over attend.`
+        : f.operatorTurn
+          ? `The operator prompted this turn: doubt stops without compacting, and the handoff in ${HANDOFF_FILE} goes to the operator over attend.`
+          : `The judge gave no verdict, so this doubt stops without compacting, and the handoff in ${HANDOFF_FILE} goes to the operator over attend.`,
     )
     move = 'stop'
     record = 'doubt'
@@ -436,23 +455,44 @@ export function settle(own: Call, v: Verdict, f: Facts, relay: boolean, canCompa
 }
 
 /** `attend keepwarm judged --json` for the boundary: the judge's verdict,
- *  its sufficiency answer, the agent's call, the move the mod carries out,
- *  which arms the exit on stop and doubt, and the judge's reason. A second
- *  record of the same wrap replaces the first, as after a compaction that
- *  left no tasks.
+ *  its sufficiency answer, the agent's call, the move the mod asks for,
+ *  which arms the exit on stop and doubt, and the judge's reason.
+ *  `--operator-turn`: an operator's prompt started the turn, so attend
+ *  records a compact as stop. A second record of the same wrap replaces the
+ *  first, as after a compaction that left no tasks.
  *
  *  References:
  *  - ADR-418 §14 item 4: the ledger records the judge's verdict, its
  *    sufficiency answer and the working agent's own call. */
-export function judgedArgv(wrapId: string, move: Move, j: Judged, own: Call): string[] {
-  return [ATTEND, 'keepwarm', 'judged', '--json', '--wrap', wrapId, '--verdict', j.verdict, '--handoff', j.handoff, '--own', own, '--move', move, '--reason', oneLine(j.reason)]
+export function judgedArgv(wrapId: string, move: Move, j: Judged, own: Call, isOperatorTurn = false): string[] {
+  const argv = [ATTEND, 'keepwarm', 'judged', '--json', '--wrap', wrapId, '--verdict', j.verdict, '--handoff', j.handoff, '--own', own, '--move', move, '--reason', oneLine(j.reason)]
+  return isOperatorTurn ? [...argv, '--operator-turn'] : argv
 }
 
-/** What `judged --json` printed: whether attend armed the exit, and for a
- *  doubt the route its handoff goes by, which attend resolves (`wrap_to`,
- *  else the operator) with its `handoff:` line; null where it gave none or
- *  the route does not parse. Undefined where the output is no record. */
-export type Recorded = { isArmed: boolean; route: WrapRoute | null }
+/** What `judged --json` printed. attend decides whether a compaction may
+ *  run: with no room for one (the relay is stopped, a relay wrap is
+ *  pending, `max_relays` is reached, or the operator's prompt started the
+ *  turn) it records a compact as stop, which arms, and `compactRefused`
+ *  says why. `move`: the move attend recorded. `isArmed`: attend armed the
+ *  exit. `isActedOn`: a keepwarm tick will act on it, false while keepwarm
+ *  is off. `route`: for a doubt, where its handoff goes (`wrap_to`, else the
+ *  operator) with its `handoff:` line; null where attend gave none or it
+ *  does not parse. `instructions`: attend's compaction instructions, built
+ *  as for the marker relay, set for a compact and for a doubt with relay on
+ *  outside the operator's turn. `resume`: attend's resume text, with the
+ *  relay's stop escape, set for a compact. Undefined where the output is no
+ *  record. */
+export type Recorded = {
+  move: Move
+  isArmed: boolean
+  isActedOn: boolean
+  compactRefused: string | null
+  route: WrapRoute | null
+  instructions: string | null
+  resume: string | null
+}
+
+const MOVES: readonly Move[] = ['stop', 'compact', 'continue', 'doubt']
 
 export function parseRecorded(stdout: string): Recorded | undefined {
   let v: unknown
@@ -463,45 +503,59 @@ export function parseRecorded(stdout: string): Recorded | undefined {
   }
   if (typeof v !== 'object' || v === null) return undefined
   const o = v as Record<string, unknown>
-  if (o.recorded !== true || typeof o.armed !== 'boolean') return undefined
-  return { isArmed: o.armed, route: parseRoute(o.wrap) }
+  if (o.recorded !== true || typeof o.armed !== 'boolean' || typeof o.acted_on !== 'boolean') return undefined
+  if (typeof o.move !== 'string' || !MOVES.includes(o.move as Move)) return undefined
+  const text = (k: string) => {
+    const t = o[k]
+    return typeof t === 'string' && t.trim() !== '' ? t : null
+  }
+  return {
+    move: o.move as Move,
+    isArmed: o.armed,
+    isActedOn: o.acted_on,
+    compactRefused: text('compact_refused'),
+    route: parseRoute(o.wrap),
+    instructions: text('instructions'),
+    resume: text('resume'),
+  }
+}
+
+/** The plan as attend recorded it. The recorded move wins: where attend
+ *  recorded stop for the mod's compact, the mod carries out the stop and
+ *  says why. A compact needs attend's instructions and its resume, and a
+ *  doubt's compaction its instructions; without them the mod compacts
+ *  nothing. A compact then stops, and `isStopDue` says the mod records the
+ *  same wrap again as a stop, which arms; a doubt has armed already.
+ *
+ *  References:
+ *  - ADR-418 §10: the `max_relays` cap ends the chain.
+ *  - ADR-418 §12: the compact row. */
+export function followRecord(plan: Plan, rec: Recorded | undefined): { plan: Plan; isStopDue: boolean } {
+  const stop = (note: string): Plan => ({ ...plan, move: 'stop', notes: [...plan.notes, note], todo: TODO_STOP })
+  if (plan.move === 'compact') {
+    if (rec?.move === 'stop') return { plan: { ...stop(`attend recorded stop, not compact: ${oneLine(rec.compactRefused ?? 'it gave no reason')}.`), record: 'stop' }, isStopDue: false }
+    if (!rec || rec.instructions === null || rec.resume === null) {
+      return { plan: { ...stop('attend returned no compaction instructions or no resume, so the compact verdict is carried out as stop.'), record: 'stop' }, isStopDue: true }
+    }
+  }
+  if (plan.move === 'doubt' && (!rec || rec.instructions === null)) {
+    return { plan: stop(`attend returned no compaction instructions, so the doubt stops without compacting, and the handoff in ${HANDOFF_FILE} goes to the operator over attend.`), isStopDue: false }
+  }
+  return { plan, isStopDue: false }
 }
 
 // ── the compaction ───────────────────────────────────────────────────────
-
-/** The line a compaction's instructions open with, as ways' handoff module
- *  writes it for a relay and for the PreCompact hook. */
-export const COMPACT_LEAD = 'Summarize this session as the handoff below; keep its TASKS and DO NEXT whole.'
-/** The most instructions the compaction takes, in characters. */
-export const COMPACT_CAP = 10_000
-
-/** The compaction's instructions: the lead, then the handoff within the
- *  cap, cut at the last whole line that fits, with a closing line saying
- *  the file holds the rest.
- *
- *  References:
- *  - ADR-417 item 4: a relay compaction takes its instructions from the
- *    handoff. */
-export function compactInstructions(text: string, path: string): string {
-  const body = text.trimEnd()
-  const whole = `${COMPACT_LEAD}\n\n${body}`
-  if (whole.length <= COMPACT_CAP) return whole
-  const tail = `\n\n(The handoff continues in ${path}; read it there.)`
-  const cut = body.slice(0, COMPACT_CAP - COMPACT_LEAD.length - 2 - tail.length)
-  const nl = cut.lastIndexOf('\n')
-  return `${COMPACT_LEAD}\n\n${(nl > 0 ? cut.slice(0, nl) : cut).trimEnd()}${tail}`
-}
-
-/** The turn the mod submits after a boundary compaction, relay `n` of
- *  `max`. */
-export function resumeText(path: string, n: number, max: number): string {
-  return `relay: the conversation was compacted at a work boundary; this is relay ${n} of ${max} since the operator's last prompt. Read ${path}. The task list survived the compaction; work from it and the handoff's TASKS, then start its DO NEXT. The operator is away: ask no questions. At the next boundary, run /wrap boundary.`
-}
 
 /** Whether open or in-progress tasks remain. A list that cannot be read
  *  counts as some, since the judge's compact said work remains. */
 export function hasTasks(t: { open: string[]; inProgress: string[] } | undefined): boolean {
   return t === undefined || t.open.length + t.inProgress.length > 0
+}
+
+/** Whether any agent, shell or watcher is in flight: work remains, so a
+ *  compaction is followed by the resume, not by a stop. */
+export function isBusy(f: InFlight): boolean {
+  return inFlightText(f) !== undefined
 }
 
 // ── the result ───────────────────────────────────────────────────────────
@@ -532,12 +586,14 @@ function sentLine(s: HandoffSent): string {
 }
 
 const EXIT_ARMED = 'The exit is armed: idle ticks keep the cache warm while something is pending or the handoff holds detail, up to the price of what replaces the session, and otherwise let it lapse and mark the session finished.'
+const EXIT_IDLE = 'attend recorded the exit, but it does nothing while keepwarm is off (mods.attend.keepwarm), since no keepwarm tick runs to carry it out.'
 
 /** The tool's result: the verdict fields, the move and why, what happens
  *  next, where the handoff went, and the next step. Nothing else of the
- *  judge's text. `isArmed` is attend's word on the exit; `relays` the count
- *  before a compaction. */
-export function boundaryResult(o: { judged: Judged; plan: Plan; relay: boolean; recorded: { exitCode: number; stdout: string; stderr: string }; isArmed: boolean; relays?: Relays; sent?: HandoffSent }) {
+ *  judge's text. `isArmed` is attend's word on the exit, and `isActedOn`
+ *  whether a keepwarm tick will carry it out; `relays` the count before a
+ *  compaction. */
+export function boundaryResult(o: { judged: Judged; plan: Plan; relay: boolean; recorded: { exitCode: number; stdout: string; stderr: string }; isArmed: boolean; isActedOn?: boolean; relays?: Relays; sent?: HandoffSent }) {
   const { judged: j, plan, relay, recorded } = o
   const fields = [
     `Verdict: ${j.verdict}; handoff ${j.handoff}; turns left ${j.turnsLeft}.`,
@@ -551,7 +607,7 @@ export function boundaryResult(o: { judged: Judged; plan: Plan; relay: boolean; 
       isError: true as const,
     }
   }
-  const exit = o.isArmed ? EXIT_ARMED : 'attend armed no exit.'
+  const exit = o.isActedOn === false ? EXIT_IDLE : o.isArmed ? EXIT_ARMED : 'attend armed no exit.'
   const relayN = o.relays ? ` as relay ${o.relays.n + 1} of ${o.relays.max}` : ''
   const outcome = plan.refused
     ? `Outcome: nothing is armed, because ${plan.refused.why}.`
