@@ -196,6 +196,34 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
+        name: "gate.profiles.*.judgements.continuance.model",
+        path: &["profiles", "*", "judgements", "continuance", "model"],
+        kind: Kind::Text,
+        default: DefaultValue::Fn(|b| shipped_field(b, "judgements.continuance.model")),
+        check: Some(check_model),
+        doc: "The model that judges at a work boundary whether a session stops, compacts or continues.",
+        long: "The continuance judgement is set apart from disclosure: changing it never changes the profile's model, and changing the profile's model never changes it. gate.mode does not govern it. The key takes any model id in the provider's form. The shipped profiles name Claude Haiku 5.5. A profile that changes provider takes that provider's shipped continuance model unless it sets its own. A bad value under judgements falls back alone, and the profile's other settings load as written.",
+        ..BASE
+    },
+    KeySpec {
+        name: "gate.profiles.*.judgements.continuance.timeout_ms",
+        path: &["profiles", "*", "judgements", "continuance", "timeout_ms"],
+        kind: Kind::Int { min: 1, max: crate::profile::MAX_JUDGEMENT_TIMEOUT_MS as i64 },
+        default: DefaultValue::Fn(|b| shipped_field(b, "judgements.continuance.timeout_ms")),
+        doc: "The continuance judgement's deadline in milliseconds.",
+        long: "No hook waits on this call, so the deadline leaves room for a model that thinks before it answers.",
+        ..BASE
+    },
+    KeySpec {
+        name: "gate.profiles.*.judgements.continuance.max_tokens",
+        path: &["profiles", "*", "judgements", "continuance", "max_tokens"],
+        kind: Kind::Int { min: 1, max: crate::profile::MAX_JUDGEMENT_TOKENS as i64 },
+        default: DefaultValue::Fn(|b| shipped_field(b, "judgements.continuance.max_tokens")),
+        doc: "The most tokens the continuance judgement's reply may hold, thinking included.",
+        long: "",
+        ..BASE
+    },
+    KeySpec {
         name: "gate.keys.*",
         section: "gate.keys",
         file: "keys",
@@ -227,9 +255,11 @@ fn closed_mode(v: &Value) -> Option<Value> {
     }
 }
 
+/// A shipped profile's field, named by its dotted path below the profile:
+/// `model`, `judgements.continuance.model`.
 fn shipped_field(bound: &[String], field: &str) -> Option<Value> {
     let p = profile::shipped().get(bound.first()?)?.clone();
-    serde_yaml::to_value(p).ok()?.get(field).cloned()
+    field.split('.').try_fold(serde_yaml::to_value(p).ok()?, |v, k| v.get(k).cloned())
 }
 
 /// The profiles `gate.engine` may name: the shipped ones, the keyed ones in
@@ -398,6 +428,24 @@ mod tests {
         // `ways agent models --provider claude-code` to point at.
         let why = model_ids_in(&scratch("cc"), &user(""), &["claude-code".to_string()]).unwrap_err();
         assert!(!why.contains("--provider claude-code"), "{why}");
+    }
+
+    #[test]
+    fn every_shipped_profile_lists_its_continuance_model() {
+        let k = KEYS.iter().find(|k| k.name == "gate.profiles.*.judgements.continuance.model").unwrap();
+        assert_eq!(k.instances, ["anthropic", "openrouter", "claude-code"]);
+        let DefaultValue::Fn(default) = k.default else { panic!("the default is the shipped profile's") };
+        let shipped = |n: &str| default(&[n.to_string()]).and_then(|v| v.as_str().map(str::to_string));
+        assert_eq!(shipped("anthropic").as_deref(), Some("claude-haiku-5-5"));
+        assert_eq!(shipped("openrouter").as_deref(), Some("anthropic/claude-haiku-5.5"));
+        assert_eq!(shipped("claude-code").as_deref(), Some("claude-haiku-5-5"));
+        // The disclosure model's default is its own.
+        let m = KEYS.iter().find(|k| k.name == "gate.profiles.*.model").unwrap();
+        let DefaultValue::Fn(model) = m.default else { panic!() };
+        assert_eq!(model(&["claude-code".to_string()]).and_then(|v| v.as_str().map(str::to_string)).as_deref(), Some("claude-haiku-4-5"));
+        // A file that sets it loads clean.
+        let layers = user("profiles:\n  claude-code:\n    judgements:\n      continuance:\n        model: claude-haiku-4-5\n        timeout_ms: 20000\n        max_tokens: 2048\n");
+        assert!(layers[0].findings.is_empty(), "{:?}", layers[0].findings);
     }
 
     #[test]

@@ -5,7 +5,7 @@ agent-tui frame 100x30
 |│     engine                                          ││                                           │|
 |│     mode                      enforce               ││Anthropic API key                          │|
 |│     held_sample               0.1                   ││                                           │|
-|│ ▾ profiles · setting          value                 ││12 entries, 0 changed                      │|
+|│ ▾ profiles · setting          value                 ││13 entries, 0 changed                      │|
 |│▌  ▾ anthropic                                       ││                                           │|
 |│       provider                anthropic             ││                                           │|
 |│       model                   claude-haiku-4-5      ││                                           │|
@@ -19,6 +19,7 @@ agent-tui frame 100x30
 |│       tool_candidates         16                    ││                                           │|
 |│       price_in_per_mtok                             ││                                           │|
 |│       price_out_per_mtok                            ││                                           │|
+|│     ▸ judgements                                    ││                                           │|
 |│   ▸ openrouter                                      ││                                           │|
 |│   ▸ claude-code                                     ││                                           │|
 |│ ▸ keys · provider             key                   ││                                           │|
@@ -26,7 +27,6 @@ agent-tui frame 100x30
 |│     readiness                 degraded !            ││                                           │|
 |│     unset engine              none                  ││                                           │|
 |│   ▾ sessions                                        ││                                           │|
-|│       (none live)             none                  ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
 | browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filters all tabs            |
 styles
@@ -106,40 +106,40 @@ styles
  19  54-55  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20   2-15  - - BOLD
+ 20   2-17  - - BOLD
  20  54-55  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
- 21   2-16  - - BOLD
+ 21   2-15  - - BOLD
  21  54-55  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22   2-7   - - BOLD
- 22   8-18  - - DIM
- 22  32-34  - - DIM
+ 22   2-16  - - BOLD
  22  54-55  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
- 23   2-8   - - BOLD
- 23   9-16  - - DIM
- 23  32-36  - - DIM
+ 23   2-7   - - BOLD
+ 23   8-18  - - DIM
+ 23  32-34  - - DIM
  23  54-55  - - DIM
  23  99-99  - - DIM
  24   0-0   - - DIM
- 24  32-39  - - DIM
- 24  40-41  Red - BOLD
+ 24   2-8   - - BOLD
+ 24   9-16  - - DIM
+ 24  32-36  - - DIM
  24  54-55  - - DIM
  24  99-99  - - DIM
  25   0-0   - - DIM
- 25  32-35  - - DIM
+ 25  32-39  - - DIM
+ 25  40-41  Red - BOLD
  25  54-55  - - DIM
  25  99-99  - - DIM
  26   0-0   - - DIM
- 26   2-13  - - BOLD
+ 26  32-35  - - DIM
  26  54-55  - - DIM
  26  99-99  - - DIM
  27   0-0   - - DIM
- 27  32-35  - - DIM
+ 27   2-13  - - BOLD
  27  54-55  - - DIM
  27  99-99  - - DIM
  28   0-99  - - DIM
