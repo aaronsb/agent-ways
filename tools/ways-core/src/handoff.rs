@@ -73,9 +73,10 @@ fn head_short_by(program: &OsStr, root: &Path, limit: Duration) -> Option<String
     (!h.is_empty()).then(|| h.to_string())
 }
 
-/// `git -C dir args`, killed at `limit`. It takes no optional locks and
-/// never prompts for credentials, so it neither waits on nor holds the
-/// index lock of a repository another git is using.
+/// `git -C dir args`, killed with what it started at `limit`. It takes
+/// no optional locks and never prompts for credentials, so it neither
+/// holds the index lock of a repository another git is using nor waits
+/// on a terminal.
 fn git(program: &OsStr, dir: &Path, args: &[&str], limit: Duration) -> Outcome {
     let mut cmd = std::process::Command::new(program);
     cmd.arg("-C").arg(dir).args(args).env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
