@@ -600,7 +600,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 
 * `on` — Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
 * `off` — Disarm and forget the window
-* `status` — Cache state, context size, cold price, window left, this session's cold writes, and one line for the last boundary. With --json, the ledger's boundary alone, with no transcript read: `exit` is the stop exit's state (armed or finished, or the move's name for a move that arms nothing), wrap id, verdict, move, pings, rent and purchase, and `boundary` is the last boundary's wrap, verdict, handoff, own, move and reason; each is null with none
+* `status` — Cache state, context size, cold price, window left, this session's cold writes, and one line for the last boundary. With --json, one object: `exit` is the stop exit's state (armed or finished, or the move's name for a move that arms nothing), wrap id, verdict, move, pings, rent and purchase, and `boundary` is the last boundary's wrap, verdict, handoff, own, move and reason, each null with none; `cache` is the card's state (warm, cold or unknown), last_request_at, lapses_at and next_tick_at; `relays` is count, max, relay and stopped (the stop reason, such as decision or "10 of 10"); `operator_prompt_at` is the operator's last prompt. Times are epoch seconds, and a value that cannot be read is null
 * `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). The attend mod polls it
 * `reset` — The operator prompted: the keepalive and relay counts start again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session
 * `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends
@@ -637,13 +637,13 @@ Disarm and forget the window
 
 ## `attend keepwarm status`
 
-Cache state, context size, cold price, window left, this session's cold writes, and one line for the last boundary. With --json, the ledger's boundary alone, with no transcript read: `exit` is the stop exit's state (armed or finished, or the move's name for a move that arms nothing), wrap id, verdict, move, pings, rent and purchase, and `boundary` is the last boundary's wrap, verdict, handoff, own, move and reason; each is null with none
+Cache state, context size, cold price, window left, this session's cold writes, and one line for the last boundary. With --json, one object: `exit` is the stop exit's state (armed or finished, or the move's name for a move that arms nothing), wrap id, verdict, move, pings, rent and purchase, and `boundary` is the last boundary's wrap, verdict, handoff, own, move and reason, each null with none; `cache` is the card's state (warm, cold or unknown), last_request_at, lapses_at and next_tick_at; `relays` is count, max, relay and stopped (the stop reason, such as decision or "10 of 10"); `operator_prompt_at` is the operator's last prompt. Times are epoch seconds, and a value that cannot be read is null
 
 **Usage:** `attend keepwarm status [OPTIONS]`
 
 ###### **Options:**
 
-* `--json` — Print the ledger's boundary as one JSON object
+* `--json` — Print the exit, the last boundary, the cache, the relays and the operator's last prompt as one JSON object
 * `--session <ID>` — The session to read, from any shell; unset, the session this shell runs in. Exit 3 when no session record names it
 
 
