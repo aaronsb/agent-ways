@@ -46,7 +46,7 @@ use attend_state as state;
 use attend_config as config;
 
 use cli::{
-    ChannelCmd, ChannelGroup, ChannelListArgs, Cli, Commands, ConfigCmd, InboxArgs, JsonArgs, KeepwarmCmd, KeepwarmStatusArgs, ListenCmd,
+    ChannelCmd, ChannelGroup, ChannelListArgs, Cli, Commands, ConfigCmd, InboxArgs, JsonArgs, KeepwarmCmd, ListenCmd,
     MessageCmd, PeerCmd, ReplyArgs, SendArgs, SensorCmd,
 };
 use sensors::Focus;
@@ -122,7 +122,7 @@ pub fn cli_main() {
             Some(PeerCmd::Status(a)) => cmd::status::cmd_status(a.json),
         },
         #[cfg(feature = "sensor-keepwarm")]
-        Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status(KeepwarmStatusArgs::default()))),
+        Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status(cli::KeepwarmStatusArgs::default()))),
         // A build without the sensor cannot judge. `check` is polled by a
         // host that reads stdout alone, so it prints nothing and exits 0,
         // as it does whenever no wake is due; the arming verbs refuse.
