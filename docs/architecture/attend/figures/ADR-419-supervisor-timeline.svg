@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="480" viewBox="0 0 1080 480" font-family="DejaVu Sans, Arial, sans-serif">
+<style>
+svg { color: #222222; }
+@media (prefers-color-scheme: dark) { svg { color: #e6e6e6; } }
+.t { fill: currentColor; font-size: 12px; }
+.s { fill: currentColor; font-size: 11px; fill-opacity: 0.75; }
+.h { fill: currentColor; font-size: 13px; font-weight: bold; }
+.ln { stroke: currentColor; stroke-width: 1.2; fill: none; }
+.lane { stroke: currentColor; stroke-width: 1; stroke-opacity: 0.35; stroke-dasharray: 2 4; }
+.bar { fill: currentColor; fill-opacity: 0.18; stroke: currentColor; stroke-width: 1; }
+.warm { fill: currentColor; fill-opacity: 0.06; stroke: currentColor; stroke-width: 1; stroke-dasharray: 5 3; }
+.arrow { stroke: currentColor; stroke-width: 1.6; fill: none; marker-end: url(#head); }
+.dash { stroke: currentColor; stroke-width: 1.4; stroke-dasharray: 4 3; fill: none; }
+.dot { fill: currentColor; }
+</style>
+<defs>
+<marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+<path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+</marker>
+</defs>
+
+<text class="h" x="16" y="24">A supervisor session watching a relay-mode worker</text>
+<text class="s" x="16" y="42">Time runs left to right. The left part is compressed (hours of relays); 0 to 60 minutes after the stop is drawn to scale, 5 px a minute.</text>
+
+<!-- max_relays bound -->
+<path class="ln" d="M150,74 L150,66 L1020,66 L1020,74"/>
+<text class="t" x="585" y="60" text-anchor="middle">max_relays (10 on this host) counts relays from the operator's last prompt; a nudge is no operator prompt and resets nothing</text>
+
+<!-- lane labels -->
+<text class="h" x="16" y="108">worker</text>
+<text class="s" x="16" y="124">relay mode,</text>
+<text class="s" x="16" y="138">wrap_to = supervisor</text>
+<text class="h" x="16" y="252">supervisor</text>
+<text class="s" x="16" y="268">/supervise &lt;worker&gt;,</text>
+<text class="s" x="16" y="282">a check every 30 min</text>
+<text class="h" x="16" y="378">operator</text>
+<text class="s" x="16" y="394">away</text>
+
+<!-- lane guides -->
+<line class="lane" x1="140" y1="250" x2="1040" y2="250"/>
+<line class="lane" x1="140" y1="376" x2="1040" y2="376"/>
+
+<!-- operator's last prompt -->
+<path class="dot" d="M150,368 L158,376 L150,384 L142,376 z"/>
+<text class="s" x="164" y="397">last prompt: the relay count starts</text>
+<line class="dash" x1="150" y1="368" x2="150" y2="124"/>
+
+<!-- worker: relays -->
+<rect class="bar" x="150" y="100" width="230" height="24"/>
+<text class="t" x="265" y="117" text-anchor="middle">working: relay 1, 2, …</text>
+<line class="ln" x1="210" y1="92" x2="210" y2="100"/>
+<line class="ln" x1="270" y1="92" x2="270" y2="100"/>
+<line class="ln" x1="330" y1="92" x2="330" y2="100"/>
+
+<!-- worker: judged stop and the warm window -->
+<rect class="warm" x="380" y="96" width="250" height="32"/>
+<text class="t" x="452" y="117" text-anchor="middle">idle, exit armed</text>
+<line class="ln" x1="380" y1="88" x2="380" y2="136"/>
+<text class="s" x="384" y="150">judged stop:</text>
+<text class="s" x="384" y="164">nothing is sent</text>
+
+<!-- first keepwarm tick -->
+<line class="dash" x1="630" y1="86" x2="630" y2="200"/>
+<text class="t" x="636" y="150">first keepwarm tick, about 50 idle minutes:</text>
+<text class="s" x="636" y="165">had no nudge come, the cache lapses here and</text>
+<text class="s" x="636" y="179">attend marks it finished, which refuses sends</text>
+
+<!-- worker: resumes after the nudge -->
+<rect class="bar" x="530" y="100" width="380" height="24"/>
+<text class="t" x="790" y="117" text-anchor="middle">working again: relay k, …</text>
+<line class="ln" x1="860" y1="92" x2="860" y2="100"/>
+
+<!-- worker: relay stop on a decision -->
+<line class="ln" x1="910" y1="88" x2="910" y2="136"/>
+<text class="s" x="916" y="96">relay: stop decision</text>
+
+<!-- supervisor checks -->
+<circle class="dot" cx="180" cy="250" r="4.5"/>
+<circle class="dot" cx="250" cy="250" r="4.5"/>
+<circle class="dot" cx="320" cy="250" r="4.5"/>
+<circle class="dot" cx="370" cy="250" r="4.5"/>
+<text class="s" x="275" y="272" text-anchor="middle">working: stays quiet</text>
+<circle class="dot" cx="520" cy="250" r="4.5"/>
+<text class="s" x="514" y="272" text-anchor="end">idle, open tasks, warm:</text>
+<text class="s" x="514" y="286" text-anchor="end">one neutral nudge</text>
+<circle class="dot" cx="670" cy="250" r="4.5"/>
+<text class="s" x="670" y="272" text-anchor="middle">working: quiet</text>
+<circle class="dot" cx="820" cy="250" r="4.5"/>
+<text class="s" x="820" y="272" text-anchor="middle">working: quiet</text>
+<text class="s" x="1030" y="272" text-anchor="end">woken by the handoff:</text>
+<text class="s" x="1030" y="286" text-anchor="end">forwards it, pages once</text>
+
+<!-- arrows -->
+<line class="arrow" x1="524" y1="244" x2="531" y2="130"/>
+<text class="t" x="520" y="205" text-anchor="end">need any help?</text>
+<line class="arrow" x1="912" y1="128" x2="925" y2="243"/>
+<text class="t" x="926" y="210">handoff</text>
+<text class="s" x="926" y="224">to wrap_to, at once</text>
+<line class="arrow" x1="932" y1="256" x2="950" y2="369"/>
+<text class="t" x="956" y="330">decision</text>
+<text class="t" x="956" y="345">forwarded</text>
+<text class="s" x="936" y="397" text-anchor="end">paged with a summary; the decision is theirs</text>
+
+<!-- time axis -->
+<line class="ln" x1="140" y1="432" x2="1040" y2="432"/>
+<text class="s" x="260" y="450" text-anchor="middle">hours, compressed</text>
+<path class="ln" d="M364,426 L372,438 M370,426 L378,438"/>
+<line class="ln" x1="380" y1="432" x2="380" y2="438"/><text class="s" x="380" y="450" text-anchor="middle">0</text>
+<line class="ln" x1="430" y1="432" x2="430" y2="438"/><text class="s" x="430" y="450" text-anchor="middle">10</text>
+<line class="ln" x1="480" y1="432" x2="480" y2="438"/><text class="s" x="480" y="450" text-anchor="middle">20</text>
+<line class="ln" x1="530" y1="432" x2="530" y2="438"/><text class="s" x="530" y="450" text-anchor="middle">30</text>
+<line class="ln" x1="580" y1="432" x2="580" y2="438"/><text class="s" x="580" y="450" text-anchor="middle">40</text>
+<line class="ln" x1="630" y1="432" x2="630" y2="438"/><text class="s" x="630" y="450" text-anchor="middle">50</text>
+<line class="ln" x1="680" y1="432" x2="680" y2="438"/><text class="s" x="680" y="450" text-anchor="middle">60</text>
+<text class="s" x="530" y="466" text-anchor="middle">minutes after the stop</text>
+<path class="ln" d="M694,426 L702,438 M700,426 L708,438"/>
+<text class="s" x="870" y="450" text-anchor="middle">later, compressed</text>
+</svg>
