@@ -98,6 +98,8 @@ The operator asked for a Claude Code sensor crate for attend "in addition to way
    The excerpt takes a fixed list of fields per event and nothing else:
    - UserPromptSubmit: `prompt`, `source`.
    - Stop: `background_tasks`, each as `id`, `type`, `status` and `name`, up to 32; the count of `session_crons`; `last_assistant_message`.
+
+     > Edited 2026-11-27: the item fields in this bullet are wrong (#1405). Claude Code 2.1.332 sends `id`, `type`, `status` and `description` on every item of `background_tasks`, plus `command` for a shell, `name` for a workflow, `server` and `tool` for a monitor, and `agent_type` for a subagent. Its public types are `subagent`, `workflow`, `shell`, `monitor`, `MCP task`, `teammate`, `cloud session`, `dream`, `auto-mode scan` and `memory save`. The excerpt takes `id`, `type`, `status` and `description` from each item, with the fields its type adds, up to 32 items. keepwarm's Stop reader, `tools/sensor-keepwarm/src/background.rs`, reads this shape. The bullet itself is left as first written.
    - StopFailure: `error`.
    - SubagentStop: `last_assistant_message`.
    - PreCompact, PostCompact: `trigger`; PostCompact also `compact_summary`.
