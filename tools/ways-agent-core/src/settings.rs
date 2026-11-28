@@ -443,6 +443,13 @@ mod tests {
         let m = KEYS.iter().find(|k| k.name == "gate.profiles.*.model").unwrap();
         let DefaultValue::Fn(model) = m.default else { panic!() };
         assert_eq!(model(&["claude-code".to_string()]).and_then(|v| v.as_str().map(str::to_string)).as_deref(), Some("claude-haiku-4-5"));
+        // Its name binds the continuance key, not the disclosure model of a
+        // profile named `claude-code.judgements.continuance`.
+        let r = agent_settings::Registry::new(vec![&SCHEMA]);
+        for field in ["model", "timeout_ms"] {
+            let b = r.lookup(&format!("gate.profiles.claude-code.judgements.continuance.{field}")).unwrap();
+            assert_eq!(b.path(), ["profiles", "claude-code", "judgements", "continuance", field]);
+        }
         // A file that sets it loads clean.
         let layers = user("profiles:\n  claude-code:\n    judgements:\n      continuance:\n        model: claude-haiku-4-5\n        timeout_ms: 20000\n        max_tokens: 2048\n");
         assert!(layers[0].findings.is_empty(), "{:?}", layers[0].findings);
