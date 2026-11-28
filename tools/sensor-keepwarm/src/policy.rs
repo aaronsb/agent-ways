@@ -1783,24 +1783,9 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
     (out, d)
 }
 
-fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &Config, gate: Gate, site: &Site, now: u64) -> (Outcome, Decision) {
-    state.policy.gate = Some(gate.as_str().into());
-    state.policy.skill_seen = cfg.skill_seen();
-    if let Some(why) = cfg.why_off(gate) {
-        let mut d = Decision::new(cfg, &state.policy, false, "off", why);
-        if !cfg.keepwarm_on {
-            return (Outcome { changed: true, ..Outcome::default() }, d);
-        }
-        let out = state.step(reading, arm, now);
-        if let Some((_, line)) = out.observations.first() {
-            d.action = Action::Keepalive;
-            d.text = Some(line.clone());
-            d.reason = format!("{why}; an armed window's wake");
-        }
-        d.next_at = Some(now + PLAIN_EVERY_SECS);
-        return (out, d);
-    }
-
+/// The plain check's step where the policy judges the wakes, and the
+/// verdict of the policy's last wake.
+fn watch(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, now: u64) -> Outcome {
     // The sensor's own arm after a paid cold write is no word of the
     // operator's: the policy reads it as no window, so it cannot carry
     // uncounted wakes past the count. The cursor forgets it the same way,
@@ -1833,6 +1818,37 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
             state.policy.stopped = Some(state.stopped.clone().unwrap_or_else(|| "the wake's turn read a cold cache".into()));
         }
     }
+    out
+}
+
+fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &Config, gate: Gate, site: &Site, now: u64) -> (Outcome, Decision) {
+    state.policy.gate = Some(gate.as_str().into());
+    state.policy.skill_seen = cfg.skill_seen();
+    if let Some(why) = cfg.why_off(gate) {
+        // A stop exit runs wherever keepwarm is on and the settings read,
+        // whatever relay, keepalive and autocompact say.
+        //
+        // References:
+        // - ADR-418 item 14, item 2(c): after a `stop` the idle path runs
+        //   the armed exit.
+        if cfg.keepwarm_on && cfg.settings_ok && armed::in_force(state, site) {
+            return armed::off(state, reading, arm, cfg, site, why, now);
+        }
+        let mut d = Decision::new(cfg, &state.policy, false, "off", why);
+        if !cfg.keepwarm_on {
+            return (Outcome { changed: true, ..Outcome::default() }, d);
+        }
+        let out = state.step(reading, arm, now);
+        if let Some((_, line)) = out.observations.first() {
+            d.action = Action::Keepalive;
+            d.text = Some(line.clone());
+            d.reason = format!("{why}; an armed window's wake");
+        }
+        d.next_at = Some(now + PLAIN_EVERY_SECS);
+        return (out, d);
+    }
+
+    let out = watch(state, reading, arm, now);
     // The resume's turn has made a request: the generation runs.
     if state.policy.resumed_at.is_some_and(|t| reading.usage_tail.last().is_some_and(|l| l.at_epoch >= t)) {
         state.policy.resumed_at = None;
@@ -1843,7 +1859,9 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
     }
     // Relay's fill path: one drain and one wrap per generation. A fill
     // under the drain point means the context was compacted or cleared,
-    // which ends the drain.
+    // which ends the drain. A stop exit in force shuts it: the exit's pings
+    // grow the context of a session the judge stopped, with no operator
+    // there to drain or wrap for.
     //
     // References:
     // - ADR-418 item 14: the drain at `relay_at_pct`, the mid-work wrap at
@@ -1853,7 +1871,7 @@ fn step_mode(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &
             state.policy.drained_at = None;
         }
         let p = &state.policy;
-        let open = p.wrapped_at.is_none() && p.stopped.is_none() && state.pinged_at.is_none() && cfg.no_wrap().is_none();
+        let open = p.wrapped_at.is_none() && p.stopped.is_none() && state.pinged_at.is_none() && cfg.no_wrap().is_none() && !armed::in_force(state, site);
         let d = if !open {
             None
         } else if f.tokens >= l.hard_at {

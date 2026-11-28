@@ -25,8 +25,8 @@
 //! - ADR-418 item 13: the handoff is the exit flag; an operator prompt
 //!   disarms.
 
-use super::{due_point, is_wrap_id, Action, Config, Decision, Handoff, Policy, Site, VERDICT_SECS};
-use crate::{cache_lapsed, fmt_duration, fmt_usd, price_of, wake_line, Price, Reading, State, FRESH_START_TOKENS};
+use super::{due_point, is_wrap_id, watch, Action, Config, Decision, Handoff, Idle, Policy, Site, PLAIN_EVERY_SECS, VERDICT_SECS};
+use crate::{cache_lapsed, fmt_duration, fmt_usd, price_of, wake_line, ArmFile, Outcome, Price, Reading, State, FRESH_START_TOKENS};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -311,19 +311,55 @@ pub fn card_line(state: &State, now: u64) -> Option<String> {
     })
 }
 
-/// The armed exit's judgment for one check, or `None` where no exit is
-/// armed, or where the handoff no longer carries its wrap id and the tick
-/// pings as it does today. The model's price unknown, the bound is unknown
-/// too, and a tick with a reason to stay pings as today.
+/// Whether a stop exit is in force: the judge said stop and the session
+/// finished, or the handoff still carries the wrap id. A stale or missing
+/// handoff leaves the session to the checks of today.
+pub(super) fn in_force(state: &State, site: &Site) -> bool {
+    state.policy.exit.as_ref().is_some_and(|e| {
+        e.verdict == Verdict::Stop && (e.finished_at.is_some() || site.handoff.as_ref().and_then(|h| h.wrap_id.as_deref()) == Some(e.wrap_id.as_str()))
+    })
+}
+
+/// A stop exit in force where the policy is off: relay off with
+/// autocompact on or unknown, or keepalive false. Its ticks run as they do
+/// where the policy runs, and an armed window (`attend keepwarm on`)
+/// overrides them as it does there. The decision is the plain check's
+/// (`policy: false`), so the mod submits a ping as it submits a window's
+/// wake, whatever autocompact says.
+///
+/// References:
+/// - ADR-418 item 14, item 2(c): after a `stop` the idle path runs the
+///   armed exit.
+/// - ADR-182: the plain check's wake, which goes in with autocompact on.
+pub(super) fn off(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &Config, site: &Site, why: &str, now: u64) -> (Outcome, Decision) {
+    let out = watch(state, reading, arm, now);
+    let judged = if out.observations.is_empty() && state.deadline <= now { judge(state, reading, cfg, site, now) } else { None };
+    let d = judged.unwrap_or_else(|| {
+        let mut d = Decision::new(cfg, &state.policy, false, "off", why);
+        if let Some((_, line)) = out.observations.first() {
+            d.action = Action::Keepalive;
+            d.text = Some(line.clone());
+            d.reason = format!("{why}; an armed window's wake");
+        }
+        d.next_at = Some(now + PLAIN_EVERY_SECS);
+        d
+    });
+    (out, Decision { policy: false, ..d })
+}
+
+/// The armed exit's judgment for one check, or `None` where no stop exit is
+/// in force ([`in_force`]) and the tick pings as it does today. The model's
+/// price unknown, the bound is unknown too, and a tick with a reason to
+/// stay pings as today.
 pub(super) fn judge(state: &mut State, reading: &Reading, cfg: &Config, site: &Site, now: u64) -> Option<Decision> {
-    let e = state.policy.exit.clone().filter(|e| e.verdict == Verdict::Stop)?;
+    if !in_force(state, site) {
+        return None;
+    }
+    let e = state.policy.exit.clone()?;
     let p = &state.policy;
     if let Some(at) = e.finished_at {
         let why = format!("finished at {}; nothing more until the operator's next prompt", cfg.windows.hm(at));
         return Some(Decision::new(cfg, p, true, "finished", why));
-    }
-    if site.handoff.as_ref().and_then(|h| h.wrap_id.as_deref()) != Some(e.wrap_id.as_str()) {
-        return None;
     }
     if let Some(t) = state.pinged_at {
         let mut d = Decision::new(cfg, p, true, "armed", "armed: waiting for the ping's turn");
@@ -351,7 +387,12 @@ pub(super) fn judge(state: &mut State, reading: &Reading, cfg: &Config, site: &S
     let Some(stay) = stay else {
         return Some(finish(state, cfg, "nothing is pending and the handoff is sufficient", now));
     };
-    let no_ping = if let Err(why) = due_point(state, reading, cfg) {
+    // The 50k floor prices a cold re-write against no reason to stay. With
+    // one, the bound decides.
+    //
+    // References:
+    // - ADR-182: the floor under which a wake is not worth it.
+    let no_ping = if let Err(why @ (Idle::NoRequest | Idle::FiveMinuteTier)) = due_point(state, reading, cfg) {
         Some(why.reason().to_string())
     } else if cache_lapsed(Some(reading), now) {
         Some(format!("the cache had lapsed at the tick {}", cfg.windows.hm(tick)))
