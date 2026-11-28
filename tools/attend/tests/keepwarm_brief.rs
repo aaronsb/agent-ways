@@ -209,6 +209,71 @@ mod measured {
         assert_eq!(v["commits_since_wrap"], serde_json::json!([]));
     }
 
+    /// The commits and the merges are each listed up to 50, newest first,
+    /// and a last line counts the rest.
+    #[test]
+    fn the_commits_and_merges_listed_are_capped() {
+        let r = Repo::new("kw-brief-cap");
+        r.handoff(&r.commit("a.txt", "the wrapped head"));
+        for n in 0..52 {
+            r.git(&["commit", "-q", "--allow-empty", "-m", &format!("commit {n}")]);
+        }
+        // Merge commits, each with HEAD and its parent as parents.
+        for n in 0..51 {
+            let sha = r.git(&["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-p", "HEAD~1", "-m", &format!("merge {n}")]);
+            r.git(&["update-ref", "refs/heads/main", &sha]);
+        }
+        let (v, _, _) = r.brief(&[]);
+        let commits = lines(&v, "commits_since_wrap");
+        assert_eq!(commits.len(), 51, "{commits:?}");
+        assert!(commits[0].ends_with(" merge 50"), "{commits:?}");
+        assert_eq!(commits[50], "… 53 more");
+        let merges = lines(&v, "merges_since_wrap");
+        assert_eq!(merges.len(), 51, "{merges:?}");
+        assert!(merges[49].ends_with(" merge 1"), "{merges:?}");
+        assert_eq!(merges[50], "… 1 more");
+        // At exactly the cap there is no last line.
+        r.handoff(&r.git(&["rev-parse", "--short", "HEAD~50"]));
+        let (v, _, _) = r.brief(&[]);
+        let merges = lines(&v, "merges_since_wrap");
+        assert_eq!(merges.len(), 50, "{merges:?}");
+        assert!(merges.iter().all(|m| !m.starts_with('…')), "{merges:?}");
+    }
+
+    /// A `ways settings` that hangs is killed at the brief's deadline: the
+    /// relays are unknown, the verb is done within 5 s, and the stand-in
+    /// does not outlive it.
+    #[test]
+    fn a_hanging_settings_read_is_killed_at_the_deadline() {
+        let r = Repo::new("kw-brief-settings-hang");
+        let pid = r.f.home.join("settings.pid");
+        let reading = r.f.home.join("brief-reading.json");
+        script(
+            &r.shims.join("ways"),
+            &format!("if [ \"$1\" = settings ]; then echo $$ > '{}'; exec sleep 30; fi\nexec cat '{}'\n", pid.display(), reading.display()),
+        );
+        // A ledger, so only the settings stand between the brief and the relays.
+        let keepwarm = r.f.cache().join("keepwarm");
+        std::fs::create_dir_all(&keepwarm).unwrap();
+        std::fs::write(
+            keepwarm.join(format!("{}.ledger.json", r.f.sid)),
+            r#"{"misses":[],"last_ping":null,"stopped":null,"pinged_at":null,"updated_at":0,"policy":{"operator_at":1}}"#,
+        )
+        .unwrap();
+        let (v, _, took) = r.brief(&[]);
+        assert!(took < Duration::from_secs(5), "took {took:?}");
+        assert_eq!(v["relays"], "unknown", "{v}");
+        assert_eq!(v["fill_tokens"], 250_000);
+        let pid: i32 = std::fs::read_to_string(&pid).unwrap().trim().parse().unwrap();
+        // SAFETY: kill(2) with signal 0 sends nothing; it asks whether the
+        // process exists.
+        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        if alive {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+        assert!(!alive, "ways settings outlived the brief");
+    }
+
     /// Acceptance: with `gh` absent, failing as it does offline, or
     /// hanging, `open_prs` is unknown and the verb exits 0 within 5 s.
     #[test]

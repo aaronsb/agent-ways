@@ -32,6 +32,9 @@ const GRACE: Duration = Duration::from_millis(250);
 const MAX_STDIN: u64 = 1024 * 1024;
 /// The most a probe's command may print.
 const MAX_OUTPUT: u64 = 4 * 1024 * 1024;
+/// The most commits, merges or PRs the brief lists, so the judge's brief
+/// stays bounded. Commits and merges past it are counted in one last line.
+const MAX_LISTED: usize = 50;
 
 /// A measure, or `"unknown"` when its probe failed or timed out.
 struct M<T>(Option<T>);
@@ -119,7 +122,7 @@ pub(crate) fn cmd_brief(ident: &attend_presence::session::SessionIdentity, args:
     });
     let settings = probe({
         let (session, project) = (session.clone(), ident.origin_path.clone());
-        move || super::keepwarm::policy_settings(&keepwarm_dir(), &session?, &project, now)
+        move || super::keepwarm::policy_settings(&keepwarm_dir(), &session?, &project, now, left(deadline))
     });
     // One count, so the two fields cannot disagree.
     let awaiting = probe({
@@ -272,8 +275,9 @@ fn handoff_head(text: &str) -> Option<&str> {
 }
 
 /// The commits since the handoff's head, and the merges among them, one
-/// `<short> <subject>` line each, newest first. `handoff` is the file, by
-/// default the repository's `.claude/handoff.wrap.md`.
+/// `<short> <subject>` line each, newest first, at most [`MAX_LISTED`] of
+/// each and then `… N more`. `handoff` is the file, by default the
+/// repository's `.claude/handoff.wrap.md`.
 fn since_wrap(project: &Path, handoff: Option<PathBuf>, deadline: Instant) -> Option<(Vec<String>, Vec<String>)> {
     let path = match handoff {
         Some(p) => p,
@@ -281,15 +285,20 @@ fn since_wrap(project: &Path, handoff: Option<PathBuf>, deadline: Instant) -> Op
     };
     let text = std::fs::read_to_string(path).ok()?;
     let range = format!("{}..HEAD", handoff_head(&text)?);
-    let log = |merges: bool| {
-        let mut args = vec!["log", "--format=%h %s"];
-        if merges {
-            args.push("--merges");
+    let max = format!("--max-count={MAX_LISTED}");
+    let log = |merges: &[&str]| {
+        let args: Vec<&str> = ["log", "--format=%h %s", max.as_str()].iter().chain(merges).chain(&[range.as_str(), "--"]).copied().collect();
+        let mut lines: Vec<String> = git(project, &args, deadline)?.lines().map(str::to_string).collect();
+        if lines.len() == MAX_LISTED {
+            let args: Vec<&str> = ["rev-list", "--count"].iter().chain(merges).chain(&[range.as_str(), "--"]).copied().collect();
+            let total: usize = git(project, &args, deadline)?.trim().parse().ok()?;
+            if total > MAX_LISTED {
+                lines.push(format!("… {} more", total - MAX_LISTED));
+            }
         }
-        args.extend([range.as_str(), "--"]);
-        git(project, &args, deadline).map(|out| out.lines().map(str::to_string).collect::<Vec<_>>())
+        Some(lines)
     };
-    Some((log(false)?, log(true)?))
+    Some((log(&[])?, log(&["--merges"])?))
 }
 
 /// The open PRs whose head is the current branch, in the repository `gh`
@@ -301,7 +310,8 @@ fn open_prs(project: &Path, deadline: Instant) -> Option<Vec<OpenPr>> {
         return Some(Vec::new());
     }
     let env = [("GH_PROMPT_DISABLED", "1"), ("GH_NO_UPDATE_NOTIFIER", "1"), ("NO_COLOR", "1")];
-    let args = ["pr", "list", "--head", branch, "--state", "open", "--json", "number,title,statusCheckRollup", "--limit", "50"];
+    let limit = MAX_LISTED.to_string();
+    let args = ["pr", "list", "--head", branch, "--state", "open", "--json", "number,title,statusCheckRollup", "--limit", &limit];
     let out = run("gh", &args, project, &env, deadline)?;
     let list: Vec<Value> = serde_json::from_str(&out).ok()?;
     list.iter()
