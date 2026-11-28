@@ -750,7 +750,7 @@ pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, n
     if let Some(p) = price_of(&s.model) {
         let pings = (p.write_1h / p.read).floor() as u64;
         lines.push(format!(
-            "break-even  up to {pings} wakes at the read rate cost one cold write, about {} of idle at one wake per {}",
+            "rewrite     up to {pings} wakes at the read rate cost one cold rewrite of this whole context, about {} of idle at one wake per {}",
             fmt_duration(pings * PING_AFTER_SECS),
             fmt_duration(PING_AFTER_SECS),
         ));
@@ -1185,7 +1185,7 @@ mod tests {
     }
 
     #[test]
-    fn card_reads_warm_armed_and_break_even() {
+    fn card_reads_warm_armed_and_the_rewrite_line() {
         let r = reading(vec![entry(1000, 200_000, 500)]);
         let arm = armed(1000 + DEFAULT_WINDOW_SECS);
         let lines = card(&r, Some(&arm), None, 1600);
@@ -1194,7 +1194,7 @@ mod tests {
         assert_eq!(lines[2], "context     200520 tokens");
         assert_eq!(lines[3], "cold cost   $4.01 to re-write it (warm turn $0.05)");
         assert_eq!(lines[4], "keepwarm    armed, 5h50m left · wake in 40m");
-        assert!(lines[5].starts_with("break-even  up to 80 wakes at the read rate cost one cold write, about 2d 18h of idle"));
+        assert!(lines[5].starts_with("rewrite     up to 80 wakes at the read rate cost one cold rewrite of this whole context, about 2d 18h of idle"));
         assert_eq!(lines[6], "session     0 cold writes paid, $0.00");
         let cold = card(&r, None, None, 1000 + TTL_SECS + 3600);
         assert_eq!(cold[1], "state       COLD, last request 2h00m ago");
